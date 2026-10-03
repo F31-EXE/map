@@ -386,3 +386,39 @@ describe('movement recording', () => {
     await assertSucceeds(updateDoc(doc(as('alice'), 'teams', TEAM, 'recordings', 'r1'), { endedAt: 1 }));
   });
 });
+
+describe('status, assigned roles and pinned messages', () => {
+  beforeEach(async () => {
+    await createTeam(as('alice'), 'alice');
+    await join(as('bob'), 'bob');
+    await join(as('carol'), 'carol');
+    await updateDoc(doc(as('alice'), 'teams', TEAM, 'members', 'bob'), { canCommand: true });
+  });
+  const member = (by: string, uid: string) => doc(as(by), 'teams', TEAM, 'members', uid);
+  const pin = (by: string, text = 'Сбор у моста в 14:00') =>
+    updateDoc(doc(as(by), 'teams', TEAM), { pinned: { id: 'm1', text, callsign: 'Гром', uid: by, at: 1 } });
+
+  test('members set their own status, only to known values', async () => {
+    await assertSucceeds(updateDoc(member('carol', 'carol'), { status: 'dead' }));
+    await assertSucceeds(updateDoc(member('carol', 'carol'), { status: 'afk' }));
+    await assertFails(updateDoc(member('carol', 'carol'), { status: 'zombie' }));
+  });
+  test('superiors set role and status of those below them', async () => {
+    await assertSucceeds(updateDoc(member('alice', 'carol'), { role: 'medic', status: 'dead' }));
+    await assertSucceeds(updateDoc(member('bob', 'carol'), { role: 'sniper' }));
+    await assertSucceeds(updateDoc(member('alice', 'bob'), { status: 'alive' }));
+  });
+  test('nobody edits equals or superiors, and commanders touch nothing else', async () => {
+    await assertFails(updateDoc(member('carol', 'bob'), { status: 'dead' }));
+    await assertFails(updateDoc(member('bob', 'alice'), { role: 'medic' }));
+    await assertFails(updateDoc(member('alice', 'carol'), { role: 'medic', callsign: 'x' }));
+    await assertFails(updateDoc(member('alice', 'carol'), { status: 'zombie' }));
+  });
+  test('commanders pin and unpin; fighters cannot; text is bounded', async () => {
+    await assertSucceeds(pin('alice'));
+    await assertSucceeds(pin('bob'));
+    await assertSucceeds(updateDoc(doc(as('bob'), 'teams', TEAM), { pinned: null }));
+    await assertFails(pin('carol'));
+    await assertFails(pin('alice', 'x'.repeat(501)));
+  });
+});

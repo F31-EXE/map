@@ -14,6 +14,8 @@ export const KEYS = {
   sideId: 'tacmap.sideId',
   sideColors: 'tacmap.sideColors',
   sideShowAll: 'tacmap.sideShowAll',
+  grid: 'tacmap.grid',
+  status: 'tacmap.status',
 } as const;
 
 export async function loadJson<T>(key: string, fallback: T): Promise<T> {

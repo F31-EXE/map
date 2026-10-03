@@ -15,7 +15,7 @@ import { distanceMeters } from '../lib/geo';
 import { isOrder, isVotedOut } from '../lib/markerKinds';
 import { DEFAULT_ROLE, DEFAULT_TEAM_COLOR, roleOf, type RoleId } from '../lib/roles';
 import { KEYS, loadJson, newId, saveJson } from '../lib/storage';
-import type { Member, SelfPosition, TacMarker, Team } from '../lib/types';
+import type { Member, MemberStatus, SelfPosition, TacMarker, Team } from '../lib/types';
 import { signalNewOrder } from '../services/orderAlert';
 import * as recordings from '../services/recordings';
 import * as teams from '../services/teams';
@@ -66,6 +66,18 @@ type Session = {
 
   orderSound: boolean;
   setOrderSound: (v: boolean) => Promise<void>;
+  /** Coordinate grid on the map. */
+  showGrid: boolean;
+  setShowGrid: (v: boolean) => Promise<void>;
+
+  /** Own game state: alive, dead (waiting for respawn) or away. */
+  status: MemberStatus;
+  setStatus: (s: MemberStatus) => Promise<void>;
+  /** Commanders: change a subordinate's role or status. */
+  setMemberRole: (memberId: string, role: RoleId) => Promise<void>;
+  setMemberStatus: (memberId: string, status: MemberStatus) => Promise<void>;
+  /** Commanders: pin a chat message for the squad (null unpins). */
+  pinMessage: (m: { id: string; text: string; callsign: string; uid: string; createdAt: number } | null) => Promise<void>;
 
   /** Team markers (when in a team) plus this device's personal ones. */
   markers: TacMarker[];
@@ -101,13 +113,15 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const [teamError, setTeamError] = useState<string | null>(null);
   const [shareLocation, setShareLocationState] = useState(true);
   const [orderSound, setOrderSoundState] = useState(true);
+  const [showGrid, setShowGridState] = useState(false);
+  const [status, setStatusState] = useState<MemberStatus>('alive');
   const [teamMarkers, setTeamMarkers] = useState<TacMarker[]>([]);
   const [personalMarkers, setPersonalMarkers] = useState<TacMarker[]>([]);
 
   // Load persisted local state.
   useEffect(() => {
     (async () => {
-      const [cs, r, av, tid, share, sound, personal] = await Promise.all([
+      const [cs, r, av, tid, share, sound, personal, grid, st] = await Promise.all([
         loadJson<string>(KEYS.callsign, ''),
         loadJson<string>(KEYS.role, DEFAULT_ROLE),
         loadJson<string | null>(KEYS.avatar, null),
@@ -115,7 +129,11 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         loadJson<boolean>(KEYS.shareLocation, true),
         loadJson<boolean>(KEYS.orderSound, true),
         loadJson<TacMarker[]>(KEYS.personalMarkers, []),
+        loadJson<boolean>(KEYS.grid, false),
+        loadJson<MemberStatus>(KEYS.status, 'alive'),
       ]);
+      setShowGridState(grid);
+      setStatusState(st === 'dead' || st === 'afk' ? st : 'alive');
       setCallsignState(cs);
       setRoleState(roleOf(r));
       setAvatarState(av);
@@ -224,6 +242,20 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const canCommand = inTeam && (isOwner || Boolean(me?.canCommand));
   canCommandRef.current = canCommand;
 
+  // A commander may change my role or status; the member doc wins over local state.
+  const myRole = me?.role;
+  const myStatus = me?.status;
+  useEffect(() => {
+    if (!myRole) return;
+    setRoleState(myRole);
+    saveJson(KEYS.role, myRole).catch(() => {});
+  }, [myRole]);
+  useEffect(() => {
+    if (!myStatus) return;
+    setStatusState(myStatus);
+    saveJson(KEYS.status, myStatus).catch(() => {});
+  }, [myStatus]);
+
   const requireUid = useCallback(() => {
     if (!uid) throw new Error(authError ?? 'Нет подключения к серверу');
     return uid;
@@ -310,6 +342,47 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     },
     [teamId]
   );
+
+  const setStatus = useCallback(
+    async (st: MemberStatus) => {
+      setStatusState(st);
+      await saveJson(KEYS.status, st);
+      if (teamId && uid) await teams.updateProfile(teamId, uid, { status: st });
+    },
+    [teamId, uid]
+  );
+
+  const setMemberRole = useCallback(
+    async (memberId: string, r: RoleId) => {
+      if (memberId === uid) return setRole(r);
+      if (teamId) await teams.updateMemberByCommander(teamId, memberId, { role: r });
+    },
+    [teamId, uid, setRole]
+  );
+
+  const setMemberStatus = useCallback(
+    async (memberId: string, st: MemberStatus) => {
+      if (memberId === uid) return setStatus(st);
+      if (teamId) await teams.updateMemberByCommander(teamId, memberId, { status: st });
+    },
+    [teamId, uid, setStatus]
+  );
+
+  const pinMessage = useCallback(
+    async (m: { id: string; text: string; callsign: string; uid: string; createdAt: number } | null) => {
+      if (!teamId) return;
+      await teams.setPinned(
+        teamId,
+        m && { id: m.id, text: m.text.slice(0, 500), callsign: m.callsign, uid: m.uid, at: m.createdAt }
+      );
+    },
+    [teamId]
+  );
+
+  const setShowGrid = useCallback(async (v: boolean) => {
+    setShowGridState(v);
+    await saveJson(KEYS.grid, v);
+  }, []);
 
   const setTeamColor = useCallback(
     async (color: string) => {
@@ -467,6 +540,13 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       reportPosition,
       orderSound,
       setOrderSound,
+      showGrid,
+      setShowGrid,
+      status,
+      setStatus,
+      setMemberRole,
+      setMemberStatus,
+      pinMessage,
       markers,
       addMarker,
       deleteMarker,
@@ -501,6 +581,13 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       reportPosition,
       orderSound,
       setOrderSound,
+      showGrid,
+      setShowGrid,
+      status,
+      setStatus,
+      setMemberRole,
+      setMemberStatus,
+      pinMessage,
       markers,
       addMarker,
       deleteMarker,

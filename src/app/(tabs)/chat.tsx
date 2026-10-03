@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import {
+  Alert,
   FlatList,
   KeyboardAvoidingView,
   Platform,
@@ -11,22 +12,22 @@ import {
   View,
 } from 'react-native';
 import { useHeaderHeight } from 'expo-router/react-navigation';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { formatClock } from '../lib/geo';
-import { MAX_MESSAGE, type ChatMessage } from '../services/chat';
-import { useChat } from '../state/chat';
-import { useSession } from '../state/session';
-import { Icon, tap } from '../ui/components';
-import { C, F, R } from '../ui/theme';
+import { formatClock } from '../../lib/geo';
+import { MAX_MESSAGE, type ChatMessage } from '../../services/chat';
+import { useChat } from '../../state/chat';
+import { useSession } from '../../state/session';
+import { Icon, tap } from '../../ui/components';
+import { confirmAction } from '../../ui/confirm';
+import { C, F, R } from '../../ui/theme';
 
 /** One-tap phrases for when there's no time to type. */
 const QUICK = ['Контакт!', 'Ранен', 'Нужна помощь', 'Иду', 'На позиции', 'Отходим', 'Чисто', 'Патроны!'];
 
 export default function ChatScreen() {
   const { messages, markRead, send } = useChat();
-  const { uid, teamId, teamColor } = useSession();
-  const insets = useSafeAreaInsets();
+  const { uid, teamId, teamColor, team, canCommand, pinMessage } = useSession();
+  const pinned = team?.pinned ?? null;
   const headerHeight = useHeaderHeight();
   const [text, setText] = useState('');
   const list = useRef<FlatList<ChatMessage>>(null);
@@ -58,6 +59,33 @@ export default function ChatScreen() {
       behavior="padding"
       keyboardVerticalOffset={headerHeight}
     >
+      {pinned && (
+        <View style={styles.pinned}>
+          <Icon name="pin" size={18} color={C.warn} />
+          <View style={{ flex: 1 }}>
+            <Text style={styles.pinnedMeta}>
+              Закреплено · {pinned.callsign} · {formatClock(pinned.at)}
+            </Text>
+            <Text style={styles.pinnedText} numberOfLines={3}>
+              {pinned.text}
+            </Text>
+          </View>
+          {canCommand && (
+            <Pressable
+              hitSlop={8}
+              accessibilityLabel="Открепить"
+              style={styles.unpin}
+              onPress={() => {
+                tap();
+                pinMessage(null).catch((e: Error) => Alert.alert('Ошибка', e.message));
+              }}
+            >
+              <Icon name="pin-off-outline" size={18} color={C.dim} />
+            </Pressable>
+          )}
+        </View>
+      )}
+
       <FlatList
         ref={list}
         data={[...messages].reverse()}
@@ -75,7 +103,16 @@ export default function ChatScreen() {
           const older = [...messages].reverse()[index + 1];
           const showName = !mine && (!older || older.uid !== item.uid);
           return (
-            <View style={[styles.bubbleRow, mine && { justifyContent: 'flex-end' }]}>
+            <Pressable
+              style={[styles.bubbleRow, mine && { justifyContent: 'flex-end' }]}
+              disabled={!canCommand || item.pending}
+              delayLongPress={350}
+              onLongPress={() =>
+                confirmAction('Закрепить сообщение?', item.text, 'Закрепить', () =>
+                  pinMessage(item).catch((e: Error) => Alert.alert('Ошибка', e.message))
+                )
+              }
+            >
               <View
                 style={[
                   styles.bubble,
@@ -97,7 +134,7 @@ export default function ChatScreen() {
                   )}
                 </View>
               </View>
-            </View>
+            </Pressable>
           );
         }}
       />
@@ -116,7 +153,7 @@ export default function ChatScreen() {
         ))}
       </ScrollView>
 
-      <View style={[styles.inputRow, { paddingBottom: insets.bottom + 10 }]}>
+      <View style={[styles.inputRow, { paddingBottom: 10 }]}>
         <TextInput
           value={text}
           onChangeText={setText}
@@ -153,6 +190,27 @@ const styles = StyleSheet.create({
   text: { color: C.text, fontSize: 16, fontFamily: F.regular, lineHeight: 21 },
   meta: { flexDirection: 'row', alignItems: 'center', gap: 4, alignSelf: 'flex-end' },
   time: { color: C.faint, fontSize: 11, fontFamily: F.mono },
+  pinned: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    backgroundColor: C.warnSoft,
+    borderBottomWidth: 1,
+    borderBottomColor: C.warn + '55',
+  },
+  pinnedMeta: { color: C.warn, fontSize: 11, fontFamily: F.mono, letterSpacing: 0.8, textTransform: 'uppercase' },
+  pinnedText: { color: C.text, fontSize: 15, fontFamily: F.semibold, marginTop: 2 },
+  unpin: {
+    width: 34,
+    height: 34,
+    borderRadius: R.md,
+    borderWidth: 1,
+    borderColor: C.line,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   quickBar: { flexGrow: 0, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: C.line },
   quick: { gap: 8, paddingHorizontal: 12, paddingVertical: 8 },
   chip: {

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { formatCoords } from '../lib/geo';
-import { isOrder, MARKER_KINDS, MARKER_KIND_ORDER, ORDER_KINDS } from '../lib/markerKinds';
+import { ADMIN_KINDS, isOrder, MARKER_KINDS, MARKER_KIND_ORDER, ORDER_KINDS } from '../lib/markerKinds';
 import type { LatLng, MarkerKind } from '../lib/types';
 import type { MarkerScope } from '../state/session';
 import type { OrderTarget } from '../state/side';
@@ -122,7 +122,7 @@ export function AddMarkerModal({
       )}
 
       <View style={{ gap: 8 }}>
-        {canCommand && <Eyebrow>Метка</Eyebrow>}
+        <Eyebrow>Метка</Eyebrow>
         <View style={styles.grid}>
           {[...MARKER_KIND_ORDER, null].map((k) => {
             // Trailing spacer keeps the last row's tiles the same width as the first.
@@ -138,6 +138,36 @@ export function AddMarkerModal({
                 <View
                   style={[
                     styles.kindIcon,
+                    { borderColor: def.color, backgroundColor: selected ? def.color : 'transparent' },
+                  ]}
+                >
+                  <Icon name={def.icon} size={20} color={selected ? C.accentInk : def.color} />
+                </View>
+                <Text style={[styles.kindText, selected && { color: C.text }]} numberOfLines={1}>
+                  {def.title}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      </View>
+
+      <View style={{ gap: 8 }}>
+        <Eyebrow>Полигон</Eyebrow>
+        <View style={styles.grid}>
+          {ADMIN_KINDS.map((k) => {
+            const def = MARKER_KINDS[k];
+            const selected = k === kind;
+            return (
+              <Pressable
+                key={k}
+                onPress={() => pick(k)}
+                style={[styles.kind, selected && { borderColor: def.color, backgroundColor: def.color + '1F' }]}
+              >
+                <View
+                  style={[
+                    styles.kindIcon,
+                    styles.kindIconSquare,
                     { borderColor: def.color, backgroundColor: selected ? def.color : 'transparent' },
                   ]}
                 >
@@ -265,6 +295,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  kindIconSquare: { borderRadius: 8 },
   kindText: { color: C.dim, fontSize: 12, fontFamily: F.semibold },
   segment: { flexDirection: 'row', backgroundColor: C.elevated, borderRadius: R.md, padding: 4 },
   segmentItem: {

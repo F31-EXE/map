@@ -1,18 +1,22 @@
 import {
+  mdiAccountTie,
   mdiAlert,
+  mdiAutorenew,
   mdiArrowTopRightThick,
   mdiFlagVariant,
   mdiMapMarkerRadius,
   mdiMedicalBag,
   mdiNoteText,
+  mdiParking,
   mdiRunFast,
   mdiShield,
   mdiShieldHalfFull,
+  mdiSkullCrossbones,
   mdiSwordCross,
   mdiTarget,
 } from '@mdi/js';
 
-import type { MarkerKind, OrderKind } from './types';
+import type { AdminKind, MarkerKind, OrderKind } from './types';
 
 type KindDef = {
   title: string;
@@ -28,7 +32,11 @@ type KindDef = {
     | 'run-fast'
     | 'sword-cross'
     | 'shield-half-full'
-    | 'arrow-top-right-thick';
+    | 'arrow-top-right-thick'
+    | 'autorenew'
+    | 'skull-crossbones'
+    | 'parking'
+    | 'account-tie';
   /** Same icon as an SVG path, for markers drawn inside the map WebView. */
   path: string;
   color: string;
@@ -43,6 +51,10 @@ export const MARKER_KINDS: Record<MarkerKind, KindDef> = {
   medic: { title: 'Медик', icon: 'medical-bag', path: mdiMedicalBag, color: '#F472B6' },
   note: { title: 'Заметка', icon: 'note-text', path: mdiNoteText, color: '#B79CFF' },
   arrow: { title: 'Стрелка', icon: 'arrow-top-right-thick', path: mdiArrowTopRightThick, color: '#FFC83D' },
+  respawn: { title: 'Респ', icon: 'autorenew', path: mdiAutorenew, color: '#2EE6C5' },
+  deadzone: { title: 'Мертвяк', icon: 'skull-crossbones', path: mdiSkullCrossbones, color: '#C3CCC6' },
+  parking: { title: 'Парковка', icon: 'parking', path: mdiParking, color: '#7FA7FF' },
+  admin: { title: 'Администрация', icon: 'account-tie', path: mdiAccountTie, color: '#F2F2F2' },
   'order-move': { title: 'Двигаться сюда', icon: 'run-fast', path: mdiRunFast, color: '#B4E34A' },
   'order-attack': { title: 'Атаковать', icon: 'sword-cross', path: mdiSwordCross, color: '#FF4D4D' },
   'order-defend': { title: 'Оборонять', icon: 'shield-half-full', path: mdiShieldHalfFull, color: '#3D9BFF' },
@@ -53,6 +65,13 @@ export const ORDER_KINDS: OrderKind[] = ['order-move', 'order-attack', 'order-de
 
 export function isOrder(kind: MarkerKind): kind is OrderKind {
   return (ORDER_KINDS as string[]).includes(kind);
+}
+
+/** Polygon infrastructure: respawn, dead zone, parking, organizers. */
+export const ADMIN_KINDS: AdminKind[] = ['respawn', 'deadzone', 'parking', 'admin'];
+
+export function isAdminKind(kind: MarkerKind): kind is AdminKind {
+  return (ADMIN_KINDS as string[]).includes(kind);
 }
 
 export const MARKER_KIND_ORDER: MarkerKind[] = [

@@ -1,22 +1,24 @@
 import * as Clipboard from 'expo-clipboard';
 import { router } from 'expo-router';
 import { useHeaderHeight } from 'expo-router/react-navigation';
-import { useEffect, useState } from 'react';
-import { Alert, Pressable, Share, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
+import { useState } from 'react';
+import { Alert, Pressable, Share, StyleSheet, Text, TextInput, View } from 'react-native';
 
-import { formatClock, timeAgo } from '../lib/geo';
-import { inviteUrl } from '../lib/invite';
-import { ROLE_ORDER, ROLES, TEAM_COLORS } from '../lib/roles';
-import type { Member } from '../lib/types';
-import { STALE_MS } from '../map/TacticalMap';
-import { pickAvatar } from '../services/avatar';
-import * as recordings from '../services/recordings';
-import { useSession } from '../state/session';
-import { useSide } from '../state/side';
-import { confirmDestructive } from '../ui/confirm';
-import { QrCode } from '../ui/QrCode';
-import { Avatar, Badge, Button, Card, Eyebrow, Icon, KeyboardScroll, RoleIcon, tap, type IconName } from '../ui/components';
-import { C, F, R } from '../ui/theme';
+import { formatClock, timeAgo } from '../../lib/geo';
+import { inviteUrl } from '../../lib/invite';
+import { ROLE_ORDER, ROLES, TEAM_COLORS, type RoleId } from '../../lib/roles';
+import { STATUSES } from '../../lib/status';
+import type { Member, MemberStatus } from '../../lib/types';
+import { STALE_MS } from '../../map/TacticalMap';
+import * as recordings from '../../services/recordings';
+import { useSession } from '../../state/session';
+import { useSide } from '../../state/side';
+import { confirmDestructive } from '../../ui/confirm';
+import { QrCode } from '../../ui/QrCode';
+import { Avatar, Badge, Button, Card, Eyebrow, Icon, KeyboardScroll, RoleIcon, Sheet, tap } from '../../ui/components';
+import { RolePicker } from '../../ui/RolePicker';
+import { StatusPicker, StatusTag } from '../../ui/StatusPicker';
+import { C, F, R } from '../../ui/theme';
 
 function useAction() {
   const [busy, setBusy] = useState<string | null>(null);
@@ -37,23 +39,25 @@ export default function TeamScreen() {
   const s = useSession();
   const headerHeight = useHeaderHeight();
   const { busy, run } = useAction();
-  const [callsign, setCallsign] = useState(s.callsign);
   const [teamName, setTeamName] = useState('');
   const [code, setCode] = useState('');
   const [mode, setMode] = useState<'join' | 'create'>('join');
   const [copied, setCopied] = useState(false);
   const [showQr, setShowQr] = useState(false);
   const [sideCode, setSideCode] = useState('');
+  const [managing, setManaging] = useState<string | null>(null);
   const side = useSide();
-
-  useEffect(() => setCallsign(s.callsign), [s.callsign]);
 
   const inTeam = Boolean(s.teamId && s.uid);
   const recording = s.team?.recordingId ?? null;
-  const callsignDirty = callsign.trim() !== s.callsign;
   const now = Date.now();
   const color = inTeam ? s.teamColor : C.accent;
   const teamMarkerCount = s.markers.filter((m) => !m.personal && side.canDelete(m)).length;
+
+  // Squad ranks (see src/lib/ranks.ts): creator 3, command rights 2, fighter 1.
+  const memberRank = (m: Member) => (m.id === s.team?.ownerId ? 3 : m.canCommand ? 2 : 1);
+  const managed = s.members.find((m) => m.id === managing) ?? null;
+  const canManageAny = s.members.some((m) => m.id !== s.uid && side.myRank > memberRank(m));
 
   const sortedMembers = [...s.members].sort((a, b) => {
     if (a.id === s.uid) return -1;
@@ -61,82 +65,17 @@ export default function TeamScreen() {
     return ROLE_ORDER.indexOf(a.role) - ROLE_ORDER.indexOf(b.role) || a.callsign.localeCompare(b.callsign);
   });
 
-  const changeAvatar = () => {
-    const pick = () =>
-      run('avatar', async () => {
-        const uri = await pickAvatar();
-        if (uri) await s.setAvatar(uri);
-      });
-    if (!s.avatar) return pick();
-    Alert.alert('Аватар', undefined, [
-      { text: 'Выбрать другое фото', onPress: pick },
-      { text: 'Удалить фото', style: 'destructive', onPress: () => run('avatar', () => s.setAvatar(null)) },
-      { text: 'Отмена', style: 'cancel' },
-    ]);
-  };
-
   return (
     <KeyboardScroll contentContainerStyle={styles.content} headerOffset={headerHeight}>
-      {/* Profile: avatar, callsign, role */}
-      <Card style={{ gap: 16 }}>
-        <View style={styles.profile}>
-          <Pressable onPress={changeAvatar} accessibilityLabel="Сменить аватар">
-            <Avatar name={callsign || '?'} color={color} uri={s.avatar} size={64} />
-            <View style={[styles.avatarEdit, { backgroundColor: color }]}>
-              <Icon name="camera" size={14} color={C.accentInk} />
-            </View>
-          </Pressable>
-          <View style={{ flex: 1, gap: 6 }}>
-            <Eyebrow>Позывной</Eyebrow>
-            <TextInput
-              value={callsign}
-              onChangeText={setCallsign}
-              placeholder="Например: Гром"
-              placeholderTextColor={C.faint}
-              maxLength={24}
-              style={styles.callsignInput}
-              selectionColor={C.accent}
-              returnKeyType="done"
-              onSubmitEditing={() => callsignDirty && run('cs', () => s.setCallsign(callsign))}
-            />
-          </View>
-          {callsignDirty && (
-            <Pressable
-              style={styles.saveIcon}
-              onPress={() => run('cs', () => s.setCallsign(callsign))}
-              accessibilityLabel="Сохранить позывной"
-            >
-              <Icon name="check" size={22} color={C.accentInk} />
-            </Pressable>
-          )}
-        </View>
-
-        <View style={{ gap: 10 }}>
-          <Eyebrow>Роль · так вас видят на карте</Eyebrow>
-          <View style={styles.roles}>
-            {ROLE_ORDER.map((r) => {
-              const selected = r === s.role;
-              return (
-                <Pressable
-                  key={r}
-                  onPress={() => {
-                    tap();
-                    run('role', () => s.setRole(r));
-                  }}
-                  style={[styles.role, selected && { borderColor: color, backgroundColor: color + '1A' }]}
-                >
-                  <View style={[styles.rolePin, { backgroundColor: selected ? color : C.bg, borderColor: color }]}>
-                    <RoleIcon role={r} size={22} color={selected ? C.accentInk : color} />
-                  </View>
-                  <Text style={[styles.roleText, selected && { color: C.text }]} numberOfLines={1}>
-                    {ROLES[r].title}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
-        </View>
-      </Card>
+      {!s.callsign && (
+        <Pressable onPress={() => router.navigate('/settings')}>
+          <Card style={[styles.hint]}>
+            <Icon name="account-edit-outline" size={22} color={C.warn} />
+            <Text style={[styles.text, { flex: 1 }]}>Сначала задайте позывной и роль во вкладке «Настройки».</Text>
+            <Icon name="chevron-right" size={20} color={C.faint} />
+          </Card>
+        </Pressable>
+      )}
 
       {!s.firebaseEnabled ? (
         <Card>
@@ -213,6 +152,61 @@ export default function TeamScreen() {
         </Card>
       ) : (
         <>
+          {/* My game state */}
+          <Card style={{ gap: 10 }}>
+            <Eyebrow>Мой статус</Eyebrow>
+            <StatusPicker value={s.status} onPick={(st) => run('status', () => s.setStatus(st))} />
+          </Card>
+
+          {/* Roster */}
+          <View style={{ gap: 10 }}>
+            <Eyebrow style={{ paddingHorizontal: 4 }}>
+              Состав · {s.members.length} · жив {s.members.filter((m) => m.status === 'alive').length} · убит{' '}
+              {s.members.filter((m) => m.status === 'dead').length}
+            </Eyebrow>
+            <Card style={{ gap: 0, paddingVertical: 6 }}>
+              {sortedMembers.map((m, i) => (
+                <MemberRow
+                  key={m.id}
+                  m={m}
+                  first={i === 0}
+                  me={m.id === s.uid}
+                  owner={m.id === s.team?.ownerId}
+                  color={color}
+                  avatar={m.id === s.uid ? s.avatar : s.avatars[m.id]}
+                  fresh={m.lat != null && m.updatedAt != null && now - m.updatedAt < STALE_MS}
+                  onPress={() => setManaging(m.id)}
+                />
+              ))}
+            </Card>
+            {canManageAny && (
+              <Text style={[styles.sub, { paddingHorizontal: 4 }]}>
+                Нажмите на бойца, чтобы сменить роль или статус{s.isOwner ? ', выдать право приказов' : ''}.
+              </Text>
+            )}
+          </View>
+
+          {managed && (
+            <MemberSheet
+              m={managed}
+              color={color}
+              me={managed.id === s.uid}
+              avatar={managed.id === s.uid ? s.avatar : s.avatars[managed.id]}
+              canEdit={managed.id === s.uid || side.myRank > memberRank(managed)}
+              isOwner={s.isOwner}
+              onClose={() => setManaging(null)}
+              onRole={(r) => run('mrole', () => s.setMemberRole(managed.id, r))}
+              onStatus={(st) => run('mstatus', () => s.setMemberStatus(managed.id, st))}
+              onToggleCommand={() => run('cmd', () => s.setMemberCanCommand(managed.id, !managed.canCommand))}
+              onKick={() =>
+                confirmDestructive('Исключить из отряда?', managed.callsign, 'Исключить', () => {
+                  setManaging(null);
+                  run('kick', () => s.kickMember(managed.id));
+                })
+              }
+            />
+          )}
+
           {/* Team, invite code, color */}
           <Card style={{ gap: 14 }}>
             <View style={styles.teamHeader}>
@@ -356,25 +350,6 @@ export default function TeamScreen() {
             </Card>
           )}
 
-          {/* Settings */}
-          <Card style={{ gap: 0, paddingVertical: 6 }}>
-            <SettingRow
-              icon={s.shareLocation ? 'access-point' : 'access-point-off'}
-              title="Передавать позицию"
-              sub={s.shareLocation ? 'Команда видит вас на карте' : 'Вы скрыты от команды'}
-              value={s.shareLocation}
-              onChange={(v) => run('share', () => s.setShareLocation(v))}
-            />
-            <View style={styles.divider} />
-            <SettingRow
-              icon={s.orderSound ? 'volume-high' : 'volume-off'}
-              title="Звук приказов"
-              sub={s.orderSound ? 'Вибрация и сигнал' : 'Только вибрация'}
-              value={s.orderSound}
-              onChange={(v) => run('sound', () => s.setOrderSound(v))}
-            />
-          </Card>
-
           {s.isOwner && (
             <Card style={{ gap: 12 }}>
               <View style={styles.inlineTitle}>
@@ -447,36 +422,6 @@ export default function TeamScreen() {
             </View>
           </Card>
 
-          {/* Roster */}
-          <View style={{ gap: 10 }}>
-            <Eyebrow style={{ paddingHorizontal: 4 }}>
-              Состав · {s.members.length}
-              {s.isOwner ? ' · ★ — право отдавать приказы' : ''}
-            </Eyebrow>
-            <Card style={{ gap: 0, paddingVertical: 6 }}>
-              {sortedMembers.map((m, i) => (
-                <MemberRow
-                  key={m.id}
-                  m={m}
-                  first={i === 0}
-                  me={m.id === s.uid}
-                  owner={m.id === s.team?.ownerId}
-                  color={color}
-                  avatar={m.id === s.uid ? s.avatar : s.avatars[m.id]}
-                  fresh={m.lat != null && m.updatedAt != null && now - m.updatedAt < STALE_MS}
-                  manage={s.isOwner && m.id !== s.uid}
-                  onToggleCommand={() => run('cmd', () => s.setMemberCanCommand(m.id, !m.canCommand))}
-                  onKick={() =>
-                    Alert.alert('Исключить из команды?', m.callsign, [
-                      { text: 'Отмена', style: 'cancel' },
-                      { text: 'Исключить', style: 'destructive', onPress: () => run('kick', () => s.kickMember(m.id)) },
-                    ])
-                  }
-                />
-              ))}
-            </Card>
-          </View>
-
           <Button
             title="Покинуть команду"
             kind="danger"
@@ -514,33 +459,6 @@ export default function TeamScreen() {
   );
 }
 
-function SettingRow({
-  icon,
-  title,
-  sub,
-  value,
-  onChange,
-}: {
-  icon: IconName;
-  title: string;
-  sub: string;
-  value: boolean;
-  onChange: (v: boolean) => void;
-}) {
-  return (
-    <View style={styles.switchRow}>
-      <View style={[styles.switchIcon, value && { backgroundColor: C.accentSoft }]}>
-        <Icon name={icon} size={22} color={value ? C.accent : C.dim} />
-      </View>
-      <View style={{ flex: 1 }}>
-        <Text style={styles.cardTitle}>{title}</Text>
-        <Text style={styles.sub}>{sub}</Text>
-      </View>
-      <Switch value={value} onValueChange={onChange} trackColor={{ true: C.accent, false: C.elevated }} thumbColor="#fff" />
-    </View>
-  );
-}
-
 function MemberRow({
   m,
   first,
@@ -549,9 +467,7 @@ function MemberRow({
   color,
   avatar,
   fresh,
-  manage,
-  onToggleCommand,
-  onKick,
+  onPress,
 }: {
   m: Member;
   first: boolean;
@@ -560,17 +476,22 @@ function MemberRow({
   color: string;
   avatar: string | null | undefined;
   fresh: boolean;
-  manage: boolean;
-  onToggleCommand: () => void;
-  onKick: () => void;
+  onPress: () => void;
 }) {
   const commands = owner || m.canCommand;
   return (
-    <View style={[styles.member, !first && styles.memberBorder]}>
+    <Pressable
+      onPress={() => {
+        tap();
+        onPress();
+      }}
+      style={({ pressed }) => [styles.member, !first && styles.memberBorder, pressed && { opacity: 0.7 }]}
+    >
+      <View style={[styles.statusBar, { backgroundColor: fresh ? STATUSES[m.status].color : C.faint }]} />
       <View>
-        <Avatar name={m.callsign} color={color} uri={avatar} size={44} dim={!fresh} />
+        <Avatar name={m.callsign} color={color} uri={avatar} size={44} dim={!fresh || m.status !== 'alive'} />
         <View style={[styles.memberRole, { backgroundColor: color }]}>
-          <RoleIcon role={m.role} size={13} color={C.accentInk} />
+          <RoleIcon role={m.role} size={14} color={C.accentInk} />
         </View>
       </View>
       <View style={{ flex: 1 }}>
@@ -590,73 +511,77 @@ function MemberRow({
               : '—'}
         </Text>
       </View>
-      {manage && (
+      <StatusTag status={m.status} offline={!fresh} />
+    </Pressable>
+  );
+}
+
+/** Fighter card: role and status (for superiors), command rights and kick (creator). */
+function MemberSheet({
+  m,
+  color,
+  me,
+  avatar,
+  canEdit,
+  isOwner,
+  onClose,
+  onRole,
+  onStatus,
+  onToggleCommand,
+  onKick,
+}: {
+  m: Member;
+  color: string;
+  me: boolean;
+  avatar: string | null | undefined;
+  canEdit: boolean;
+  isOwner: boolean;
+  onClose: () => void;
+  onRole: (r: RoleId) => void;
+  onStatus: (st: MemberStatus) => void;
+  onToggleCommand: () => void;
+  onKick: () => void;
+}) {
+  return (
+    <Sheet visible onClose={onClose}>
+      <View style={styles.sheetHead}>
+        <Avatar name={m.callsign} color={color} uri={avatar} size={52} />
+        <View style={{ flex: 1 }}>
+          <Text style={styles.teamName} numberOfLines={1}>
+            {m.callsign}
+          </Text>
+          <Text style={styles.sub}>{ROLES[m.role].title}</Text>
+        </View>
+        <RoleIcon role={m.role} size={44} color={color} framed />
+      </View>
+      {canEdit ? (
         <>
-          <Pressable
-            hitSlop={6}
-            accessibilityLabel={m.canCommand ? 'Забрать право приказов' : 'Дать право приказов'}
-            style={[styles.iconButton, m.canCommand && { backgroundColor: C.warn }]}
-            onPress={() => {
-              tap();
-              onToggleCommand();
-            }}
-          >
-            <Icon name="star" size={18} color={m.canCommand ? C.accentInk : C.dim} />
-          </Pressable>
-          <Pressable hitSlop={6} accessibilityLabel="Исключить" style={styles.iconButton} onPress={onKick}>
-            <Icon name="account-remove-outline" size={18} color={C.dim} />
-          </Pressable>
+          <Eyebrow>Статус</Eyebrow>
+          <StatusPicker value={m.status} onPick={onStatus} />
+          <Eyebrow>Роль</Eyebrow>
+          <RolePicker value={m.role} color={color} onPick={onRole} />
         </>
+      ) : (
+        <Text style={styles.text}>Менять роль и статус может только вышестоящий командир.</Text>
       )}
-    </View>
+      {isOwner && !me && (
+        <View style={styles.row}>
+          <Button
+            title={m.canCommand ? 'Забрать приказы' : 'Дать право приказов'}
+            icon="star"
+            kind={m.canCommand ? 'secondary' : 'primary'}
+            style={{ flex: 1 }}
+            onPress={onToggleCommand}
+          />
+          <Button title="Исключить" icon="account-remove-outline" kind="danger" onPress={onKick} />
+        </View>
+      )}
+    </Sheet>
   );
 }
 
 const styles = StyleSheet.create({
   content: { padding: 16, gap: 14, paddingBottom: 48, width: '100%', maxWidth: 640, alignSelf: 'center' },
-  profile: { flexDirection: 'row', alignItems: 'center', gap: 14 },
-  avatarEdit: {
-    position: 'absolute',
-    right: -2,
-    bottom: -2,
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    borderWidth: 2,
-    borderColor: C.surface,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  callsignInput: { color: C.text, fontSize: 22, fontFamily: F.bold, padding: 0 },
-  saveIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: C.accent,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  roles: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  role: {
-    flexBasis: '30%',
-    flexGrow: 1,
-    alignItems: 'center',
-    gap: 6,
-    paddingVertical: 10,
-    borderRadius: R.md,
-    borderWidth: 1.5,
-    borderColor: C.line,
-    backgroundColor: C.elevated,
-  },
-  rolePin: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    borderWidth: 2,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  roleText: { color: C.dim, fontSize: 12, fontFamily: F.semibold },
   inlineTitle: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   cardTitle: { color: C.text, fontSize: 16, fontFamily: F.semibold },
   text: { color: C.dim, fontSize: 15, lineHeight: 21, fontFamily: F.regular },
@@ -716,16 +641,14 @@ const styles = StyleSheet.create({
     borderColor: 'transparent',
   },
   colorDotActive: { borderColor: C.text },
-  switchRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10 },
   switchIcon: {
     width: 44,
     height: 44,
     borderRadius: 14,
-    backgroundColor: 'rgba(255,255,255,0.05)',
+    backgroundColor: C.elevated,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  divider: { height: StyleSheet.hairlineWidth, backgroundColor: C.line },
   sideEntry: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   member: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10 },
   memberBorder: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: C.line },
@@ -743,12 +666,7 @@ const styles = StyleSheet.create({
   },
   memberNameRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   memberName: { color: C.text, fontSize: 16, fontFamily: F.semibold, flexShrink: 1 },
-  iconButton: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: C.elevated,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
+  statusBar: { width: 3, alignSelf: 'stretch', borderRadius: 2, marginVertical: 2 },
+  hint: { flexDirection: 'row', alignItems: 'center', gap: 12, borderColor: C.warn + '66' },
+  sheetHead: { flexDirection: 'row', alignItems: 'center', gap: 14 },
 });

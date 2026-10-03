@@ -17,6 +17,8 @@ export function useSelfPosition(enabled = true) {
   const [position, setPosition] = useState<SelfPosition | null>(null);
   const [status, setStatus] = useState<LocationStatus>('pending');
   const heading = useRef<number | null>(null);
+  // Compass reading on its own, so the compass works before the first GPS fix.
+  const [compass, setCompass] = useState<number | null>(null);
 
   useEffect(() => {
     if (!enabled) return;
@@ -63,6 +65,7 @@ export function useSelfPosition(enabled = true) {
               if (now - lastEmit < HEADING_MIN_INTERVAL_MS) return;
               lastEmit = now;
               heading.current = Math.round(v);
+              setCompass(heading.current);
               setPosition((p) => (p ? { ...p, heading: heading.current } : p));
             })
           );
@@ -81,5 +84,5 @@ export function useSelfPosition(enabled = true) {
     };
   }, [enabled]);
 
-  return { position, status };
+  return { position, status, heading: compass ?? position?.heading ?? null };
 }

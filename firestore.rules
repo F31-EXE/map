@@ -2,8 +2,9 @@ rules_version = '2';
 
 // Data model:
 //   teamCodes/{code}                 -> { teamId }            join code lookup
-//   teams/{teamId}                   -> { name, code, ownerId, color, createdAt }
-//   teams/{teamId}/members/{uid}     -> { callsign, role, canCommand?, joinCode, lat, lng, heading, accuracy, updatedAt }
+//   teams/{teamId}                   -> { name, code, ownerId, color, createdAt, recordingId?, pinned? }
+//   teams/{teamId}/members/{uid}     -> { callsign, role, status?, canCommand?, joinCode, lat, lng, heading, accuracy, updatedAt }
+//     pinned = { id, text, callsign, uid, at }: chat message pinned by a commander
 //   teams/{teamId}/markers/{id}      -> { kind, label, lat, lng, createdBy, createdByName, createdAt }
 //   teams/{teamId}/avatars/{uid}     -> { data, updatedAt }   small JPEG data URI
 //   teams/{teamId}/messages/{id}    -> { uid, callsign, text, createdAt }   team chat
@@ -71,7 +72,14 @@ service cloud.firestore {
     function validProfile(d) {
       return d.callsign is string
         && d.callsign.size() <= 24
-        && (!('role' in d) || (d.role is string && d.role.size() <= 20));
+        && (!('role' in d) || (d.role is string && d.role.size() <= 20))
+        && (!('status' in d) || d.status in ['alive', 'dead', 'afk']);
+    }
+    function validPinned(p) {
+      return p == null
+        || (p.text is string && p.text.size() <= 500
+          && p.callsign is string && p.callsign.size() <= 24
+          && p.id is string && p.uid is string);
     }
 
     match /teamCodes/{code} {
@@ -125,9 +133,10 @@ service cloud.firestore {
           && (!('color' in request.resource.data) || validColor(request.resource.data.color))
           && (request.resource.data.get('sideId', null) == null
             || request.resource.data.get('sideCode', null) == get(sidePath(request.resource.data.sideId)).data.code))
-        // Commanders start and stop movement recording.
+        // Commanders start and stop movement recording and pin chat messages.
         || (canCommand(teamId)
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['recordingId']))
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['recordingId', 'pinned'])
+          && validPinned(request.resource.data.get('pinned', null)))
         // The side commander may drop a squad from the side, and nothing else.
         || (isSideOwner(resource.data.get('sideId', null))
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['sideId', 'sideCode'])
@@ -153,6 +162,11 @@ service cloud.firestore {
           || (isOwner(teamId)
             && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['canCommand'])
             && request.resource.data.canCommand is bool)
+          // Commanders assign roles and set the status of anyone below them.
+          || (canCommand(teamId)
+            && rank(teamId, request.auth.uid) > rank(teamId, uid)
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['role', 'status'])
+            && validProfile(request.resource.data))
         );
         // Leave, or be removed by the team creator.
         allow delete: if signedIn() && (uid == request.auth.uid || isOwner(teamId));

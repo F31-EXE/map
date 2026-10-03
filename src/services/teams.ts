@@ -18,7 +18,7 @@ import {
 import { firestore } from '../lib/firebase';
 import { normalizeCode } from '../lib/invite';
 import { DEFAULT_TEAM_COLOR, roleOf, type RoleId } from '../lib/roles';
-import type { Member, SelfPosition, TacMarker, Team } from '../lib/types';
+import type { Member, MemberStatus, PinnedMessage, SelfPosition, TacMarker, Team } from '../lib/types';
 
 // No 0/O/1/I/L to keep codes easy to dictate over the radio.
 const CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
@@ -103,9 +103,23 @@ export async function kickMember(teamId: string, memberId: string): Promise<void
 export async function updateProfile(
   teamId: string,
   uid: string,
-  profile: { callsign?: string; role?: RoleId }
+  profile: { callsign?: string; role?: RoleId; status?: MemberStatus }
 ): Promise<void> {
   await updateDoc(doc(firestore(), 'teams', teamId, 'members', uid), profile);
+}
+
+/** A commander sets the role or status of someone below them (enforced by rules). */
+export async function updateMemberByCommander(
+  teamId: string,
+  memberId: string,
+  patch: { role?: RoleId; status?: MemberStatus }
+): Promise<void> {
+  await updateDoc(doc(firestore(), 'teams', teamId, 'members', memberId), patch);
+}
+
+/** Commanders pin a chat message for the squad; null unpins. */
+export async function setPinned(teamId: string, pinned: PinnedMessage | null): Promise<void> {
+  await updateDoc(doc(firestore(), 'teams', teamId), { pinned });
 }
 
 /** Team creator only (enforced by rules). */
@@ -185,6 +199,7 @@ export function subscribeTeam(
               color: d.color ?? DEFAULT_TEAM_COLOR,
               sideId: typeof d.sideId === 'string' ? d.sideId : null,
               recordingId: typeof d.recordingId === 'string' ? d.recordingId : null,
+              pinned: d.pinned && typeof d.pinned.text === 'string' ? (d.pinned as PinnedMessage) : null,
             }
           : null
       );
@@ -209,6 +224,7 @@ export function subscribeMembers(
             callsign: v.callsign ?? '???',
             role: roleOf(v.role),
             canCommand: v.canCommand === true,
+            status: v.status === 'dead' || v.status === 'afk' ? v.status : 'alive',
             lat: typeof v.lat === 'number' ? v.lat : null,
             lng: typeof v.lng === 'number' ? v.lng : null,
             heading: typeof v.heading === 'number' ? v.heading : null,

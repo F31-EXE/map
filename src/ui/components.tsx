@@ -23,7 +23,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
 
-import { ROLES, type RoleId } from '../lib/roles';
+import { roleFrame, ROLES, type RoleId } from '../lib/roles';
 
 import { C, eyebrow, F, R, shadow } from './theme';
 
@@ -77,12 +77,14 @@ export function GlassButton({
   active,
   size = 48,
   label,
+  activeColor = C.accent,
 }: {
   icon: IconName;
   onPress: () => void;
   active?: boolean;
   size?: number;
   label?: string;
+  activeColor?: string;
 }) {
   return (
     <Pressable
@@ -95,8 +97,8 @@ export function GlassButton({
       style={({ pressed }) => ({ transform: [{ scale: pressed ? 0.94 : 1 }] })}
     >
       <Glass
-        radius={size / 2}
-        fill={active ? C.accent : undefined}
+        radius={R.lg}
+        fill={active ? activeColor : undefined}
         style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}
       >
         <Icon name={icon} size={size * 0.46} color={active ? C.accentInk : C.text} />
@@ -208,10 +210,24 @@ export function Avatar({
   );
 }
 
-/** Squad-style role glyph (see src/lib/roles.ts). */
-export function RoleIcon({ role, size = 22, color = C.text }: { role: RoleId; size?: number; color?: string }) {
+/**
+ * Role glyph (see src/lib/roles.ts). `framed` draws the full badge with its shield or
+ * diamond; without it the glyph alone fills the box (for small pins).
+ */
+export function RoleIcon({
+  role,
+  size = 22,
+  color = C.text,
+  framed,
+}: {
+  role: RoleId;
+  size?: number;
+  color?: string;
+  framed?: boolean;
+}) {
   return (
-    <Svg width={size} height={size} viewBox="0 0 24 24">
+    <Svg width={size} height={size} viewBox={framed ? '0 0 24 24' : '4 4 16 16'}>
+      {framed && <Path d={roleFrame(role)} fill={color} fillRule="evenodd" />}
       <Path d={ROLES[role].path} fill={color} />
     </Svg>
   );

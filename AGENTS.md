@@ -61,3 +61,7 @@ Docs: https://docs.expo.dev/eas/index.md
 - `npm test` uses `scripts/ts-resolve.mjs` so tests can import app modules with extensionless imports.
 - Marker deletion follows the chain of command (`src/lib/ranks.ts`, mirrored by `rank()` in firestore.rules): own markers or strictly lower rank.
 - Use `KeyboardScroll` (components.tsx) for screens with text inputs; `Sheet` already keeps the focused input above the keyboard.
+- Screens: tabs live in `src/app/(tabs)/` (index = map, chat, team = «Отряд», settings) with the custom `src/ui/TabBar.tsx` (bottom in portrait, left column in landscape — the map screen then ignores the bottom/left safe-area insets). Other screens are stack routes in `src/app/`.
+- Role badges: `src/lib/roles.ts` builds glyphs with `xf()` (absolute M/L/C/Z paths only) and frames (`roleFrame`); `RoleIcon framed` draws the full badge, without `framed` only the glyph (viewBox `4 4 16 16`, also used for map pins and the self marker).
+- Member `status` (`alive`/`dead`/`afk`, `src/lib/status.ts`): set by the fighter or by anyone ranked above them (rules: `rank()` comparison, keys `role`/`status` only). Team `pinned` chat message is written by commanders.
+- Coordinate grid: UTM in map.js (`toUtm`/`fromUtm`, `setGrid`), labels kept clear of native panels via `setInsets({ top, bottom })`.

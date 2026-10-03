@@ -90,14 +90,23 @@
   var selfAccuracy = null;
   var follow = false;
 
-  // Built once; heading updates only rotate the cone so the pulse animation
-  // isn't restarted and the marker doesn't flicker.
-  var selfIcon = L.divIcon({
-    className: 'self-icon',
-    html: '<div class="self-cone"></div><div class="self-pulse"></div><div class="self-dot"></div>',
-    iconSize: [80, 80],
-    iconAnchor: [40, 40],
-  });
+  // Rebuilt only when role or color changes; heading updates just rotate the cone so
+  // the pulse animation isn't restarted and the marker doesn't flicker.
+  function selfIcon(look) {
+    var c = escapeHtml(look.color || '#8EF07A');
+    return L.divIcon({
+      className: 'self-icon',
+      html:
+        '<div class="self-cone"></div>' +
+        '<div class="self-pulse" style="background:' + c + '"></div>' +
+        '<div class="self-pin" style="background:' + c + '">' +
+        (look.rolePath ? '<svg viewBox="4 4 16 16"><path d="' + escapeHtml(look.rolePath) + '" fill="#04100A"/></svg>' : '') +
+        '</div>',
+      iconSize: [80, 80],
+      iconAnchor: [40, 40],
+    });
+  }
+  var selfLook = null;
   var coneAngle = null;
 
   function setHeading(heading) {
@@ -118,6 +127,7 @@
     if (!p) {
       selfLayer.clearLayers();
       selfMarker = selfAccuracy = null;
+      selfLook = null;
       coneAngle = null;
       return;
     }
@@ -126,13 +136,20 @@
       selfAccuracy = L.circle(ll, {
         radius: p.accuracy || 0,
         interactive: false,
-        color: '#38BDF8',
+        color: '#8EF07A',
         weight: 1,
         opacity: 0.5,
         fillOpacity: 0.08,
       }).addTo(selfLayer);
-      selfMarker = L.marker(ll, { icon: selfIcon, interactive: false, zIndexOffset: 1000 }).addTo(selfLayer);
+      selfLook = JSON.stringify([p.rolePath, p.color]);
+      selfMarker = L.marker(ll, { icon: selfIcon(p), interactive: false, zIndexOffset: 1000 }).addTo(selfLayer);
     } else {
+      var look = JSON.stringify([p.rolePath, p.color]);
+      if (look !== selfLook) {
+        selfLook = look;
+        selfMarker.setIcon(selfIcon(p));
+        coneAngle = null;
+      }
       selfMarker.setLatLng(ll);
       selfAccuracy.setLatLng(ll);
       selfAccuracy.setRadius(p.accuracy || 0);
@@ -182,18 +199,30 @@
   var memberMarkers = {};
 
   var STAR_PATH = 'M12,17.27L18.18,21L16.54,13.97L22,9.24L14.81,8.62L12,2L9.19,8.62L2,9.24L7.45,13.97L5.82,21L12,17.27Z';
+  var SKULL_PATH =
+    'M12,2A9,9 0 0,0 3,11C3,14.03 4.53,16.82 7,18.47V22H9V19H11V22H13V19H15V22H17V18.46C19.47,16.81 21,14 21,11A9,9 0 0,0 12,2' +
+    'M8,11A2,2 0 0,1 10,13A2,2 0 0,1 8,15A2,2 0 0,1 6,13A2,2 0 0,1 8,11M16,11A2,2 0 0,1 18,13A2,2 0 0,1 16,15A2,2 0 0,1 14,13' +
+    'A2,2 0 0,1 16,11M12,14L13.5,17H10.5L12,14Z';
+  var SLEEP_PATH =
+    'M23,12H17V10L20.39,6H17V4H23V6L19.62,10H23V12M15,16H9V14L12.39,10H9V8H15V10L11.62,14H15V16M7,20H1V18L4.39,14H1V12H7V14' +
+    'L3.62,18H7V20Z';
 
   // Teammate: team-colored disc with the role glyph, a heading tip outside the disc,
   // and a star badge for anyone allowed to issue orders.
   function memberIcon(m) {
     var c = escapeHtml(m.color);
+    var status = m.status === 'dead' || m.status === 'afk' ? m.status : '';
     return L.divIcon({
-      className: 'member-icon' + (m.stale ? ' stale' : ''),
+      className: 'member-icon' + (m.stale ? ' stale' : '') + (status ? ' ' + status : ''),
       html:
-        (m.stale ? '' : '<div class="member-halo" style="background:' + c + '"></div>') +
+        (m.stale || status ? '' : '<div class="member-halo" style="background:' + c + '"></div>') +
         '<div class="member-dir"><div class="member-dir-tip" style="border-bottom-color:' + c + '"></div></div>' +
         '<div class="member-pin" style="background:' + c + '">' +
-        '<svg viewBox="0 0 24 24"><path d="' + escapeHtml(m.rolePath) + '" fill="#0B0F0C"/></svg></div>' +
+        '<svg viewBox="4 4 16 16"><path d="' + escapeHtml(m.rolePath) + '" fill="#04100A"/></svg></div>' +
+        (status
+          ? '<div class="member-status"><svg viewBox="0 0 24 24"><path d="' +
+            (status === 'dead' ? SKULL_PATH : SLEEP_PATH) + '" fill="#fff"/></svg></div>'
+          : '') +
         (m.commander
           ? '<div class="member-badge"><svg viewBox="0 0 24 24"><path d="' + STAR_PATH + '" fill="#0B0F0C"/></svg></div>'
           : '') +
@@ -219,7 +248,7 @@
   }
 
   function memberKey(m) {
-    return JSON.stringify([m.callsign, m.color, m.stale, m.rolePath, m.roleTitle, m.commander]);
+    return JSON.stringify([m.callsign, m.color, m.stale, m.rolePath, m.roleTitle, m.commander, m.status]);
   }
 
   function setMembers(list) {
@@ -262,7 +291,7 @@
     var time = m.time ? '<span class="chip-role">' + (m.label ? ' · ' : '') + escapeHtml(m.time) + '</span>' : '';
     var label = m.label || m.time ? '<div class="chip tac-chip">' + escapeHtml(m.label || '') + time + '</div>' : '';
     return L.divIcon({
-      className: 'tac-icon' + (m.order ? ' order' : '') + (m.personal ? ' personal' : ''),
+      className: 'tac-icon' + (m.order ? ' order' : '') + (m.admin ? ' admin' : '') + (m.personal ? ' personal' : ''),
       html:
         '<div class="tac-pin" style="--c:' + c + ';border-color:' + c + ';box-shadow:0 0 0 4px ' + c + '33, 0 4px 14px rgba(0,0,0,.6)">' +
         '<svg viewBox="0 0 24 24"><path d="' + escapeHtml(m.path) + '" fill="' + c + '"/></svg></div>' +
@@ -826,6 +855,156 @@
   // ---------------------------------------------------------------------------
   // Bridge
   // ---------------------------------------------------------------------------
+
+  // ---------------------------------------------------------------------------
+  // Coordinate grid: UTM kilometre-style squares, like a military map. Lines are
+  // straight between computed corners, fine at the scale of a playing field.
+  // ---------------------------------------------------------------------------
+  var UTM_K0 = 0.9996;
+  var UTM_A = 6378137;
+  var UTM_E2 = 0.00669438;
+  var UTM_EP2 = UTM_E2 / (1 - UTM_E2);
+
+  function toUtm(lat, lng, zone) {
+    var phi = (lat * Math.PI) / 180;
+    var lam0 = (((zone - 1) * 6 - 180 + 3) * Math.PI) / 180;
+    var lam = (lng * Math.PI) / 180;
+    var n = UTM_A / Math.sqrt(1 - UTM_E2 * Math.sin(phi) * Math.sin(phi));
+    var t = Math.tan(phi) * Math.tan(phi);
+    var c = UTM_EP2 * Math.cos(phi) * Math.cos(phi);
+    var a = Math.cos(phi) * (lam - lam0);
+    var e4 = UTM_E2 * UTM_E2;
+    var e6 = e4 * UTM_E2;
+    var m =
+      UTM_A *
+      ((1 - UTM_E2 / 4 - (3 * e4) / 64 - (5 * e6) / 256) * phi -
+        ((3 * UTM_E2) / 8 + (3 * e4) / 32 + (45 * e6) / 1024) * Math.sin(2 * phi) +
+        ((15 * e4) / 256 + (45 * e6) / 1024) * Math.sin(4 * phi) -
+        ((35 * e6) / 3072) * Math.sin(6 * phi));
+    var x =
+      UTM_K0 * n * (a + ((1 - t + c) * a * a * a) / 6 + ((5 - 18 * t + t * t + 72 * c - 58 * UTM_EP2) * Math.pow(a, 5)) / 120) +
+      500000;
+    var y =
+      UTM_K0 *
+      (m +
+        n *
+          Math.tan(phi) *
+          ((a * a) / 2 +
+            ((5 - t + 9 * c + 4 * c * c) * Math.pow(a, 4)) / 24 +
+            ((61 - 58 * t + t * t + 600 * c - 330 * UTM_EP2) * Math.pow(a, 6)) / 720));
+    if (lat < 0) y += 10000000;
+    return { e: x, n: y };
+  }
+
+  function fromUtm(e, nn, zone, south) {
+    var x = e - 500000;
+    var y = south ? nn - 10000000 : nn;
+    var m = y / UTM_K0;
+    var e4 = UTM_E2 * UTM_E2;
+    var e6 = e4 * UTM_E2;
+    var mu = m / (UTM_A * (1 - UTM_E2 / 4 - (3 * e4) / 64 - (5 * e6) / 256));
+    var e1 = (1 - Math.sqrt(1 - UTM_E2)) / (1 + Math.sqrt(1 - UTM_E2));
+    var phi1 =
+      mu +
+      ((3 * e1) / 2 - (27 * Math.pow(e1, 3)) / 32) * Math.sin(2 * mu) +
+      ((21 * e1 * e1) / 16 - (55 * Math.pow(e1, 4)) / 32) * Math.sin(4 * mu) +
+      ((151 * Math.pow(e1, 3)) / 96) * Math.sin(6 * mu);
+    var n1 = UTM_A / Math.sqrt(1 - UTM_E2 * Math.sin(phi1) * Math.sin(phi1));
+    var t1 = Math.tan(phi1) * Math.tan(phi1);
+    var c1 = UTM_EP2 * Math.cos(phi1) * Math.cos(phi1);
+    var r1 = (UTM_A * (1 - UTM_E2)) / Math.pow(1 - UTM_E2 * Math.sin(phi1) * Math.sin(phi1), 1.5);
+    var d = x / (n1 * UTM_K0);
+    var lat =
+      phi1 -
+      ((n1 * Math.tan(phi1)) / r1) *
+        ((d * d) / 2 -
+          ((5 + 3 * t1 + 10 * c1 - 4 * c1 * c1 - 9 * UTM_EP2) * Math.pow(d, 4)) / 24 +
+          ((61 + 90 * t1 + 298 * c1 + 45 * t1 * t1 - 252 * UTM_EP2 - 3 * c1 * c1) * Math.pow(d, 6)) / 720);
+    var lng =
+      (d - ((1 + 2 * t1 + c1) * Math.pow(d, 3)) / 6 +
+        ((5 - 2 * c1 + 28 * t1 - 3 * c1 * c1 + 8 * UTM_EP2 + 24 * t1 * t1) * Math.pow(d, 5)) / 120) /
+      Math.cos(phi1);
+    var lam0 = ((zone - 1) * 6 - 180 + 3);
+    return [(lat * 180) / Math.PI, lam0 + (lng * 180) / Math.PI];
+  }
+
+  var gridLayer = L.layerGroup();
+  var gridOn = false;
+  // Screen area covered by native panels at the top; labels go just below it.
+  var gridTopInset = 0;
+  var gridBottomInset = 0;
+  var GRID_STEPS = [100, 200, 500, 1000, 2000, 5000, 10000];
+
+  function gridLabel(v, step) {
+    // Last digits that change, like the numbers in a map's margin: 37 for 437000 at 1 km.
+    var km = Math.floor(v / 1000);
+    if (step >= 1000) return String(km % 100).padStart(2, '0');
+    return String(km % 100).padStart(2, '0') + '.' + String(Math.round((v % 1000) / 100) % 10);
+  }
+
+  function drawGrid() {
+    gridLayer.clearLayers();
+    if (!gridOn) return;
+    var b = map.getBounds();
+    var c = map.getCenter();
+    var zone = Math.floor((c.lng + 180) / 6) + 1;
+    var south = c.lat < 0;
+    var size = map.getSize();
+    var metersPerPx = map.distance(map.containerPointToLatLng([0, size.y / 2]), map.containerPointToLatLng([size.x, size.y / 2])) / size.x;
+    var step = GRID_STEPS[GRID_STEPS.length - 1];
+    for (var i = 0; i < GRID_STEPS.length; i++) {
+      if (GRID_STEPS[i] / metersPerPx >= 90) {
+        step = GRID_STEPS[i];
+        break;
+      }
+    }
+    var corners = [b.getSouthWest(), b.getNorthWest(), b.getNorthEast(), b.getSouthEast()].map(function (p) {
+      return toUtm(p.lat, p.lng, zone);
+    });
+    var minE = Math.min.apply(null, corners.map(function (p) { return p.e; }));
+    var maxE = Math.max.apply(null, corners.map(function (p) { return p.e; }));
+    var minN = Math.min.apply(null, corners.map(function (p) { return p.n; }));
+    var maxN = Math.max.apply(null, corners.map(function (p) { return p.n; }));
+    var style = { color: '#8EF07A', weight: 1, opacity: 0.55, interactive: false };
+    var labelAt = function (ll, text, cls) {
+      L.marker(ll, {
+        interactive: false,
+        keyboard: false,
+        icon: L.divIcon({ className: 'grid-label ' + cls, html: '<span>' + text + '</span>', iconSize: [0, 0] }),
+      }).addTo(gridLayer);
+    };
+    var e0 = Math.floor(minE / step) * step;
+    var n0 = Math.floor(minN / step) * step;
+    var top = map.containerPointToLatLng([0, gridTopInset + 6]).lat;
+    var left = map.containerPointToLatLng([6, 0]).lng;
+    for (var e = e0; e <= maxE + step; e += step) {
+      var line = [fromUtm(e, minN - step, zone, south), fromUtm(e, maxN + step, zone, south)];
+      L.polyline(line, style).addTo(gridLayer);
+      // Where this easting line crosses the top edge of the screen.
+      var f = (top - line[0][0]) / (line[1][0] - line[0][0]);
+      labelAt([top, line[0][1] + f * (line[1][1] - line[0][1])], gridLabel(e, step), 'grid-top');
+    }
+    for (var n = n0; n <= maxN + step; n += step) {
+      var row = [fromUtm(minE - step, n, zone, south), fromUtm(maxE + step, n, zone, south)];
+      L.polyline(row, style).addTo(gridLayer);
+      var g = (left - row[0][1]) / (row[1][1] - row[0][1]);
+      var at = [row[0][0] + g * (row[1][0] - row[0][0]), left];
+      // Skip labels hidden under the native panels.
+      var py = map.latLngToContainerPoint(at).y;
+      if (py > gridTopInset + 24 && py < size.y - gridBottomInset - 8) labelAt(at, gridLabel(n, step), 'grid-left');
+    }
+  }
+
+  function setGrid(p) {
+    gridOn = !!(p && p.on);
+    if (gridOn) gridLayer.addTo(map);
+    else map.removeLayer(gridLayer);
+    drawGrid();
+  }
+  map.on('moveend zoomend resize', drawGrid);
+  // Exposed for tests.
+  window.__tacmapUtm = { toUtm: toUtm, fromUtm: fromUtm };
+
   var handlers = {
     setBaseLayer: function (p) {
       setBaseLayer(p.id);
@@ -856,8 +1035,16 @@
       var b = Math.max(0, Math.round(p.bottom || 0)) + 'px';
       var corners = map.getContainer().querySelectorAll('.leaflet-bottom');
       for (var i = 0; i < corners.length; i++) corners[i].style.marginBottom = b;
+      var top = Math.round(p.top || 0);
+      var bottom = Math.max(0, Math.round(p.bottom || 0));
+      if (top !== gridTopInset || bottom !== gridBottomInset) {
+        gridTopInset = top;
+        gridBottomInset = bottom;
+        drawGrid();
+      }
     },
     setAnalysis: setAnalysis,
+    setGrid: setGrid,
     setMembers: setMembers,
     setMarkers: setMarkers,
     addOverlay: addOverlay,

@@ -19,7 +19,14 @@ export type Team = {
   sideId: string | null;
   /** Movement recording in progress, if any. */
   recordingId?: string | null;
+  /** Chat message pinned by a commander. */
+  pinned?: PinnedMessage | null;
 };
+
+export type PinnedMessage = { id: string; text: string; callsign: string; uid: string; at: number };
+
+/** Fighter's game state, set by themselves or a superior. */
+export type MemberStatus = 'alive' | 'dead' | 'afk';
 
 /** A side: several squads under one side commander. */
 export type Side = {
@@ -35,6 +42,7 @@ export type Member = {
   role: RoleId;
   /** May issue orders (granted by the team creator). */
   canCommand: boolean;
+  status: MemberStatus;
   lat: number | null;
   lng: number | null;
   heading: number | null;
@@ -49,6 +57,9 @@ export type Member = {
 
 export type OrderKind = 'order-move' | 'order-attack' | 'order-defend';
 
+/** Polygon infrastructure. */
+export type AdminKind = 'respawn' | 'deadzone' | 'parking' | 'admin';
+
 export type MarkerKind =
   | 'enemy'
   | 'friendly'
@@ -58,6 +69,7 @@ export type MarkerKind =
   | 'medic'
   | 'note'
   | 'arrow'
+  | AdminKind
   | OrderKind;
 
 export type TacMarker = {

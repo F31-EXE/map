@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useImperativeHandle, useRef, useState, type Ref } from 'react';
 
 import { formatClock } from '../lib/geo';
-import { isOrder, MARKER_KINDS } from '../lib/markerKinds';
-import { ROLES } from '../lib/roles';
+import { isAdminKind, isOrder, MARKER_KINDS } from '../lib/markerKinds';
+import { ROLES, type RoleId } from '../lib/roles';
 import type { LatLng, Member, OverlayMeta, SelfPosition, TacMarker } from '../lib/types';
 import { loadOverlayPayload } from '../services/overlays';
 import { MapFrame, type MapFrameHandle } from './MapFrame';
@@ -37,7 +37,12 @@ type Props = {
   ref?: Ref<TacticalMapHandle>;
   baseLayer: BaseLayerId;
   self: SelfPosition | null;
+  /** Own role and color for the self marker. */
+  selfRole?: RoleId;
+  selfColor?: string;
   follow: boolean;
+  /** Coordinate grid overlay. */
+  grid?: boolean;
   members: Member[];
   /** Own uid — excluded from the members layer (drawn as `self`). */
   selfId: string | null;
@@ -65,6 +70,8 @@ type Props = {
   } | null;
   /** Pixels at the bottom covered by native panels (scale bar goes above). */
   bottomInset?: number;
+  /** Pixels at the top covered by native panels (grid labels go below). */
+  topInset?: number;
   /** Arrow drawing mode: taps add points (reported via onDrawChanged). */
   drawing?: { color: string; points: LatLng[] } | null;
   onDrawChanged?: (points: LatLng[]) => void;
@@ -109,8 +116,17 @@ export function TacticalMap(props: Props) {
   }, [ready, generation, props.baseLayer, send]);
 
   useEffect(() => {
-    if (ready) send({ type: 'setSelf', payload: props.self });
-  }, [ready, generation, props.self, send]);
+    if (!ready) return;
+    const { self, selfRole, selfColor } = props;
+    send({
+      type: 'setSelf',
+      payload: self && { ...self, rolePath: selfRole ? ROLES[selfRole].path : null, color: selfColor ?? null },
+    });
+  }, [ready, generation, props.self, props.selfRole, props.selfColor, send]);
+
+  useEffect(() => {
+    if (ready) send({ type: 'setGrid', payload: { on: Boolean(props.grid) } });
+  }, [ready, generation, props.grid, send]);
 
   useEffect(() => {
     if (ready) send({ type: 'setFollow', payload: { follow: props.follow } });
@@ -130,6 +146,7 @@ export function TacticalMap(props: Props) {
         roleTitle: ROLES[m.role].title,
         commander: m.leader ?? (m.canCommand || m.id === props.ownerId),
         heading: m.heading,
+        status: m.status,
         stale: !m.updatedAt || now - m.updatedAt > STALE_MS,
       }));
     send({ type: 'setMembers', payload: list });
@@ -148,6 +165,7 @@ export function TacticalMap(props: Props) {
         color: m.color ?? k.color,
         points: m.points,
         order: isOrder(m.kind),
+        admin: isAdminKind(m.kind),
         personal: Boolean(m.personal),
         time: formatClock(m.createdAt),
       };
@@ -160,10 +178,10 @@ export function TacticalMap(props: Props) {
     if (ready) send({ type: 'setAnalysis', payload: analysis ?? null });
   }, [ready, generation, analysis, send]);
 
-  const { bottomInset } = props;
+  const { bottomInset, topInset } = props;
   useEffect(() => {
-    if (ready && bottomInset != null) send({ type: 'setInsets', payload: { bottom: bottomInset } });
-  }, [ready, generation, bottomInset, send]);
+    if (ready && bottomInset != null) send({ type: 'setInsets', payload: { bottom: bottomInset, top: topInset ?? 0 } });
+  }, [ready, generation, bottomInset, topInset, send]);
 
   const drawing = props.drawing;
   useEffect(() => {

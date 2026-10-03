@@ -4,27 +4,28 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Platform, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { useSelfPosition } from '../hooks/useSelfPosition';
-import { bearingDegrees, distanceMeters, formatClock, formatCoords, formatDistance, timeAgo } from '../lib/geo';
-import { isOrder, MARKER_KINDS, voteThreshold } from '../lib/markerKinds';
-import { ROLES } from '../lib/roles';
-import { KEYS, loadJson, saveJson } from '../lib/storage';
-import type { LatLng, MarkerKind, SelfPosition, TacMarker } from '../lib/types';
+import { useSelfPosition } from '../../hooks/useSelfPosition';
+import { bearingDegrees, distanceMeters, formatClock, formatCoords, formatDistance, timeAgo } from '../../lib/geo';
+import { isOrder, MARKER_KINDS, voteThreshold } from '../../lib/markerKinds';
+import { ROLES } from '../../lib/roles';
+import { STATUSES } from '../../lib/status';
+import { KEYS, loadJson, saveJson } from '../../lib/storage';
+import type { LatLng, MarkerKind, SelfPosition, TacMarker } from '../../lib/types';
 import {
   BASE_LAYERS,
   STALE_MS,
   TacticalMap,
   type BaseLayerId,
   type TacticalMapHandle,
-} from '../map/TacticalMap';
-import { useOverlays } from '../state/overlays';
-import { useSession, type MarkerScope } from '../state/session';
-import { useChat } from '../state/chat';
-import { useSide, type OrderTarget } from '../state/side';
-import { AddMarkerModal } from '../ui/AddMarkerModal';
-import { Avatar, Button, Glass, GlassButton, Icon, RoleIcon, Sheet, tap, type IconName } from '../ui/components';
-import { InfoSheet, type Stat } from '../ui/InfoSheet';
-import { C, eyebrow, F, R } from '../ui/theme';
+} from '../../map/TacticalMap';
+import { useOverlays } from '../../state/overlays';
+import { useSession, type MarkerScope } from '../../state/session';
+import { useSide, type OrderTarget } from '../../state/side';
+import { AddMarkerModal } from '../../ui/AddMarkerModal';
+import { CompassTape } from '../../ui/CompassTape';
+import { Avatar, Button, Glass, GlassButton, Icon, RoleIcon, Sheet, tap, type IconName } from '../../ui/components';
+import { InfoSheet, type Stat } from '../../ui/InfoSheet';
+import { C, eyebrow, F, R } from '../../ui/theme';
 
 type Selection = { type: 'marker' | 'member'; id: string } | null;
 
@@ -114,14 +115,15 @@ function gpsColor(acc: number | null | undefined) {
 }
 
 export default function MapScreen() {
-  const insets = useSafeAreaInsets();
+  const safe = useSafeAreaInsets();
   const { width, height } = useWindowDimensions();
   const landscape = width > height;
+  // The tab bar owns the bottom edge (portrait) or the left edge (landscape).
+  const insets = { top: safe.top, bottom: 0, left: landscape ? 0 : safe.left, right: safe.right };
   const session = useSession();
   const side = useSide();
-  const chat = useChat();
   const { overlays, focusRequest, requestFocus } = useOverlays();
-  const { position, status } = useSelfPosition();
+  const { position, status, heading } = useSelfPosition();
   const mapRef = useRef<TacticalMapHandle>(null);
 
   const [baseLayer, setBaseLayer] = useState<BaseLayerId>('yandex-sat');
@@ -195,6 +197,9 @@ export default function MapScreen() {
 
   const inTeam = Boolean(session.teamId && session.uid);
   const now = Date.now();
+  // Portrait: compass tape on top, the team pill under it.
+  const compassH = landscape ? 0 : 48;
+  const pillTop = insets.top + 10 + compassH;
   const visibleMembers = side.mapMembers
     .filter((m) => m.id !== session.uid && m.lat != null && m.lng != null)
     .map((m) => ({ lat: m.lat!, lng: m.lng! }));
@@ -202,7 +207,7 @@ export default function MapScreen() {
   // Votes apply to my own squad's shared markers.
   const canVote = (m: TacMarker) => inTeam && !m.personal && (!m.teamId || m.teamId === session.teamId);
 
-  const toolbarButtons = 3 + (inTeam ? 1 : 0) + (visibleMembers.length > 0 ? 1 : 0);
+  const toolbarButtons = 4 + (visibleMembers.length > 0 ? 1 : 0);
   const toolbarWidth = toolbarButtons * 50 + 8;
 
   // Side commander without a squad of their own: the pill shows the side instead.
@@ -239,6 +244,10 @@ export default function MapScreen() {
         ref={mapRef}
         baseLayer={baseLayer}
         self={position}
+        selfRole={session.role}
+        selfColor={session.teamColor}
+        grid={session.showGrid}
+        topInset={landscape ? insets.top + 52 : pillTop + 58}
         follow={follow}
         members={side.mapMembers}
         selfId={session.uid}
@@ -261,11 +270,17 @@ export default function MapScreen() {
 
       <Reticle />
 
+      {!landscape && (
+        <View style={[styles.compass, { top: insets.top + 10, left: 12 + insets.left, right: 12 + insets.right }]}>
+          <CompassTape heading={heading} />
+        </View>
+      )}
+
       {/* Top: team status + tools */}
       <View
         style={[
           styles.top,
-          { top: insets.top + 10, left: 12 + insets.left, right: 12 + insets.right },
+          { top: pillTop, left: 12 + insets.left, right: 12 + insets.right },
           landscape && { right: undefined, width: Math.min(420, width - toolbarWidth - 36 - insets.left - insets.right) },
         ]}
       >
@@ -273,15 +288,16 @@ export default function MapScreen() {
           style={({ pressed }) => [{ flex: 1 }, pressed && { opacity: 0.8 }]}
           onPress={() => {
             tap();
-            router.push(sideOnly ? '/side' : '/team');
+            if (sideOnly) router.push('/side');
+            else router.navigate('/team');
           }}
         >
-          <Glass radius={R.pill} style={[styles.teamPill, landscape && styles.teamPillCompact]}>
+          <Glass radius={R.lg} style={[styles.teamPill, landscape && styles.teamPillCompact]}>
             <View
               style={[
                 styles.teamIcon,
                 landscape && styles.teamIconCompact,
-                { backgroundColor: inTeam || sideOnly ? C.accentSoft : 'rgba(255,255,255,0.06)' },
+                { backgroundColor: inTeam || sideOnly ? C.accentSoft : C.elevated },
               ]}
             >
               <Icon
@@ -325,24 +341,18 @@ export default function MapScreen() {
 
       {/* Portrait: a column under the team pill. Landscape: a row beside it, so it can't
           run into the bottom-right buttons on short screens. */}
-      <View style={[styles.tools, { top: insets.top + (landscape ? 10 : 74), right: 12 + insets.right }]}>
+      <View style={[styles.tools, { top: landscape ? insets.top + 10 : pillTop + 64, right: 12 + insets.right }]}>
         <Glass radius={R.lg} style={[styles.toolbar, landscape && styles.toolbarRow]}>
           <ToolbarButton icon="layers-triple-outline" label="Подложка" onPress={() => setLayerPicker(true)} />
           <View style={[styles.toolbarSep, landscape && styles.toolbarSepRow]} />
           <ToolbarButton icon="map-plus" label="Карты полигона" onPress={() => router.push('/maps')} />
-          {inTeam && (
-            <>
-              <View style={[styles.toolbarSep, landscape && styles.toolbarSepRow]} />
-              <View>
-                <ToolbarButton icon="chat-outline" label="Чат отряда" onPress={() => router.push('/chat')} />
-                {chat.unread > 0 && (
-                  <View pointerEvents="none" style={styles.badge}>
-                    <Text style={styles.badgeText}>{chat.unread > 9 ? '9+' : chat.unread}</Text>
-                  </View>
-                )}
-              </View>
-            </>
-          )}
+          <View style={[styles.toolbarSep, landscape && styles.toolbarSepRow]} />
+          <ToolbarButton
+            icon={session.showGrid ? 'grid' : 'grid-off'}
+            label="Сетка координат"
+            active={session.showGrid}
+            onPress={() => session.setShowGrid(!session.showGrid)}
+          />
           <View style={[styles.toolbarSep, landscape && styles.toolbarSepRow]} />
           <ToolbarButton
             icon="draw"
@@ -370,7 +380,7 @@ export default function MapScreen() {
           radius={R.md}
           style={[
             styles.banner,
-            { top: insets.top + 74, left: 12 + insets.left },
+            { top: pillTop + 64, left: 12 + insets.left },
             landscape && { right: undefined, width: Math.min(420, width - 100) },
           ]}
         >
@@ -420,6 +430,20 @@ export default function MapScreen() {
           landscape && { flexDirection: 'row-reverse' },
         ]}
       >
+        {inTeam && (
+          <GlassButton
+            icon="skull"
+            label={session.status === 'dead' ? 'Я снова в игре' : 'Я убит'}
+            size={52}
+            active={session.status === 'dead'}
+            activeColor={C.danger}
+            onPress={() => {
+              const next = session.status === 'dead' ? 'alive' : 'dead';
+              session.setStatus(next).catch((e: Error) => Alert.alert('Ошибка', e.message));
+              if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
+            }}
+          />
+        )}
         <GlassButton
           icon={follow ? 'crosshairs-gps' : 'crosshairs'}
           label="Моё местоположение"
@@ -552,6 +576,7 @@ export default function MapScreen() {
           selectedMember &&
           [
             ROLES[selectedMember.role].title,
+            selectedMember.status !== 'alive' ? STATUSES[selectedMember.status].title.toUpperCase() : null,
             selectedMember.canCommand || selectedMember.id === session.team?.ownerId ? 'отдаёт приказы' : null,
             selectedMember.updatedAt ? `на связи ${timeAgo(selectedMember.updatedAt)}` : null,
           ]
@@ -684,7 +709,17 @@ function DrawBar({
   );
 }
 
-function ToolbarButton({ icon, label, onPress }: { icon: IconName; label: string; onPress: () => void }) {
+function ToolbarButton({
+  icon,
+  label,
+  onPress,
+  active,
+}: {
+  icon: IconName;
+  label: string;
+  onPress: () => void;
+  active?: boolean;
+}) {
   return (
     <Pressable
       accessibilityLabel={label}
@@ -693,9 +728,10 @@ function ToolbarButton({ icon, label, onPress }: { icon: IconName; label: string
         tap();
         onPress();
       }}
+      accessibilityState={active == null ? undefined : { selected: active }}
       style={({ pressed }) => [styles.toolbarButton, pressed && { opacity: 0.6 }]}
     >
-      <Icon name={icon} size={22} />
+      <Icon name={icon} size={22} color={active ? C.accent : C.text} />
     </Pressable>
   );
 }
@@ -723,17 +759,18 @@ const styles = StyleSheet.create({
 
   top: { position: 'absolute', left: 12, right: 12, flexDirection: 'row', gap: 10 },
   teamPill: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingLeft: 6, paddingRight: 12, height: 54 },
-  teamIcon: { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center' },
-  teamTitle: { color: C.text, fontSize: 15, fontFamily: F.bold },
+  teamIcon: { width: 42, height: 42, borderRadius: R.md, alignItems: 'center', justifyContent: 'center' },
+  teamTitle: { color: C.text, fontSize: 14, fontFamily: F.mono, letterSpacing: 1, textTransform: 'uppercase' },
   teamSubRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   liveDot: { width: 7, height: 7, borderRadius: 4 },
   teamSub: { color: C.dim, fontSize: 12, fontFamily: F.regular },
   teamPillCompact: { height: 38, gap: 8, paddingLeft: 4, paddingRight: 10 },
-  teamIconCompact: { width: 30, height: 30, borderRadius: 15 },
+  teamIconCompact: { width: 30, height: 30, borderRadius: R.sm },
   teamTextCompact: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   teamTitleCompact: { fontSize: 14, flexShrink: 1 },
 
   tools: { position: 'absolute', right: 12 },
+  compass: { position: 'absolute' },
   toolbar: { paddingVertical: 4, width: 50, alignItems: 'center' },
   toolbarButton: { width: 50, height: 46, alignItems: 'center', justifyContent: 'center' },
   toolbarSep: { width: 26, height: StyleSheet.hairlineWidth, backgroundColor: C.lineStrong },
@@ -757,7 +794,7 @@ const styles = StyleSheet.create({
   fab: {
     width: 64,
     height: 64,
-    borderRadius: 22,
+    borderRadius: R.lg,
     backgroundColor: C.accent,
     alignItems: 'center',
     justifyContent: 'center',
@@ -778,7 +815,7 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     gap: 12,
   },
-  hudValue: { color: C.text, fontSize: 13, fontFamily: F.mono, marginTop: 3 },
+  hudValue: { color: C.accent, fontSize: 13, fontFamily: F.mono, marginTop: 3 },
   hudCompact: { paddingVertical: 7, paddingHorizontal: 12, gap: 10 },
   hudValueCompact: { fontSize: 12, marginTop: 0 },
   gpsCompact: { flexDirection: 'row', gap: 5, paddingLeft: 0 },
@@ -803,19 +840,6 @@ const styles = StyleSheet.create({
   },
   recDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: C.danger },
   recText: { color: C.danger, fontSize: 11, fontFamily: F.bold, letterSpacing: 0.8 },
-  badge: {
-    position: 'absolute',
-    top: 4,
-    right: 4,
-    minWidth: 18,
-    height: 18,
-    borderRadius: 9,
-    paddingHorizontal: 4,
-    backgroundColor: C.danger,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  badgeText: { color: '#fff', fontSize: 11, fontFamily: F.bold },
   drawBar: { position: 'absolute', padding: 12, gap: 10, maxWidth: 520 },
   drawHeader: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   drawTitle: { color: C.text, fontSize: 15, fontFamily: F.bold },
@@ -882,7 +906,7 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 12,
-    backgroundColor: 'rgba(255,255,255,0.06)',
+    backgroundColor: C.elevated,
     alignItems: 'center',
     justifyContent: 'center',
   },
