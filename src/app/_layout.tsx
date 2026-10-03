@@ -7,6 +7,7 @@ import { View } from 'react-native';
 
 import { OverlaysProvider } from '../state/overlays';
 import { SessionProvider } from '../state/session';
+import { SideProvider } from '../state/side';
 import { C, F } from '../ui/theme';
 
 export default function RootLayout() {
@@ -22,23 +23,28 @@ export default function RootLayout() {
 
   return (
     <SessionProvider>
-      <OverlaysProvider>
-        <StatusBar style="light" />
-        <Stack
-          screenOptions={{
-            headerStyle: { backgroundColor: C.bg },
-            headerShadowVisible: false,
-            headerTintColor: C.text,
-            headerTitleStyle: { fontFamily: F.bold, fontSize: 18 },
-            headerBackButtonDisplayMode: 'minimal',
-            contentStyle: { backgroundColor: C.bg },
-          }}
-        >
-          <Stack.Screen name="index" options={{ headerShown: false, title: 'Карта' }} />
-          <Stack.Screen name="team" options={{ title: 'Команда' }} />
-          <Stack.Screen name="maps" options={{ title: 'Карты полигона' }} />
-        </Stack>
-      </OverlaysProvider>
+      <SideProvider>
+        <OverlaysProvider>
+          <StatusBar style="light" />
+          <Stack
+            screenOptions={{
+              headerStyle: { backgroundColor: C.bg },
+              headerShadowVisible: false,
+              headerTintColor: C.text,
+              headerTitleStyle: { fontFamily: F.bold, fontSize: 18 },
+              headerBackButtonDisplayMode: 'minimal',
+              contentStyle: { backgroundColor: C.bg },
+            }}
+          >
+            <Stack.Screen name="index" options={{ headerShown: false, title: 'Карта' }} />
+            <Stack.Screen name="team" options={{ title: 'Команда' }} />
+            <Stack.Screen name="maps" options={{ title: 'Карты полигона' }} />
+            <Stack.Screen name="side" options={{ title: 'Командование стороной' }} />
+            <Stack.Screen name="scan" options={{ title: 'Сканировать QR', presentation: 'modal' }} />
+            <Stack.Screen name="join" options={{ title: 'Приглашение' }} />
+          </Stack>
+        </OverlaysProvider>
+      </SideProvider>
     </SessionProvider>
   );
 }

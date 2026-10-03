@@ -15,6 +15,16 @@ export type Team = {
   ownerId: string;
   /** Chosen by the commander; every teammate is drawn in it. */
   color: string;
+  /** Side this squad is attached to, if any. */
+  sideId: string | null;
+};
+
+/** A side: several squads under one side commander. */
+export type Side = {
+  id: string;
+  name: string;
+  code: string;
+  ownerId: string;
 };
 
 export type Member = {
@@ -27,6 +37,12 @@ export type Member = {
   lng: number | null;
   heading: number | null;
   updatedAt: number | null;
+  /** Display color override (side view: the squad's color). */
+  color?: string;
+  /** Squad leader or holds command rights (side view). */
+  leader?: boolean;
+  /** Squad the member belongs to (side view). */
+  teamId?: string;
 };
 
 export type OrderKind = 'order-move' | 'order-attack' | 'order-defend';
@@ -52,6 +68,12 @@ export type TacMarker = {
   createdAt: number;
   /** Stored only on this device, never sent to the team. */
   personal?: boolean;
+  /** Side orders go to squad commanders only. */
+  audience?: 'commanders';
+  /** Copies of one side order across squads share this id. */
+  groupId?: string;
+  /** Squad the marker lives in. */
+  teamId?: string;
 };
 
 export type OverlayFormat = 'kml' | 'kmz' | 'gpx' | 'geojson';

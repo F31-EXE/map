@@ -142,6 +142,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   // Read inside the markers listener without resubscribing when it changes.
   const orderSoundRef = useRef(orderSound);
   orderSoundRef.current = orderSound;
+  const canCommandRef = useRef(false);
 
   // Live team subscriptions.
   useEffect(() => {
@@ -189,7 +190,13 @@ export function SessionProvider({ children }: { children: ReactNode }) {
           setTeamMarkers(list);
           const orders = list.filter((m) => isOrder(m.kind));
           if (seenOrders) {
-            const fresh = orders.filter((m) => !seenOrders!.has(m.id) && m.createdBy !== uid);
+            const fresh = orders.filter(
+              (m) =>
+                !seenOrders!.has(m.id) &&
+                m.createdBy !== uid &&
+                // Side orders reach squad commanders only.
+                (m.audience !== 'commanders' || canCommandRef.current)
+            );
             if (fresh.length) signalNewOrder(orderSoundRef.current);
           }
           seenOrders = new Set(orders.map((m) => m.id));
@@ -208,6 +215,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const me = members.find((m) => m.id === uid);
   const isOwner = Boolean(team && uid && team.ownerId === uid);
   const canCommand = inTeam && (isOwner || Boolean(me?.canCommand));
+  canCommandRef.current = canCommand;
 
   const requireUid = useCallback(() => {
     if (!uid) throw new Error(authError ?? 'Нет подключения к серверу');
@@ -379,8 +387,11 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   );
 
   const markers = useMemo(
-    () => (inTeam ? [...teamMarkers, ...personalMarkers] : personalMarkers),
-    [inTeam, teamMarkers, personalMarkers]
+    () =>
+      inTeam
+        ? [...teamMarkers.filter((m) => m.audience !== 'commanders' || canCommand), ...personalMarkers]
+        : personalMarkers,
+    [inTeam, teamMarkers, personalMarkers, canCommand]
   );
 
   const value = useMemo<Session>(

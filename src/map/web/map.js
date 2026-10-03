@@ -704,6 +704,15 @@
     setView: function (p) {
       map.setView([p.lat, p.lng], p.zoom || map.getZoom());
     },
+    // Zoom to show every given point (e.g. all squads), but never closer than street level.
+    fitPoints: function (pts) {
+      if (!pts || !pts.length) return;
+      var b = L.latLngBounds(pts.map(function (p) { return [p.lat, p.lng]; }));
+      if (selfMarker) b.extend(selfMarker.getLatLng());
+      follow = false;
+      post('followChanged', { follow: false });
+      map.fitBounds(b, { padding: [70, 70], maxZoom: 17 });
+    },
     setMembers: setMembers,
     setMarkers: setMarkers,
     addOverlay: addOverlay,

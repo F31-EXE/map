@@ -15,21 +15,20 @@ import {
 } from 'firebase/firestore';
 
 import { firestore } from '../lib/firebase';
+import { normalizeCode } from '../lib/invite';
 import { DEFAULT_TEAM_COLOR, roleOf, type RoleId } from '../lib/roles';
 import type { Member, SelfPosition, TacMarker, Team } from '../lib/types';
 
 // No 0/O/1/I/L to keep codes easy to dictate over the radio.
 const CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 
-function randomCode(length = 6): string {
+export function randomCode(length = 6): string {
   let s = '';
   for (let i = 0; i < length; i++) s += CODE_ALPHABET[Math.floor(Math.random() * CODE_ALPHABET.length)];
   return s;
 }
 
-export function normalizeCode(code: string): string {
-  return code.toUpperCase().replace(/[^A-Z0-9]/g, '');
-}
+export { normalizeCode };
 
 function millis(v: unknown): number | null {
   if (v instanceof Timestamp) return v.toMillis();
@@ -177,7 +176,14 @@ export function subscribeTeam(
       const d = s.data();
       onTeam(
         d
-          ? { id: s.id, name: d.name, code: d.code, ownerId: d.ownerId, color: d.color ?? DEFAULT_TEAM_COLOR }
+          ? {
+              id: s.id,
+              name: d.name,
+              code: d.code,
+              ownerId: d.ownerId,
+              color: d.color ?? DEFAULT_TEAM_COLOR,
+              sideId: typeof d.sideId === 'string' ? d.sideId : null,
+            }
           : null
       );
     },
@@ -233,6 +239,9 @@ export function subscribeTeamMarkers(
             createdBy: v.createdBy,
             createdByName: v.createdByName ?? '',
             createdAt: millis(v.createdAt) ?? Date.now(),
+            audience: v.audience === 'commanders' ? 'commanders' : undefined,
+            groupId: typeof v.groupId === 'string' ? v.groupId : undefined,
+            teamId,
           };
         })
       );
@@ -243,7 +252,7 @@ export function subscribeTeamMarkers(
 
 export async function addTeamMarker(
   teamId: string,
-  m: Omit<TacMarker, 'id' | 'createdAt' | 'personal'>
+  m: Pick<TacMarker, 'kind' | 'label' | 'lat' | 'lng' | 'createdBy' | 'createdByName'>
 ): Promise<void> {
   await addDoc(collection(firestore(), 'teams', teamId, 'markers'), {
     ...m,

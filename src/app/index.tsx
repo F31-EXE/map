@@ -19,8 +19,9 @@ import {
 } from '../map/TacticalMap';
 import { useOverlays } from '../state/overlays';
 import { useSession, type MarkerScope } from '../state/session';
+import { useSide, type OrderTarget } from '../state/side';
 import { AddMarkerModal } from '../ui/AddMarkerModal';
-import { Avatar, Button, Glass, GlassButton, Icon, RoleIcon, Sheet, tap } from '../ui/components';
+import { Avatar, Button, Glass, GlassButton, Icon, RoleIcon, Sheet, tap, type IconName } from '../ui/components';
 import { InfoSheet, type Stat } from '../ui/InfoSheet';
 import { C, eyebrow, F, R } from '../ui/theme';
 
@@ -38,7 +39,11 @@ function vectorStats(from: SelfPosition | null, to: LatLng): Stat[] {
 function markerSubtitle(m: TacMarker): string {
   const parts = [
     m.label ? MARKER_KINDS[m.kind].title : null,
-    m.personal ? 'личная метка' : isOrder(m.kind) ? `приказ: ${m.createdByName}` : m.createdByName,
+    m.personal
+      ? 'личная метка'
+      : isOrder(m.kind)
+        ? `${m.audience === 'commanders' ? 'приказ стороны командирам' : 'приказ'}: ${m.createdByName}`
+        : m.createdByName,
     timeAgo(m.createdAt),
   ];
   return parts.filter(Boolean).join(' · ');
@@ -73,6 +78,7 @@ export default function MapScreen() {
   const { width, height } = useWindowDimensions();
   const landscape = width > height;
   const session = useSession();
+  const side = useSide();
   const { overlays, focusRequest, requestFocus } = useOverlays();
   const { position, status } = useSelfPosition();
   const mapRef = useRef<TacticalMapHandle>(null);
@@ -123,10 +129,12 @@ export default function MapScreen() {
   const onMarkerPress = useCallback((id: string) => setSelection({ type: 'marker', id }), []);
   const onMemberPress = useCallback((id: string) => setSelection({ type: 'member', id }), []);
 
-  const saveMarker = async (kind: MarkerKind, label: string, scope: MarkerScope) => {
+  const saveMarker = async (kind: MarkerKind, label: string, scope: MarkerScope, target: OrderTarget) => {
     if (!addAt) return;
     try {
-      await session.addMarker({ kind, label, lat: addAt.lat, lng: addAt.lng }, scope);
+      const at = { label, lat: addAt.lat, lng: addAt.lng };
+      if (isOrder(kind)) await side.placeOrder({ kind, ...at }, target);
+      else await session.addMarker({ kind, ...at }, scope);
       setAddAt(null);
       if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
     } catch (e) {
@@ -140,14 +148,30 @@ export default function MapScreen() {
 
   const inTeam = Boolean(session.teamId && session.uid);
   const now = Date.now();
-  const online = session.members.filter(
+  const visibleMembers = side.mapMembers
+    .filter((m) => m.id !== session.uid && m.lat != null && m.lng != null)
+    .map((m) => ({ lat: m.lat!, lng: m.lng! }));
+
+  // Side commander without a squad of their own: the pill shows the side instead.
+  const sideOnly = side.isSideCommander && !inTeam;
+  const online = side.mapMembers.filter(
     (m) => m.id !== session.uid && m.updatedAt && now - m.updatedAt < STALE_MS
   ).length;
 
+  const orderTargets: { id: OrderTarget; label: string; color?: string }[] = [
+    ...(session.canCommand ? [{ id: 'own', label: 'Мой отряд', color: session.teamColor }] : []),
+    ...(side.isSideCommander
+      ? [
+          { id: 'all', label: 'Командирам всех отрядов' },
+          ...side.squads.map((sq) => ({ id: sq.id, label: sq.name, color: sq.displayColor })),
+        ]
+      : []),
+  ];
+
   const selectedMarker =
-    selection?.type === 'marker' ? session.markers.find((m) => m.id === selection.id) : undefined;
+    selection?.type === 'marker' ? side.mapMarkers.find((m) => m.id === selection.id) : undefined;
   const selectedMember =
-    selection?.type === 'member' ? session.members.find((m) => m.id === selection.id) : undefined;
+    selection?.type === 'member' ? side.mapMembers.find((m) => m.id === selection.id) : undefined;
 
   const banner =
     status === 'denied'
@@ -163,11 +187,11 @@ export default function MapScreen() {
         baseLayer={baseLayer}
         self={position}
         follow={follow}
-        members={session.members}
+        members={side.mapMembers}
         selfId={session.uid}
         teamColor={session.teamColor}
         ownerId={session.team?.ownerId ?? null}
-        markers={session.markers}
+        markers={side.mapMarkers}
         overlays={overlays}
         focusOverlay={focusRequest}
         onFocusHandled={onFocusHandled}
@@ -193,21 +217,40 @@ export default function MapScreen() {
           style={({ pressed }) => [{ flex: 1 }, pressed && { opacity: 0.8 }]}
           onPress={() => {
             tap();
-            router.push('/team');
+            router.push(sideOnly ? '/side' : '/team');
           }}
         >
           <Glass radius={R.pill} style={styles.teamPill}>
-            <View style={[styles.teamIcon, { backgroundColor: inTeam ? C.accentSoft : 'rgba(255,255,255,0.06)' }]}>
-              <Icon name={inTeam ? 'account-group' : 'account'} size={18} color={inTeam ? C.accent : C.dim} />
+            <View
+              style={[
+                styles.teamIcon,
+                { backgroundColor: inTeam || sideOnly ? C.accentSoft : 'rgba(255,255,255,0.06)' },
+              ]}
+            >
+              <Icon
+                name={sideOnly ? 'flag-variant' : inTeam ? 'account-group' : 'account'}
+                size={18}
+                color={inTeam || sideOnly ? C.accent : C.dim}
+              />
             </View>
             <View style={{ flex: 1 }}>
               <Text style={styles.teamTitle} numberOfLines={1}>
-                {inTeam ? (session.team?.name ?? '…') : session.callsign || 'Позывной не задан'}
+                {sideOnly
+                  ? (side.side?.name ?? '…')
+                  : inTeam
+                    ? (session.team?.name ?? '…')
+                    : session.callsign || 'Позывной не задан'}
               </Text>
               <View style={styles.teamSubRow}>
-                {inTeam && <View style={[styles.liveDot, { backgroundColor: online ? C.online : C.faint }]} />}
+                {(inTeam || sideOnly) && (
+                  <View style={[styles.liveDot, { backgroundColor: online ? C.online : C.faint }]} />
+                )}
                 <Text style={styles.teamSub} numberOfLines={1}>
-                  {inTeam ? `${online} в сети · ${session.members.length} в составе` : 'Нажмите, чтобы собрать команду'}
+                  {sideOnly
+                    ? `Сторона · ${side.squads.length} отр. · ${online} в сети`
+                    : inTeam
+                      ? `${online} в сети · ${session.members.length} в составе${side.isSideCommander ? ' · сторона' : ''}`
+                      : 'Нажмите, чтобы собрать команду'}
                 </Text>
               </View>
             </View>
@@ -221,6 +264,16 @@ export default function MapScreen() {
           <ToolbarButton icon="layers-triple-outline" label="Подложка" onPress={() => setLayerPicker(true)} />
           <View style={styles.toolbarSep} />
           <ToolbarButton icon="map-plus" label="Карты полигона" onPress={() => router.push('/maps')} />
+          {visibleMembers.length > 0 && (
+            <>
+              <View style={styles.toolbarSep} />
+              <ToolbarButton
+                icon="account-group-outline"
+                label="Показать всех"
+                onPress={() => mapRef.current?.fitPoints(visibleMembers)}
+              />
+            </>
+          )}
         </Glass>
       </View>
 
@@ -307,7 +360,8 @@ export default function MapScreen() {
       <AddMarkerModal
         at={addAt}
         inTeam={inTeam}
-        canCommand={session.canCommand}
+        canCommand={session.canCommand || side.isSideCommander}
+        orderTargets={orderTargets}
         onCancel={() => setAddAt(null)}
         onSave={saveMarker}
       />
@@ -321,13 +375,14 @@ export default function MapScreen() {
         subtitle={selectedMarker && markerSubtitle(selectedMarker)}
         stats={selectedMarker ? vectorStats(position, selectedMarker) : []}
       >
-        {selectedMarker && (!isOrder(selectedMarker.kind) || session.canCommand) && (
+        {selectedMarker &&
+          (!isOrder(selectedMarker.kind) || session.canCommand || side.isSideCommander) && (
           <Button
             title={isOrder(selectedMarker.kind) ? 'Отменить приказ' : 'Удалить метку'}
             kind="danger"
             icon="trash-can-outline"
             onPress={() => {
-              session
+              side
                 .deleteMarker(selectedMarker)
                 .then(() => setSelection(null))
                 .catch((e: Error) => Alert.alert('Ошибка', e.message));
@@ -345,12 +400,12 @@ export default function MapScreen() {
             <View>
               <Avatar
                 name={selectedMember.callsign}
-                color={session.teamColor}
+                color={selectedMember.color ?? session.teamColor}
                 uri={session.avatars[selectedMember.id]}
                 size={56}
                 dim={!selectedMember.updatedAt || now - selectedMember.updatedAt > STALE_MS}
               />
-              <View style={[styles.roleBadge, { backgroundColor: session.teamColor }]}>
+              <View style={[styles.roleBadge, { backgroundColor: selectedMember.color ?? session.teamColor }]}>
                 <RoleIcon role={selectedMember.role} size={16} color={C.accentInk} />
               </View>
             </View>
@@ -406,7 +461,7 @@ export default function MapScreen() {
   );
 }
 
-function ToolbarButton({ icon, label, onPress }: { icon: 'layers-triple-outline' | 'map-plus'; label: string; onPress: () => void }) {
+function ToolbarButton({ icon, label, onPress }: { icon: IconName; label: string; onPress: () => void }) {
   return (
     <Pressable
       accessibilityLabel={label}

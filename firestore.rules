@@ -6,6 +6,9 @@ rules_version = '2';
 //   teams/{teamId}/members/{uid}     -> { callsign, role, canCommand?, joinCode, lat, lng, heading, accuracy, updatedAt }
 //   teams/{teamId}/markers/{id}      -> { kind, label, lat, lng, createdBy, createdByName, createdAt }
 //   teams/{teamId}/avatars/{uid}     -> { data, updatedAt }   small JPEG data URI
+//   sides/{sideId}                   -> { name, code, ownerId, createdAt }   several squads under one side commander
+//   sideCodes/{code}                 -> { sideId }
+// A squad joins a side when its leader writes { sideId, sideCode } into the team doc.
 service cloud.firestore {
   match /databases/{database}/documents {
     function signedIn() {
@@ -28,6 +31,17 @@ service cloud.firestore {
       return isOwner(teamId)
         || (isMember(teamId) && get(memberPath(teamId, request.auth.uid)).data.get('canCommand', false) == true);
     }
+    function sidePath(sideId) {
+      return /databases/$(database)/documents/sides/$(sideId);
+    }
+    function isSideOwner(sideId) {
+      return signedIn() && sideId is string && get(sidePath(sideId)).data.ownerId == request.auth.uid;
+    }
+    // Commander of the side this squad is attached to.
+    function isSideCommanderOf(teamId) {
+      let t = get(teamPath(teamId)).data;
+      return isSideOwner(t.get('sideId', null));
+    }
     function isOrderKind(kind) {
       return kind in ['order-move', 'order-attack', 'order-defend'];
     }
@@ -49,25 +63,58 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
-    match /teams/{teamId} {
-      allow get: if isMember(teamId);
+    match /sideCodes/{code} {
+      allow get: if signedIn();
+      allow create: if signedIn()
+        && getAfter(sidePath(request.resource.data.sideId)).data.ownerId == request.auth.uid
+        && getAfter(sidePath(request.resource.data.sideId)).data.code == code;
+      allow update, delete: if false;
+    }
+
+    match /sides/{sideId} {
+      // Squad leaders read the side's name after attaching; ids are unguessable.
+      allow get: if signedIn();
       allow list: if false;
+      allow create: if signedIn()
+        && request.resource.data.ownerId == request.auth.uid
+        && request.resource.data.name is string
+        && request.resource.data.name.size() <= 40;
+      allow update: if signedIn()
+        && resource.data.ownerId == request.auth.uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name'])
+        && request.resource.data.name.size() <= 40;
+      allow delete: if false;
+    }
+
+    match /teams/{teamId} {
+      allow get: if isMember(teamId) || isSideOwner(resource.data.get('sideId', null));
+      // The side commander lists squads with where('sideId', '==', mySide).
+      allow list: if isSideOwner(resource.data.get('sideId', null));
       allow create: if signedIn()
         && request.resource.data.ownerId == request.auth.uid
         && request.resource.data.name is string
         && request.resource.data.name.size() <= 40
         && (!('color' in request.resource.data) || validColor(request.resource.data.color));
-      // The creator may rename the team or change its color; code and owner are fixed.
-      allow update: if signedIn()
-        && resource.data.ownerId == request.auth.uid
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'color'])
-        && request.resource.data.name is string
-        && request.resource.data.name.size() <= 40
-        && (!('color' in request.resource.data) || validColor(request.resource.data.color));
+      // The creator may rename the team, change its color and attach it to a side (with
+      // that side's code) or detach it; code and owner are fixed.
+      allow update: if signedIn() && (
+        (resource.data.ownerId == request.auth.uid
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'color', 'sideId', 'sideCode'])
+          && request.resource.data.name is string
+          && request.resource.data.name.size() <= 40
+          && (!('color' in request.resource.data) || validColor(request.resource.data.color))
+          && (request.resource.data.get('sideId', null) == null
+            || request.resource.data.get('sideCode', null) == get(sidePath(request.resource.data.sideId)).data.code))
+        // The side commander may drop a squad from the side, and nothing else.
+        || (isSideOwner(resource.data.get('sideId', null))
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['sideId', 'sideCode'])
+          && request.resource.data.sideId == null
+          && request.resource.data.sideCode == null)
+      );
       allow delete: if false;
 
       match /members/{uid} {
-        allow read: if isMember(teamId);
+        allow read: if isMember(teamId) || isSideCommanderOf(teamId);
         // Joining requires knowing the team's code; nobody grants themselves command rights.
         allow create: if signedIn()
           && uid == request.auth.uid
@@ -89,18 +136,25 @@ service cloud.firestore {
       }
 
       match /markers/{markerId} {
-        allow read: if isMember(teamId);
-        allow create: if isMember(teamId)
-          && request.resource.data.createdBy == request.auth.uid
+        allow read: if isMember(teamId) || isSideCommanderOf(teamId);
+        allow create: if request.resource.data.createdBy == request.auth.uid
           && request.resource.data.kind is string
           && request.resource.data.lat is number
           && request.resource.data.lng is number
           && request.resource.data.label is string
           && request.resource.data.label.size() <= 40
-          && (!isOrderKind(request.resource.data.kind) || canCommand(teamId));
+          && (
+            // Squad members; orders only from the squad's commanders.
+            (isMember(teamId) && (!isOrderKind(request.resource.data.kind) || canCommand(teamId)))
+            // The side commander sends orders to squad commanders.
+            || (isSideCommanderOf(teamId)
+              && isOrderKind(request.resource.data.kind)
+              && request.resource.data.get('audience', null) == 'commanders')
+          );
         allow update: if false;
         // Anyone clears plain markers; only commanders cancel orders.
-        allow delete: if isMember(teamId) && (!isOrderKind(resource.data.kind) || canCommand(teamId));
+        allow delete: if (isMember(teamId) && (!isOrderKind(resource.data.kind) || canCommand(teamId)))
+          || isSideCommanderOf(teamId);
       }
 
       match /avatars/{uid} {

@@ -29,6 +29,7 @@ export type TacticalMapHandle = {
   centerOnSelf: () => void;
   fitOverlay: (id: string) => void;
   setView: (p: LatLng, zoom?: number) => void;
+  fitPoints: (points: LatLng[]) => void;
 };
 
 type Props = {
@@ -77,6 +78,7 @@ export function TacticalMap(props: Props) {
       centerOnSelf: () => send({ type: 'centerOnSelf' }),
       fitOverlay: (id) => send({ type: 'fitOverlay', payload: { id } }),
       setView: (p, zoom) => send({ type: 'setView', payload: { ...p, zoom } }),
+      fitPoints: (points) => send({ type: 'fitPoints', payload: points }),
     }),
     [send]
   );
@@ -110,10 +112,10 @@ export function TacticalMap(props: Props) {
         lat: m.lat,
         lng: m.lng,
         callsign: m.callsign,
-        color: props.teamColor,
+        color: m.color ?? props.teamColor,
         rolePath: ROLES[m.role].path,
         roleTitle: ROLES[m.role].title,
-        commander: m.canCommand || m.id === props.ownerId,
+        commander: m.leader ?? (m.canCommand || m.id === props.ownerId),
         heading: m.heading,
         stale: !m.updatedAt || now - m.updatedAt > STALE_MS,
       }));

@@ -55,3 +55,5 @@ Docs: https://docs.expo.dev/eas/index.md
 - `scripts/make-order-sound.mjs` regenerates `assets/sounds/order.wav`.
 - Marker level of detail is driven by `lod-dot` / `lod-mid` classes on the map container (`updateLod` in map.js): dots below zoom 15, icons without labels at 15, full detail from 16. Scale inner elements (`.tac-pin`, `.member-pin`), never the Leaflet icon element itself — its `transform` is Leaflet's positioning.
 - App display name is GrimMap; `slug` and Android `package` stay `tacmap` on purpose so EAS builds keep the same project and signing key and install as updates.
+- Sides (`src/state/side.tsx`, `src/services/sides.ts`): a squad joins a side when its leader writes `{ sideId, sideCode }` into the team doc. Side orders are copies in each targeted squad's `markers` with `audience: 'commanders'` and a shared `groupId`; plain fighters filter them out client-side (not a security boundary). Side-view member/marker ids are `teamId/uid` to stay unique across squads.
+- Invite QR/links: `src/lib/invite.ts` (`grimmap://join?team=…|side=…`), scanner `src/app/scan.tsx`, deep-link route `src/app/join.tsx`.

@@ -2,7 +2,7 @@
   "expo": {
     "name": "GrimMap",
     "slug": "tacmap",
-    "version": "1.2.0",
+    "version": "1.3.0",
     "orientation": "default",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
@@ -27,7 +27,7 @@
         "ACCESS_COARSE_LOCATION",
         "ACCESS_FINE_LOCATION"
       ],
-      "versionCode": 3
+      "versionCode": 4
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -46,8 +46,15 @@
         "expo-image-picker",
         {
           "photosPermission": "Нужно, чтобы выбрать фото для аватара.",
-          "cameraPermission": false,
           "microphonePermission": false
+        }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Нужно, чтобы сканировать QR-коды отрядов и сторон.",
+          "microphonePermission": false,
+          "recordAudioAndroid": false
         }
       ]
     ],

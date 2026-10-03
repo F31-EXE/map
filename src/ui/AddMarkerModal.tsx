@@ -5,6 +5,7 @@ import { formatCoords } from '../lib/geo';
 import { isOrder, MARKER_KINDS, MARKER_KIND_ORDER, ORDER_KINDS } from '../lib/markerKinds';
 import type { LatLng, MarkerKind } from '../lib/types';
 import type { MarkerScope } from '../state/session';
+import type { OrderTarget } from '../state/side';
 import { Button, Eyebrow, Icon, Sheet, tap } from './components';
 import { C, F, R } from './theme';
 
@@ -12,6 +13,7 @@ export function AddMarkerModal({
   at,
   inTeam,
   canCommand,
+  orderTargets,
   onCancel,
   onSave,
 }: {
@@ -19,26 +21,34 @@ export function AddMarkerModal({
   inTeam: boolean;
   /** Shows the orders row (move / attack / defend). */
   canCommand: boolean;
+  /** Who an order can go to; more than one shows a picker (side commander). */
+  orderTargets: { id: OrderTarget; label: string; color?: string }[];
   onCancel: () => void;
-  onSave: (kind: MarkerKind, label: string, scope: MarkerScope) => Promise<void>;
+  onSave: (kind: MarkerKind, label: string, scope: MarkerScope, target: OrderTarget) => Promise<void>;
 }) {
   const [kind, setKind] = useState<MarkerKind>('enemy');
   const [label, setLabel] = useState('');
   const [scope, setScope] = useState<MarkerScope>('team');
+  const [target, setTarget] = useState<OrderTarget>(orderTargets[0]?.id ?? 'own');
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     if (at) setLabel('');
   }, [at]);
 
+  // Keep the target valid when squads join or leave the side.
+  useEffect(() => {
+    if (!orderTargets.some((t) => t.id === target)) setTarget(orderTargets[0]?.id ?? 'own');
+  }, [orderTargets, target]);
+
   const order = isOrder(kind);
-  // Orders always go to the team; without a team everything is personal.
-  const effectiveScope: MarkerScope = !inTeam ? 'personal' : order ? 'team' : scope;
+  // Orders always go out; plain markers without a team are personal.
+  const effectiveScope: MarkerScope = order ? 'team' : !inTeam ? 'personal' : scope;
 
   const save = async () => {
     setBusy(true);
     try {
-      await onSave(kind, label, effectiveScope);
+      await onSave(kind, label, effectiveScope, target);
     } finally {
       setBusy(false);
     }
@@ -60,7 +70,7 @@ export function AddMarkerModal({
 
       {canCommand && (
         <View style={{ gap: 8 }}>
-          <Eyebrow>Приказ бойцам · вибро и звук</Eyebrow>
+          <Eyebrow>Приказ · вибро и звук</Eyebrow>
           <View style={styles.orders}>
             {ORDER_KINDS.map((k) => {
               const def = MARKER_KINDS[k];
@@ -86,6 +96,28 @@ export function AddMarkerModal({
               );
             })}
           </View>
+          {order && orderTargets.length > 1 && (
+            <View style={styles.targets}>
+              {orderTargets.map((t) => {
+                const selected = t.id === target;
+                return (
+                  <Pressable
+                    key={t.id}
+                    onPress={() => {
+                      tap();
+                      setTarget(t.id);
+                    }}
+                    style={[styles.target, selected && styles.targetActive]}
+                  >
+                    {t.color && <View style={[styles.targetDot, { backgroundColor: t.color }]} />}
+                    <Text style={[styles.targetText, selected && { color: C.accentInk }]} numberOfLines={1}>
+                      {t.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          )}
         </View>
       )}
 
@@ -120,14 +152,13 @@ export function AddMarkerModal({
         </View>
       </View>
 
-      {inTeam && (
-        <View style={[styles.segment, order && { opacity: 0.45 }]}>
+      {inTeam && !order && (
+        <View style={styles.segment}>
           {(['team', 'personal'] as const).map((sc) => {
             const selected = effectiveScope === sc;
             return (
               <Pressable
                 key={sc}
-                disabled={order}
                 onPress={() => {
                   tap();
                   setScope(sc);
@@ -177,6 +208,21 @@ const styles = StyleSheet.create({
   title: { color: C.text, fontSize: 22, fontFamily: F.bold },
   coords: { color: C.dim, fontSize: 12, fontFamily: F.mono, marginTop: 2 },
   orders: { flexDirection: 'row', gap: 8 },
+  targets: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  target: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    height: 34,
+    borderRadius: R.pill,
+    backgroundColor: C.elevated,
+    borderWidth: 1,
+    borderColor: C.line,
+  },
+  targetActive: { backgroundColor: C.accent, borderColor: C.accent },
+  targetDot: { width: 10, height: 10, borderRadius: 5 },
+  targetText: { color: C.dim, fontSize: 13, fontFamily: F.semibold, maxWidth: 160 },
   order: {
     flex: 1,
     flexDirection: 'row',

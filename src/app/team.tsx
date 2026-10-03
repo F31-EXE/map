@@ -1,13 +1,17 @@
 import * as Clipboard from 'expo-clipboard';
+import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Alert, Pressable, ScrollView, Share, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 
 import { timeAgo } from '../lib/geo';
+import { inviteUrl } from '../lib/invite';
 import { ROLE_ORDER, ROLES, TEAM_COLORS } from '../lib/roles';
 import type { Member } from '../lib/types';
 import { STALE_MS } from '../map/TacticalMap';
 import { pickAvatar } from '../services/avatar';
 import { useSession } from '../state/session';
+import { useSide } from '../state/side';
+import { QrCode } from '../ui/QrCode';
 import { Avatar, Badge, Button, Card, Eyebrow, Icon, RoleIcon, tap, type IconName } from '../ui/components';
 import { C, F, R } from '../ui/theme';
 
@@ -34,6 +38,9 @@ export default function TeamScreen() {
   const [code, setCode] = useState('');
   const [mode, setMode] = useState<'join' | 'create'>('join');
   const [copied, setCopied] = useState(false);
+  const [showQr, setShowQr] = useState(false);
+  const [sideCode, setSideCode] = useState('');
+  const side = useSide();
 
   useEffect(() => setCallsign(s.callsign), [s.callsign]);
 
@@ -173,6 +180,7 @@ export default function TeamScreen() {
                 busy={busy === 'join'}
                 onPress={() => run('join', () => s.joinTeam(code))}
               />
+              <Button title="Сканировать QR отряда" icon="qrcode-scan" kind="secondary" onPress={() => router.push('/scan')} />
             </>
           ) : (
             <>
@@ -241,10 +249,24 @@ export default function TeamScreen() {
                 style={{ flex: 1 }}
                 onPress={() =>
                   s.team &&
-                  Share.share({ message: `Вступай в команду «${s.team.name}» в GrimMap. Код: ${s.team.code}` })
+                  Share.share({
+                    message: `Вступай в отряд «${s.team.name}» в GrimMap. Код: ${s.team.code}\n${inviteUrl({ kind: 'team', code: s.team.code })}`,
+                  })
                 }
               />
             </View>
+            <Button
+              title={showQr ? 'Скрыть QR' : 'Показать QR для вступления'}
+              icon="qrcode"
+              kind="ghost"
+              onPress={() => setShowQr(!showQr)}
+            />
+            {showQr && s.team && (
+              <View style={{ alignItems: 'center', gap: 8 }}>
+                <QrCode value={inviteUrl({ kind: 'team', code: s.team.code })} size={220} />
+                <Text style={styles.sub}>Боец сканирует в GrimMap: Команда → «Сканировать QR отряда»</Text>
+              </View>
+            )}
             {s.isOwner && (
               <View style={{ gap: 10 }}>
                 <Eyebrow>Цвет команды на карте</Eyebrow>
@@ -267,6 +289,66 @@ export default function TeamScreen() {
             )}
             {s.teamError && <Text style={styles.error}>{s.teamError}</Text>}
           </Card>
+
+          {/* Side membership */}
+          {(s.isOwner || side.mySquadSide) && (
+            <Card style={{ gap: 12 }}>
+              <View style={styles.inlineTitle}>
+                <Icon name="flag-variant" size={20} color={side.mySquadSide ? C.accent : C.dim} />
+                <Text style={styles.cardTitle}>
+                  {side.mySquadSide ? `Сторона «${side.mySquadSide.name}»` : 'Сторона'}
+                </Text>
+              </View>
+              {side.mySquadSide ? (
+                <>
+                  <Text style={styles.text}>
+                    Отряд в составе стороны: её командир видит отряд на карте и отдаёт приказы командирам.
+                  </Text>
+                  {s.isOwner && (
+                    <Button
+                      title="Отсоединить отряд"
+                      kind="secondary"
+                      icon="link-variant-off"
+                      busy={busy === 'detach'}
+                      onPress={() => run('detach', side.detachMySquad)}
+                    />
+                  )}
+                </>
+              ) : (
+                <>
+                  <Text style={styles.text}>Отряд не в составе стороны. Код или QR даёт командир стороны.</Text>
+                  <TextInput
+                    value={sideCode}
+                    onChangeText={(t) => setSideCode(t.toUpperCase().replace(/[^A-Z0-9]/g, ''))}
+                    placeholder="Код стороны"
+                    placeholderTextColor={C.faint}
+                    autoCapitalize="characters"
+                    autoCorrect={false}
+                    maxLength={6}
+                    style={styles.input}
+                    selectionColor={C.accent}
+                  />
+                  <View style={styles.row}>
+                    <Button
+                      title="Сканировать"
+                      icon="qrcode-scan"
+                      kind="secondary"
+                      style={{ flex: 1 }}
+                      onPress={() => router.push('/scan')}
+                    />
+                    <Button
+                      title="Присоединить"
+                      icon="link-variant"
+                      style={{ flex: 1 }}
+                      disabled={sideCode.length < 6}
+                      busy={busy === 'attach'}
+                      onPress={() => run('attach', () => side.attachMySquad(sideCode))}
+                    />
+                  </View>
+                </>
+              )}
+            </Card>
+          )}
 
           {/* Settings */}
           <Card style={{ gap: 0, paddingVertical: 6 }}>
@@ -330,6 +412,25 @@ export default function TeamScreen() {
             }
           />
         </>
+      )}
+
+      {s.firebaseEnabled && s.uid && (
+        <Pressable onPress={() => router.push('/side')}>
+          <Card style={styles.sideEntry}>
+            <View style={[styles.switchIcon, side.isSideCommander && { backgroundColor: C.accentSoft }]}>
+              <Icon name="flag-variant" size={22} color={side.isSideCommander ? C.accent : C.dim} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.cardTitle}>Командование стороной</Text>
+              <Text style={styles.sub}>
+                {side.isSideCommander
+                  ? `«${side.side?.name ?? ''}» · ${side.squads.length} отр.`
+                  : 'Объединить отряды и командовать ими'}
+              </Text>
+            </View>
+            <Icon name="chevron-right" size={20} color={C.faint} />
+          </Card>
+        </Pressable>
       )}
     </ScrollView>
   );
@@ -547,6 +648,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   divider: { height: StyleSheet.hairlineWidth, backgroundColor: C.line },
+  sideEntry: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   member: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10 },
   memberBorder: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: C.line },
   memberRole: {

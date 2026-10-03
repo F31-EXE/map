@@ -11,6 +11,9 @@ export const KEYS = {
   // Historical key name: these used to be "solo" markers.
   personalMarkers: 'tacmap.soloMarkers',
   overlays: 'tacmap.overlays',
+  sideId: 'tacmap.sideId',
+  sideColors: 'tacmap.sideColors',
+  sideShowAll: 'tacmap.sideShowAll',
 } as const;
 
 export async function loadJson<T>(key: string, fallback: T): Promise<T> {

@@ -11,8 +11,10 @@ import {
   doc,
   getDoc,
   getDocs,
+  query,
   setDoc,
   updateDoc,
+  where,
   writeBatch,
   type Firestore,
 } from 'firebase/firestore';
@@ -199,5 +201,71 @@ describe('command rights and orders', () => {
     await assertSucceeds(deleteDoc(doc(as('carol'), 'teams', TEAM, 'markers', 'm1')));
     await grant('alice', 'carol');
     await assertSucceeds(deleteDoc(doc(as('carol'), 'teams', TEAM, 'markers', 'o1')));
+  });
+});
+
+describe('sides', () => {
+  const SIDE = 'side1';
+  const SIDE_CODE = 'SD4X7Q';
+  const createSide = (uid: string, code = SIDE_CODE) => {
+    const db = as(uid);
+    const batch = writeBatch(db);
+    batch.set(doc(db, 'sides', SIDE), { name: 'Север', code, ownerId: uid });
+    batch.set(doc(db, 'sideCodes', SIDE_CODE), { sideId: SIDE });
+    return batch.commit();
+  };
+  const attach = (by: string, code = SIDE_CODE) =>
+    updateDoc(doc(as(by), 'teams', TEAM), { sideId: SIDE, sideCode: code });
+  const sideOrder = (by: string, id = 's1', audience: string | null = 'commanders') =>
+    setDoc(doc(as(by), 'teams', TEAM, 'markers', id), { ...marker(by, 'order-move'), audience, groupId: 'g1' });
+
+  beforeEach(async () => {
+    await createTeam(as('alice'), 'alice');
+    await join(as('bob'), 'bob');
+    await createSide('sam');
+  });
+
+  test('side code must match the side', async () => {
+    await env.clearFirestore();
+    await assertFails(createSide('sam', 'OTHER1'));
+  });
+  test('squad leader attaches with the right code only', async () => {
+    await assertFails(attach('alice', 'WRONG1'));
+    await assertFails(attach('bob'));
+    await assertSucceeds(attach('alice'));
+  });
+  test('before attaching, the side commander sees nothing', async () => {
+    await assertFails(getDoc(doc(as('sam'), 'teams', TEAM)));
+    await assertFails(getDocs(collection(as('sam'), 'teams', TEAM, 'members')));
+  });
+  test('after attaching, the side commander lists squads and reads them', async () => {
+    await attach('alice');
+    const q = query(collection(as('sam'), 'teams'), where('sideId', '==', SIDE));
+    await assertSucceeds(getDocs(q));
+    await assertSucceeds(getDocs(collection(as('sam'), 'teams', TEAM, 'members')));
+    await assertSucceeds(getDocs(collection(as('sam'), 'teams', TEAM, 'markers')));
+  });
+  test('nobody else can list a side', async () => {
+    await attach('alice');
+    await assertFails(getDocs(query(collection(as('mallory'), 'teams'), where('sideId', '==', SIDE))));
+  });
+  test('side commander sends orders to commanders only, nothing else', async () => {
+    await attach('alice');
+    await assertSucceeds(sideOrder('sam'));
+    await assertFails(sideOrder('sam', 's2', null));
+    await assertFails(setDoc(doc(as('sam'), 'teams', TEAM, 'markers', 'p1'), marker('sam')));
+    await assertFails(updateDoc(doc(as('sam'), 'teams', TEAM, 'members', 'bob'), { canCommand: true }));
+  });
+  test('side commander cancels own orders and can drop the squad, not hijack it', async () => {
+    await attach('alice');
+    await sideOrder('sam');
+    await assertSucceeds(deleteDoc(doc(as('sam'), 'teams', TEAM, 'markers', 's1')));
+    await assertFails(updateDoc(doc(as('sam'), 'teams', TEAM), { color: '#FF4D4D' }));
+    await assertSucceeds(updateDoc(doc(as('sam'), 'teams', TEAM), { sideId: null, sideCode: null }));
+    await assertFails(getDocs(collection(as('sam'), 'teams', TEAM, 'members')));
+  });
+  test('squad leader detaches', async () => {
+    await attach('alice');
+    await assertSucceeds(updateDoc(doc(as('alice'), 'teams', TEAM), { sideId: null, sideCode: null }));
   });
 });
