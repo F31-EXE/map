@@ -1,8 +1,8 @@
 {
   "expo": {
-    "name": "TacMap",
+    "name": "GrimMap",
     "slug": "tacmap",
-    "version": "1.1.0",
+    "version": "1.2.0",
     "orientation": "default",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
@@ -27,12 +27,12 @@
         "ACCESS_COARSE_LOCATION",
         "ACCESS_FINE_LOCATION"
       ],
-      "versionCode": 2
+      "versionCode": 3
     },
     "web": {
       "favicon": "./assets/favicon.png"
     },
-    "scheme": "tacmap",
+    "scheme": "grimmap",
     "plugins": [
       "expo-router",
       [

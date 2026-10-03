@@ -261,3 +261,48 @@ body,
   font-weight: 500;
   font-size: 10px;
 }
+
+/* ---------- level of detail (see updateLod in map.js) ---------- */
+.tac-pin,
+.member-pin {
+  transition: transform 0.2s ease-out, background-color 0.2s;
+}
+.chip-role {
+  color: #8c9a92;
+  font-weight: 500;
+}
+
+/* Mid zoom: icons a bit smaller, no labels. */
+.lod-mid .chip,
+.lod-dot .chip,
+.lod-mid .member-halo {
+  display: none;
+}
+.lod-mid .tac-pin,
+.lod-mid .member-pin {
+  transform: scale(0.8);
+}
+.lod-mid .tac-icon.order .tac-pin {
+  transform: rotate(45deg) scale(0.8);
+}
+
+/* Zoomed out: plain colored dots. */
+.lod-dot .tac-pin {
+  transform: scale(0.38);
+  background: var(--c);
+  box-shadow: 0 0 0 3px rgba(11, 15, 12, 0.85) !important;
+}
+.lod-dot .tac-icon.order .tac-pin {
+  transform: rotate(45deg) scale(0.42);
+}
+.lod-dot .member-pin {
+  transform: scale(0.45);
+}
+.lod-dot .tac-pin svg,
+.lod-dot .member-pin svg,
+.lod-dot .member-dir,
+.lod-dot .member-badge,
+.lod-dot .member-halo,
+.lod-dot .order-ring {
+  visibility: hidden;
+}

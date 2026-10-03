@@ -197,7 +197,9 @@
         (m.commander
           ? '<div class="member-badge"><svg viewBox="0 0 24 24"><path d="' + STAR_PATH + '" fill="#0B0F0C"/></svg></div>'
           : '') +
-        '<div class="chip">' + escapeHtml(m.callsign) + '</div>',
+        '<div class="chip">' + escapeHtml(m.callsign) +
+        (m.roleTitle ? '<span class="chip-role"> · ' + escapeHtml(m.roleTitle) + '</span>' : '') +
+        '</div>',
       iconSize: [32, 32],
       iconAnchor: [16, 16],
     });
@@ -217,7 +219,7 @@
   }
 
   function memberKey(m) {
-    return JSON.stringify([m.callsign, m.color, m.stale, m.rolePath, m.commander]);
+    return JSON.stringify([m.callsign, m.color, m.stale, m.rolePath, m.roleTitle, m.commander]);
   }
 
   function setMembers(list) {
@@ -260,7 +262,7 @@
     return L.divIcon({
       className: 'tac-icon' + (m.order ? ' order' : '') + (m.personal ? ' personal' : ''),
       html:
-        '<div class="tac-pin" style="border-color:' + c + ';box-shadow:0 0 0 4px ' + c + '33, 0 4px 14px rgba(0,0,0,.6)">' +
+        '<div class="tac-pin" style="--c:' + c + ';border-color:' + c + ';box-shadow:0 0 0 4px ' + c + '33, 0 4px 14px rgba(0,0,0,.6)">' +
         '<svg viewBox="0 0 24 24"><path d="' + escapeHtml(m.path) + '" fill="' + c + '"/></svg></div>' +
         (m.order ? '<div class="order-ring" style="border-color:' + c + '"></div>' : '') +
         label,
@@ -664,6 +666,20 @@
     if (Date.now() - lastTouch < 1500) return;
     post('longPress', { lat: e.latlng.lat, lng: e.latlng.lng });
   });
+
+  // Level of detail. Icons have a fixed pixel size, so zoomed out they would bury the
+  // map: far away everything collapses to colored dots, closer in the glyphs come
+  // back, and labels only show up close.
+  var LOD_ICONS_FROM = 15; // ~1 km across a phone screen
+  var LOD_LABELS_FROM = 16; // ~500 m
+  function updateLod() {
+    var z = map.getZoom();
+    var c = map.getContainer();
+    c.classList.toggle('lod-dot', z < LOD_ICONS_FROM);
+    c.classList.toggle('lod-mid', z >= LOD_ICONS_FROM && z < LOD_LABELS_FROM);
+  }
+  map.on('zoomend', updateLod);
+  updateLod();
 
   map.on('moveend', function () {
     var c = map.getCenter();

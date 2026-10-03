@@ -40,7 +40,7 @@ Docs: https://docs.expo.dev/eas/index.md
 - Expo Go only includes its bundled native modules. After adding a library with native code, the app needs a development build: `npx expo run:ios|android` locally, or `eas build --profile development`.
 - Prefer recommended Expo modules over third-party libraries, and check your available skills before adding dependencies. Docs: https://docs.expo.dev/versions/latest/index.md
 
-## TacMap project notes
+## GrimMap project notes
 
 - The map is Leaflet running inside `react-native-webview`. Its source is `src/map/web/map.js` + `map.css`; `npm run build:map` (also run on `postinstall`) inlines them with Leaflet into `src/map/mapHtml.generated.ts`. Rebuild after editing anything in `src/map/web/`.
 - RN ↔ WebView protocol: RN calls `window.__tacmap({type, payload})`; the page answers via `ReactNativeWebView.postMessage`. Handlers are listed at the bottom of `map.js`, the RN side is `src/map/TacticalMap.tsx`; the host is `MapFrame.tsx` (WebView) / `MapFrame.web.tsx` (iframe).
@@ -53,3 +53,5 @@ Docs: https://docs.expo.dev/eas/index.md
 - Roles, team colors: `src/lib/roles.ts` (rifle and machine-gun glyphs are custom SVG paths; others are `@mdi/js`). Orders are marker kinds `order-*` (`src/lib/markerKinds.ts`); rules restrict them to the team creator and members with `canCommand`.
 - Leaflet marker icons must stay `position: absolute` (Leaflet's own class). Never add `position: relative` to a divIcon className — icons then stack in document flow and drift on zoom.
 - `scripts/make-order-sound.mjs` regenerates `assets/sounds/order.wav`.
+- Marker level of detail is driven by `lod-dot` / `lod-mid` classes on the map container (`updateLod` in map.js): dots below zoom 15, icons without labels at 15, full detail from 16. Scale inner elements (`.tac-pin`, `.member-pin`), never the Leaflet icon element itself — its `transform` is Leaflet's positioning.
+- App display name is GrimMap; `slug` and Android `package` stay `tacmap` on purpose so EAS builds keep the same project and signing key and install as updates.

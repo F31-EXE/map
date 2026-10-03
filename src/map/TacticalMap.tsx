@@ -112,6 +112,7 @@ export function TacticalMap(props: Props) {
         callsign: m.callsign,
         color: props.teamColor,
         rolePath: ROLES[m.role].path,
+        roleTitle: ROLES[m.role].title,
         commander: m.canCommand || m.id === props.ownerId,
         heading: m.heading,
         stale: !m.updatedAt || now - m.updatedAt > STALE_MS,

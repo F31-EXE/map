@@ -241,7 +241,7 @@ export default function TeamScreen() {
                 style={{ flex: 1 }}
                 onPress={() =>
                   s.team &&
-                  Share.share({ message: `Вступай в команду «${s.team.name}» в TacMap. Код: ${s.team.code}` })
+                  Share.share({ message: `Вступай в команду «${s.team.name}» в GrimMap. Код: ${s.team.code}` })
                 }
               />
             </View>
