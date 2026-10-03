@@ -48,11 +48,16 @@ EXPO_PUBLIC_FIREBASE_EMULATOR_HOST=192.168.1.10   # IP компьютера в �
 
 Бесплатного тарифа Spark хватает с запасом: позиция отправляется не чаще раза в 4 секунды и только при перемещении больше 3 м (плюс раз в 30 секунд сигнал «я на связи»).
 
-## Сборка APK / IPA
+## Сборка APK
+
+Облачная сборка Expo (EAS), Android Studio не нужен. Настройки Firebase для сборки лежат в `eas.json` (это публичные значения, они всё равно попадают в приложение).
 
 ```bash
-npx eas-cli@latest build --profile preview --platform android
+npx eas-cli@latest login                                   # бесплатный аккаунт expo.dev
+npx eas-cli@latest build --platform android --profile preview
 ```
+
+Первый запуск спросит, создать ли проект на expo.dev и сгенерировать ли ключ подписи, на оба вопроса ответить «Y». Через 10–20 минут появится ссылка и QR-код на APK.
 
 ## Структура
 
