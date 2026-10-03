@@ -43,8 +43,10 @@ Docs: https://docs.expo.dev/eas/index.md
 ## TacMap project notes
 
 - The map is Leaflet running inside `react-native-webview`. Its source is `src/map/web/map.js` + `map.css`; `npm run build:map` (also run on `postinstall`) inlines them with Leaflet into `src/map/mapHtml.generated.ts`. Rebuild after editing anything in `src/map/web/`.
-- RN ↔ WebView protocol: RN calls `window.__tacmap({type, payload})`; the page answers via `ReactNativeWebView.postMessage`. Handlers are listed at the bottom of `map.js`, the RN side is `src/map/TacticalMap.tsx`.
+- RN ↔ WebView protocol: RN calls `window.__tacmap({type, payload})`; the page answers via `ReactNativeWebView.postMessage`. Handlers are listed at the bottom of `map.js`, the RN side is `src/map/TacticalMap.tsx`; the host is `MapFrame.tsx` (WebView) / `MapFrame.web.tsx` (iframe).
 - Yandex tiles are EPSG:3395, others EPSG:3857 — switching base layers switches the Leaflet CRS in place. Don't put Yandex tiles in a 3857 map (they'd be offset by hundreds of meters).
 - Team sync is Firebase (anonymous auth + Firestore). Data model and access rules: `firestore.rules`. Without `.env` the app runs in solo mode.
 - `npm test` runs node:test unit tests in `test/` (pure modules only — no RN imports there).
 - `npx expo install` can't reach api.expo.dev from some sandboxes; pin versions from `node_modules/expo/bundledNativeModules.json` instead.
+- UI tokens live in `src/ui/theme.ts` (colors `C`, fonts `F`: Exo 2 + JetBrains Mono, radii `R`); reuse `src/ui/components.tsx` (Glass, Sheet, Button, Avatar…) rather than ad-hoc styles. Icons: MaterialCommunityIcons in RN, the same glyphs as `@mdi/js` paths inside the map.
+- Security rules tests: `npm run test:rules` (Firestore emulator, needs Java).

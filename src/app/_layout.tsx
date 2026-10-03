@@ -1,11 +1,25 @@
+import { Exo2_500Medium, Exo2_600SemiBold, Exo2_700Bold } from '@expo-google-fonts/exo-2';
+import { JetBrainsMono_500Medium } from '@expo-google-fonts/jetbrains-mono';
+import { useFonts } from 'expo-font';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
+import { View } from 'react-native';
 
 import { OverlaysProvider } from '../state/overlays';
 import { SessionProvider } from '../state/session';
-import { C } from '../ui/theme';
+import { C, F } from '../ui/theme';
 
 export default function RootLayout() {
+  const [fontsLoaded, fontError] = useFonts({
+    Exo2_500Medium,
+    Exo2_600SemiBold,
+    Exo2_700Bold,
+    JetBrainsMono_500Medium,
+  });
+
+  // Fall back to system fonts rather than hang if loading fails.
+  if (!fontsLoaded && !fontError) return <View style={{ flex: 1, backgroundColor: C.bg }} />;
+
   return (
     <SessionProvider>
       <OverlaysProvider>
@@ -13,7 +27,10 @@ export default function RootLayout() {
         <Stack
           screenOptions={{
             headerStyle: { backgroundColor: C.bg },
+            headerShadowVisible: false,
             headerTintColor: C.text,
+            headerTitleStyle: { fontFamily: F.bold, fontSize: 18 },
+            headerBackButtonDisplayMode: 'minimal',
             contentStyle: { backgroundColor: C.bg },
           }}
         >

@@ -20,6 +20,7 @@ import * as teams from '../services/teams';
 const HEARTBEAT_MS = 30_000;
 const MIN_INTERVAL_MS = 4_000;
 const MIN_MOVE_M = 3;
+const NOT_A_MEMBER = 'Вы больше не состоите в этой команде';
 
 type Session = {
   ready: boolean;
@@ -113,23 +114,40 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       return;
     }
     setTeamError(null);
-    const onError = (e: Error) => setTeamError(e.message);
+    let active = true;
+    let checking = false;
+    const onError = (e: Error) => setTeamError(teams.isPermissionDenied(e) ? NOT_A_MEMBER : e.message);
     const unsubs = [
       teams.subscribeTeam(teamId, setTeam, onError),
       teams.subscribeMembers(
         teamId,
         (list) => {
           setMembers(list);
-          // Kicked or left from another device.
-          if (!list.some((m) => m.id === uid)) {
-            setTeamError('Вы больше не состоите в этой команде');
+          if (list.some((m) => m.id === uid)) {
+            setTeamError((e) => (e === NOT_A_MEMBER ? null : e));
+            return;
           }
+          // Possibly kicked, or left from another device — confirm with the server.
+          if (checking) return;
+          checking = true;
+          teams
+            .isMember(teamId, uid)
+            .then((member) => {
+              if (active && !member) setTeamError(NOT_A_MEMBER);
+            })
+            .catch(() => {})
+            .finally(() => {
+              checking = false;
+            });
         },
         onError
       ),
       teams.subscribeTeamMarkers(teamId, setTeamMarkers, onError),
     ];
-    return () => unsubs.forEach((u) => u());
+    return () => {
+      active = false;
+      unsubs.forEach((u) => u());
+    };
   }, [teamId, uid]);
 
   const requireUid = useCallback(() => {

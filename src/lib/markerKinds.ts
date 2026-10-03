@@ -1,13 +1,32 @@
+import {
+  mdiAlert,
+  mdiFlagVariant,
+  mdiMapMarkerRadius,
+  mdiMedicalBag,
+  mdiNoteText,
+  mdiShield,
+  mdiTarget,
+} from '@mdi/js';
+
 import type { MarkerKind } from './types';
 
-export const MARKER_KINDS: Record<MarkerKind, { title: string; symbol: string; color: string }> = {
-  enemy: { title: 'Противник', symbol: '✖', color: '#e53935' },
-  friendly: { title: 'Свои', symbol: '◆', color: '#1e88e5' },
-  objective: { title: 'Цель / точка', symbol: '★', color: '#fdd835' },
-  danger: { title: 'Опасность / мина', symbol: '⚠', color: '#fb8c00' },
-  rally: { title: 'Точка сбора', symbol: '⚑', color: '#43a047' },
-  medic: { title: 'Медик / респаун', symbol: '✚', color: '#ffffff' },
-  note: { title: 'Заметка', symbol: '✎', color: '#8e24aa' },
+type KindDef = {
+  title: string;
+  /** MaterialCommunityIcons glyph name, for the RN UI. */
+  icon: 'target' | 'shield' | 'flag-variant' | 'alert' | 'map-marker-radius' | 'medical-bag' | 'note-text';
+  /** Same icon as an SVG path, for markers drawn inside the map WebView. */
+  path: string;
+  color: string;
+};
+
+export const MARKER_KINDS: Record<MarkerKind, KindDef> = {
+  enemy: { title: 'Противник', icon: 'target', path: mdiTarget, color: '#FF4D4D' },
+  friendly: { title: 'Свои', icon: 'shield', path: mdiShield, color: '#3D9BFF' },
+  objective: { title: 'Цель', icon: 'flag-variant', path: mdiFlagVariant, color: '#FFC83D' },
+  danger: { title: 'Опасность', icon: 'alert', path: mdiAlert, color: '#FF8A3D' },
+  rally: { title: 'Сбор', icon: 'map-marker-radius', path: mdiMapMarkerRadius, color: '#4ADE80' },
+  medic: { title: 'Медик', icon: 'medical-bag', path: mdiMedicalBag, color: '#F472B6' },
+  note: { title: 'Заметка', icon: 'note-text', path: mdiNoteText, color: '#B79CFF' },
 };
 
 export const MARKER_KIND_ORDER: MarkerKind[] = [
@@ -21,12 +40,12 @@ export const MARKER_KIND_ORDER: MarkerKind[] = [
 ];
 
 export const MEMBER_COLORS = [
-  '#43a047',
-  '#1e88e5',
-  '#fdd835',
-  '#e53935',
-  '#8e24aa',
-  '#fb8c00',
-  '#00acc1',
-  '#d81b60',
+  '#4ADE80',
+  '#3D9BFF',
+  '#FFC83D',
+  '#FF8A3D',
+  '#B79CFF',
+  '#22D3EE',
+  '#F472B6',
+  '#A3E635',
 ];

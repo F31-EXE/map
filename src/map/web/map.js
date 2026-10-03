@@ -89,15 +89,15 @@
   var follow = false;
 
   function selfIcon(heading) {
-    var arrow =
+    var cone =
       heading == null
         ? ''
-        : '<div class="self-arrow" style="transform: rotate(' + heading + 'deg)"></div>';
+        : '<div class="self-cone" style="transform: rotate(' + heading + 'deg)"></div>';
     return L.divIcon({
       className: 'self-icon',
-      html: arrow + '<div class="self-dot"></div>',
-      iconSize: [40, 40],
-      iconAnchor: [20, 20],
+      html: cone + '<div class="self-pulse"></div><div class="self-dot"></div>',
+      iconSize: [80, 80],
+      iconAnchor: [40, 40],
     });
   }
 
@@ -112,9 +112,10 @@
       selfAccuracy = L.circle(ll, {
         radius: p.accuracy || 0,
         interactive: false,
-        color: '#4fc3f7',
+        color: '#38BDF8',
         weight: 1,
-        fillOpacity: 0.12,
+        opacity: 0.5,
+        fillOpacity: 0.08,
       }).addTo(selfLayer);
       selfMarker = L.marker(ll, { icon: selfIcon(p.heading), interactive: false, zIndexOffset: 1000 }).addTo(
         selfLayer
@@ -168,14 +169,23 @@
   var membersLayer = L.layerGroup().addTo(map);
   var memberMarkers = {};
 
+  var NAV_PATH = 'M12,2L4.5,20.29L5.21,21L12,18L18.79,21L19.5,20.29L12,2Z';
+
   function memberIcon(m) {
+    var c = escapeHtml(m.color);
+    var body =
+      m.heading == null
+        ? '<div class="member-dot" style="background:' + c + '"></div>'
+        : '<svg class="member-arrow" viewBox="0 0 24 24" style="transform: rotate(' + m.heading + 'deg)">' +
+          '<path d="' + NAV_PATH + '" fill="' + c + '" stroke="#0B0F0C" stroke-width="1.2" stroke-linejoin="round"/></svg>';
     return L.divIcon({
       className: 'member-icon' + (m.stale ? ' stale' : ''),
       html:
-        '<div class="member-dot" style="background:' + escapeHtml(m.color) + '"></div>' +
-        '<div class="member-label">' + escapeHtml(m.callsign) + '</div>',
-      iconSize: [18, 18],
-      iconAnchor: [9, 9],
+        (m.stale ? '' : '<div class="member-halo" style="background:' + c + '"></div>') +
+        body +
+        '<div class="chip"><span class="chip-dot" style="background:' + c + '"></span>' + escapeHtml(m.callsign) + '</div>',
+      iconSize: [28, 28],
+      iconAnchor: [14, 14],
     });
   }
 
@@ -190,12 +200,12 @@
           post('memberTap', { id: mk._tacId });
         });
         mk._tacId = m.id;
-        mk._tacKey = JSON.stringify([m.callsign, m.color, m.stale]);
+        mk._tacKey = JSON.stringify([m.callsign, m.color, m.stale, m.heading]);
         return mk;
       },
       function (mk, m) {
         mk.setLatLng([m.lat, m.lng]);
-        var key = JSON.stringify([m.callsign, m.color, m.stale]);
+        var key = JSON.stringify([m.callsign, m.color, m.stale, m.heading]);
         if (key !== mk._tacKey) {
           mk._tacKey = key;
           mk.setIcon(memberIcon(m));
@@ -208,13 +218,16 @@
   var tacMarkers = {};
 
   function tacIcon(m) {
-    var label = m.label ? '<div class="tac-label">' + escapeHtml(m.label) + '</div>' : '';
+    var c = escapeHtml(m.color);
+    var label = m.label ? '<div class="chip tac-chip">' + escapeHtml(m.label) + '</div>' : '';
     return L.divIcon({
       className: 'tac-icon',
       html:
-        '<div class="tac-symbol" style="background:' + escapeHtml(m.color) + '">' + escapeHtml(m.symbol) + '</div>' + label,
-      iconSize: [30, 30],
-      iconAnchor: [15, 15],
+        '<div class="tac-pin" style="border-color:' + c + ';box-shadow:0 0 0 4px ' + c + '33, 0 4px 14px rgba(0,0,0,.6)">' +
+        '<svg viewBox="0 0 24 24"><path d="' + escapeHtml(m.path) + '" fill="' + c + '"/></svg></div>' +
+        label,
+      iconSize: [36, 36],
+      iconAnchor: [18, 18],
     });
   }
 
@@ -226,7 +239,7 @@
       function (m) {
         var mk = L.marker([m.lat, m.lng], { icon: tacIcon(m) });
         mk._tacId = m.id;
-        mk._tacKey = JSON.stringify([m.symbol, m.color, m.label]);
+        mk._tacKey = JSON.stringify([m.path, m.color, m.label]);
         mk.on('click', function () {
           post('markerTap', { id: mk._tacId });
         });
@@ -234,7 +247,7 @@
       },
       function (mk, m) {
         mk.setLatLng([m.lat, m.lng]);
-        var key = JSON.stringify([m.symbol, m.color, m.label]);
+        var key = JSON.stringify([m.path, m.color, m.label]);
         if (key !== mk._tacKey) {
           mk._tacKey = key;
           mk.setIcon(tacIcon(m));
@@ -373,7 +386,7 @@
           outline: poly ? childText(poly, 'outline') !== '0' : st.outline !== false,
         };
       }
-      var line2 = st.line || { color: '#ffeb3b', opacity: 1 };
+      var line2 = st.line || { color: '#FFC83D', opacity: 1 };
       var poly2 = st.poly || { color: line2.color, opacity: 0.2 };
       return {
         color: line2.color,
@@ -395,7 +408,7 @@
           icon: L.divIcon({
             className: 'kml-point',
             html: '<div class="kml-dot" style="background:' + escapeHtml(style.color) + '"></div>' +
-              (name ? '<div class="kml-label">' + escapeHtml(name) + '</div>' : ''),
+              (name ? '<div class="chip kml-chip">' + escapeHtml(name) + '</div>' : ''),
             iconSize: [12, 12],
             iconAnchor: [6, 6],
           }),
@@ -483,14 +496,14 @@
     }
     Array.prototype.forEach.call(doc.getElementsByTagName('trkseg'), function (seg) {
       L.polyline(Array.prototype.map.call(seg.getElementsByTagName('trkpt'), pt), {
-        color: '#ff7043',
+        color: '#FF8A3D',
         weight: 3,
         interactive: false,
       }).addTo(group);
     });
     Array.prototype.forEach.call(doc.getElementsByTagName('rte'), function (rte) {
       L.polyline(Array.prototype.map.call(rte.getElementsByTagName('rtept'), pt), {
-        color: '#ab47bc',
+        color: '#B79CFF',
         weight: 3,
         dashArray: '6 4',
         interactive: false,
@@ -502,8 +515,8 @@
         interactive: false,
         icon: L.divIcon({
           className: 'kml-point',
-          html: '<div class="kml-dot" style="background:#ffeb3b"></div>' +
-            (name ? '<div class="kml-label">' + escapeHtml(name) + '</div>' : ''),
+          html: '<div class="kml-dot" style="background:#FFC83D"></div>' +
+            (name ? '<div class="chip kml-chip">' + escapeHtml(name) + '</div>' : ''),
           iconSize: [12, 12],
           iconAnchor: [6, 6],
         }),
@@ -520,7 +533,7 @@
       else if (o.format === 'gpx') layer = parseGpx(o.data);
       else if (o.format === 'geojson')
         layer = L.geoJSON(JSON.parse(o.data), {
-          style: { color: '#ffeb3b', weight: 2, fillOpacity: 0.15 },
+          style: { color: '#FFC83D', weight: 2, fillOpacity: 0.12 },
           interactive: false,
         });
       else throw new Error('Unknown format ' + o.format);

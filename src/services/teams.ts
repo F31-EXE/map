@@ -4,6 +4,7 @@ import {
   deleteDoc,
   doc,
   getDoc,
+  getDocFromServer,
   onSnapshot,
   serverTimestamp,
   setDoc,
@@ -77,6 +78,24 @@ export async function joinTeam(uid: string, callsign: string, rawCode: string): 
     joinedAt: serverTimestamp(),
   });
   return teamId;
+}
+
+/**
+ * Server-side membership check. Query snapshots alone can't answer this: while our own
+ * position update is in flight, Firestore may briefly leave our doc out of the results.
+ */
+export async function isMember(teamId: string, uid: string): Promise<boolean> {
+  try {
+    return (await getDocFromServer(doc(firestore(), 'teams', teamId, 'members', uid))).exists();
+  } catch (e) {
+    // Removed members lose read access to the team.
+    if (isPermissionDenied(e)) return false;
+    throw e;
+  }
+}
+
+export function isPermissionDenied(e: unknown): boolean {
+  return (e as { code?: string })?.code === 'permission-denied';
 }
 
 export async function leaveTeam(teamId: string, uid: string): Promise<void> {

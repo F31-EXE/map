@@ -1,21 +1,24 @@
 import { useCallback, useEffect, useImperativeHandle, useRef, useState, type Ref } from 'react';
-import { StyleSheet } from 'react-native';
-import { WebView, type WebViewMessageEvent } from 'react-native-webview';
 
 import { MARKER_KINDS } from '../lib/markerKinds';
 import type { LatLng, Member, OverlayMeta, SelfPosition, TacMarker } from '../lib/types';
 import { loadOverlayPayload } from '../services/overlays';
-import { MAP_HTML } from './mapHtml.generated';
+import { MapFrame, type MapFrameHandle } from './MapFrame';
 
 export type BaseLayerId = 'yandex-sat' | 'yandex-hybrid' | 'yandex-map' | 'esri-sat' | 'osm' | 'topo';
 
-export const BASE_LAYERS: { id: BaseLayerId; title: string }[] = [
-  { id: 'yandex-sat', title: 'Яндекс спутник' },
-  { id: 'yandex-hybrid', title: 'Яндекс гибрид' },
-  { id: 'yandex-map', title: 'Яндекс схема' },
-  { id: 'esri-sat', title: 'Esri спутник' },
-  { id: 'topo', title: 'Топо (OpenTopoMap)' },
-  { id: 'osm', title: 'OpenStreetMap' },
+export const BASE_LAYERS: {
+  id: BaseLayerId;
+  title: string;
+  provider: string;
+  icon: 'satellite-variant' | 'layers-outline' | 'map-outline' | 'earth' | 'terrain' | 'map-legend';
+}[] = [
+  { id: 'yandex-sat', title: 'Спутник', provider: 'Яндекс', icon: 'satellite-variant' },
+  { id: 'yandex-hybrid', title: 'Гибрид', provider: 'Яндекс', icon: 'layers-outline' },
+  { id: 'yandex-map', title: 'Схема', provider: 'Яндекс', icon: 'map-outline' },
+  { id: 'esri-sat', title: 'Спутник', provider: 'Esri', icon: 'earth' },
+  { id: 'topo', title: 'Топо', provider: 'OpenTopoMap', icon: 'terrain' },
+  { id: 'osm', title: 'Схема', provider: 'OpenStreetMap', icon: 'map-legend' },
 ];
 
 /** Positions older than this are drawn faded. */
@@ -51,7 +54,7 @@ type Props = {
 type Outgoing = { type: string; payload?: unknown };
 
 export function TacticalMap(props: Props) {
-  const webRef = useRef<WebView>(null);
+  const frameRef = useRef<MapFrameHandle>(null);
   // Bumped every time the page (re)loads, so all effects re-send their state.
   const [generation, setGeneration] = useState(0);
   const sentOverlays = useRef(new Map<string, boolean>());
@@ -60,7 +63,7 @@ export function TacticalMap(props: Props) {
   const [now, setNow] = useState(Date.now());
 
   const send = useCallback((msg: Outgoing) => {
-    webRef.current?.injectJavaScript(`window.__tacmap && window.__tacmap(${JSON.stringify(msg)}); true;`);
+    frameRef.current?.post(msg);
   }, []);
 
   useImperativeHandle(
@@ -103,6 +106,7 @@ export function TacticalMap(props: Props) {
         lng: m.lng,
         callsign: m.callsign,
         color: m.color,
+        heading: m.heading,
         stale: !m.updatedAt || now - m.updatedAt > STALE_MS,
       }));
     send({ type: 'setMembers', payload: list });
@@ -112,7 +116,7 @@ export function TacticalMap(props: Props) {
     if (!ready) return;
     const list = props.markers.map((m) => {
       const k = MARKER_KINDS[m.kind] ?? MARKER_KINDS.note;
-      return { id: m.id, lat: m.lat, lng: m.lng, label: m.label, symbol: k.symbol, color: k.color };
+      return { id: m.id, lat: m.lat, lng: m.lng, label: m.label, path: k.path, color: k.color };
     });
     send({ type: 'setMarkers', payload: list });
   }, [ready, generation, props.markers, send]);
@@ -154,10 +158,10 @@ export function TacticalMap(props: Props) {
   }, [ready, generation, focusOverlay, onFocusHandled, send]);
 
   const onMessage = useCallback(
-    (e: WebViewMessageEvent) => {
+    (data: string) => {
       let msg: { type: string; payload: any };
       try {
-        msg = JSON.parse(e.nativeEvent.data);
+        msg = JSON.parse(data);
       } catch {
         return;
       }
@@ -206,29 +210,5 @@ export function TacticalMap(props: Props) {
     [props, send]
   );
 
-  // If the OS kills the WebView renderer, reload it; 'ready' then resends everything.
-  const reload = useCallback(() => webRef.current?.reload(), []);
-
-  return (
-    <WebView
-      ref={webRef}
-      style={styles.web}
-      originWhitelist={['*']}
-      source={{ html: MAP_HTML }}
-      onMessage={onMessage}
-      javaScriptEnabled
-      domStorageEnabled
-      setSupportMultipleWindows={false}
-      bounces={false}
-      overScrollMode="never"
-      scrollEnabled={false}
-      textInteractionEnabled={false}
-      onContentProcessDidTerminate={reload}
-      onRenderProcessGone={reload}
-    />
-  );
+  return <MapFrame ref={frameRef} onMessage={onMessage} />;
 }
-
-const styles = StyleSheet.create({
-  web: { flex: 1, backgroundColor: '#1b1f1d' },
-});

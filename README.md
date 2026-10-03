@@ -21,6 +21,23 @@ npx expo start
 
 Без `.env` приложение работает в одиночном режиме: карта, импорт карт и личные метки.
 
+Работает и веб-версия (`npx expo start --web`): удобно открыть карту на штабном ноутбуке. Импорт карт полигона в браузере пока не поддерживается.
+
+### Локальный сервер без облака
+
+```bash
+npx firebase-tools emulators:start --only auth,firestore --project demo-tacmap
+```
+
+и в `.env`:
+
+```
+EXPO_PUBLIC_FIREBASE_API_KEY=demo-key
+EXPO_PUBLIC_FIREBASE_PROJECT_ID=demo-tacmap
+EXPO_PUBLIC_FIREBASE_APP_ID=1:1:web:1
+EXPO_PUBLIC_FIREBASE_EMULATOR_HOST=192.168.1.10   # IP компьютера в локальной сети
+```
+
 ## Настройка сервера (Firebase) для команд
 
 1. Создайте проект на <https://console.firebase.google.com>.
@@ -43,6 +60,8 @@ npx eas-cli@latest build --profile preview --platform android
 src/app/            экраны (expo-router): index — карта, team — команда, maps — карты полигона
 src/map/web/        код карты внутри WebView (Leaflet), инлайнится в mapHtml.generated.ts
 src/map/TacticalMap.tsx   React-компонент карты и протокол обмена с WebView
+src/map/MapFrame*.tsx     хост карты: WebView на телефоне, iframe в браузере
+src/ui/             дизайн-система: тема, стеклянные панели, шторки, кнопки
 src/state/          сессия (позывной, команда, метки) и загруженные карты
 src/services/       Firestore (команды, позиции, метки), импорт файлов
 src/lib/            геометрия, типы, распаковка KMZ
@@ -52,8 +71,9 @@ firestore.rules     модель данных и права доступа
 ## Проверки
 
 ```bash
-npx tsc --noEmit   # типы
-npm test           # юнит-тесты (распаковка KMZ)
+npx tsc --noEmit    # типы
+npm test            # юнит-тесты (распаковка KMZ)
+npm run test:rules  # правила доступа Firestore на эмуляторе (нужна Java)
 ```
 
 ## Ограничения и что дальше

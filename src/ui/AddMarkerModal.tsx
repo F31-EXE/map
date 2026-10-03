@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react';
-import { KeyboardAvoidingView, Modal, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { formatCoords } from '../lib/geo';
 import { MARKER_KINDS, MARKER_KIND_ORDER } from '../lib/markerKinds';
 import type { LatLng, MarkerKind } from '../lib/types';
-import { Button } from './components';
-import { C } from './theme';
+import { Button, Icon, Sheet, tap } from './components';
+import { C, F, R } from './theme';
 
 export function AddMarkerModal({
   at,
@@ -36,103 +36,117 @@ export function AddMarkerModal({
     }
   };
 
+  const active = MARKER_KINDS[kind];
+
   return (
-    <Modal visible={!!at} transparent animationType="slide" onRequestClose={onCancel}>
-      <Pressable style={styles.backdrop} onPress={onCancel} />
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <View style={styles.sheet}>
+    <Sheet visible={!!at} onClose={onCancel}>
+      <View style={styles.header}>
+        <View>
           <Text style={styles.title}>Новая метка</Text>
-          {at && (
-            <Text style={styles.sub}>
-              {formatCoords(at)} · {shared ? 'видна команде' : 'только на этом устройстве'}
-            </Text>
-          )}
-          <View style={styles.grid}>
-            {MARKER_KIND_ORDER.map((k) => {
-              const def = MARKER_KINDS[k];
-              const selected = k === kind;
-              return (
-                <Pressable
-                  key={k}
-                  onPress={() => setKind(k)}
-                  style={[styles.kind, selected && { borderColor: def.color, backgroundColor: '#2a332e' }]}
-                >
-                  <View style={[styles.symbol, { backgroundColor: def.color }]}>
-                    <Text style={styles.symbolText}>{def.symbol}</Text>
-                  </View>
-                  <Text style={styles.kindText} numberOfLines={2}>
-                    {def.title}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
-          <TextInput
-            value={label}
-            onChangeText={setLabel}
-            placeholder="Подпись (необязательно)"
-            placeholderTextColor={C.muted}
-            maxLength={40}
-            style={styles.input}
-            returnKeyType="done"
-            onSubmitEditing={save}
-          />
-          <View style={styles.row}>
-            <Button title="Отмена" kind="secondary" onPress={onCancel} style={{ flex: 1 }} />
-            <Button title="Поставить" onPress={save} busy={busy} style={{ flex: 1 }} />
-          </View>
+          {at && <Text style={styles.coords}>{formatCoords(at)}</Text>}
         </View>
-      </KeyboardAvoidingView>
-    </Modal>
+        <View style={[styles.scope, shared && styles.scopeShared]}>
+          <Icon name={shared ? 'account-group' : 'cellphone'} size={14} color={shared ? C.accent : C.dim} />
+          <Text style={[styles.scopeText, shared && { color: C.accent }]}>{shared ? 'Команде' : 'Только мне'}</Text>
+        </View>
+      </View>
+
+      <View style={styles.grid}>
+        {[...MARKER_KIND_ORDER, null].map((k) => {
+          // Trailing spacer keeps the last row's tiles the same width as the first.
+          if (!k) return <View key="spacer" style={[styles.kind, styles.spacer]} />;
+          const def = MARKER_KINDS[k];
+          const selected = k === kind;
+          return (
+            <Pressable
+              key={k}
+              onPress={() => {
+                tap();
+                setKind(k);
+              }}
+              style={[
+                styles.kind,
+                selected && { borderColor: def.color, backgroundColor: def.color + '1F' },
+              ]}
+            >
+              <View style={[styles.kindIcon, { borderColor: def.color, backgroundColor: selected ? def.color : 'transparent' }]}>
+                <Icon name={def.icon} size={20} color={selected ? C.accentInk : def.color} />
+              </View>
+              <Text style={[styles.kindText, selected && { color: C.text }]} numberOfLines={1}>
+                {def.title}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
+
+      <TextInput
+        value={label}
+        onChangeText={setLabel}
+        placeholder="Подпись: «пулемёт», «вход в здание»…"
+        placeholderTextColor={C.faint}
+        maxLength={40}
+        style={styles.input}
+        returnKeyType="done"
+        onSubmitEditing={save}
+        selectionColor={C.accent}
+      />
+      <View style={styles.row}>
+        <Button title="Отмена" kind="secondary" onPress={onCancel} style={{ flex: 1 }} />
+        <Button title={`Поставить`} icon={active.icon} onPress={save} busy={busy} style={{ flex: 1.4 }} />
+      </View>
+    </Sheet>
   );
 }
 
 const styles = StyleSheet.create({
-  backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)' },
-  sheet: {
-    backgroundColor: C.bg,
-    padding: 16,
-    paddingBottom: 32,
-    gap: 12,
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
-    borderTopWidth: 1,
-    borderColor: C.border,
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
+  title: { color: C.text, fontSize: 22, fontFamily: F.bold },
+  coords: { color: C.dim, fontSize: 12, fontFamily: F.mono, marginTop: 2 },
+  scope: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: R.pill,
+    borderWidth: 1,
+    borderColor: C.line,
   },
-  title: { color: C.text, fontSize: 18, fontWeight: '700' },
-  sub: { color: C.muted, fontSize: 13 },
+  scopeShared: { borderColor: C.accent + '55', backgroundColor: C.accentSoft },
+  scopeText: { color: C.dim, fontSize: 12, fontFamily: F.semibold },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   kind: {
-    width: '23%',
+    flexBasis: '22%',
     flexGrow: 1,
     alignItems: 'center',
-    gap: 4,
-    padding: 8,
-    borderRadius: 10,
-    borderWidth: 2,
-    borderColor: 'transparent',
-    backgroundColor: C.card,
+    gap: 6,
+    paddingVertical: 12,
+    borderRadius: R.md,
+    borderWidth: 1.5,
+    borderColor: C.line,
+    backgroundColor: C.elevated,
   },
-  symbol: {
-    width: 32,
-    height: 32,
-    borderRadius: 6,
+  kindIcon: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    borderWidth: 2,
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 2,
-    borderColor: '#fff',
   },
-  symbolText: { fontSize: 16, color: '#000' },
-  kindText: { color: C.text, fontSize: 11, textAlign: 'center' },
+  spacer: { opacity: 0, borderWidth: 0 },
+  kindText: { color: C.dim, fontSize: 12, fontFamily: F.semibold },
   input: {
-    backgroundColor: C.card,
+    backgroundColor: C.elevated,
     color: C.text,
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    height: 46,
+    borderRadius: R.md,
+    paddingHorizontal: 14,
+    height: 52,
     borderWidth: 1,
-    borderColor: C.border,
+    borderColor: C.line,
     fontSize: 16,
+    fontFamily: F.regular,
   },
   row: { flexDirection: 'row', gap: 10 },
 });

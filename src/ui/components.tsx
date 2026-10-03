@@ -1,103 +1,269 @@
-import type { ReactNode } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, View, type ViewStyle } from 'react-native';
+import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
+import { BlurView } from 'expo-blur';
+import * as Haptics from 'expo-haptics';
+import type { ComponentProps, ReactNode } from 'react';
+import {
+  ActivityIndicator,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+  type StyleProp,
+  type ViewStyle,
+} from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { C } from './theme';
+import { C, eyebrow, F, R, shadow } from './theme';
+
+export type IconName = ComponentProps<typeof MaterialCommunityIcons>['name'];
+
+export function Icon({ name, size = 22, color = C.text }: { name: IconName; size?: number; color?: string }) {
+  return <MaterialCommunityIcons name={name} size={size} color={color} />;
+}
+
+export const tap = () => {
+  if (Platform.OS !== 'web') Haptics.selectionAsync().catch(() => {});
+};
+
+/**
+ * Frosted panel for anything floating over the map. Real blur on iOS; Android can't
+ * blur a WebView cheaply, so it gets a denser tint instead.
+ */
+export function Glass({
+  children,
+  style,
+  radius = R.lg,
+  fill,
+}: {
+  children?: ReactNode;
+  style?: StyleProp<ViewStyle>;
+  radius?: number;
+  /** Solid color instead of frosted glass (e.g. an active toggle). */
+  fill?: string;
+}) {
+  return (
+    <View style={[{ borderRadius: radius }, shadow, style]}>
+      {fill ? (
+        <View style={[StyleSheet.absoluteFill, { borderRadius: radius, backgroundColor: fill }]} />
+      ) : (
+        <BlurView
+          intensity={40}
+          tint="dark"
+          style={[StyleSheet.absoluteFill, styles.glassFill, { borderRadius: radius }]}
+        />
+      )}
+      {children}
+    </View>
+  );
+}
+
+export function GlassButton({
+  icon,
+  onPress,
+  active,
+  size = 48,
+  label,
+}: {
+  icon: IconName;
+  onPress: () => void;
+  active?: boolean;
+  size?: number;
+  label?: string;
+}) {
+  return (
+    <Pressable
+      onPress={() => {
+        tap();
+        onPress();
+      }}
+      hitSlop={6}
+      accessibilityLabel={label}
+      style={({ pressed }) => ({ transform: [{ scale: pressed ? 0.94 : 1 }] })}
+    >
+      <Glass
+        radius={size / 2}
+        fill={active ? C.accent : undefined}
+        style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}
+      >
+        <Icon name={icon} size={size * 0.46} color={active ? C.accentInk : C.text} />
+      </Glass>
+    </Pressable>
+  );
+}
 
 export function Button({
   title,
   onPress,
   kind = 'primary',
+  icon,
   busy,
   disabled,
   style,
 }: {
   title: string;
   onPress: () => void;
-  kind?: 'primary' | 'secondary' | 'danger';
+  kind?: 'primary' | 'secondary' | 'danger' | 'ghost';
+  icon?: IconName;
   busy?: boolean;
   disabled?: boolean;
-  style?: ViewStyle;
+  style?: StyleProp<ViewStyle>;
 }) {
-  const bg = kind === 'primary' ? C.accent : kind === 'danger' ? C.danger : C.card;
-  const fg = kind === 'primary' ? '#10140f' : C.text;
+  const palette = {
+    primary: { bg: C.accent, fg: C.accentInk, border: C.accent },
+    secondary: { bg: C.elevated, fg: C.text, border: C.lineStrong },
+    danger: { bg: C.dangerSoft, fg: C.danger, border: 'rgba(255,77,77,0.35)' },
+    ghost: { bg: 'transparent', fg: C.dim, border: 'transparent' },
+  }[kind];
   return (
     <Pressable
-      onPress={onPress}
+      onPress={() => {
+        tap();
+        onPress();
+      }}
       disabled={disabled || busy}
       style={({ pressed }) => [
         styles.button,
-        { backgroundColor: bg, opacity: disabled ? 0.4 : pressed ? 0.75 : 1 },
-        kind === 'secondary' && styles.secondary,
+        {
+          backgroundColor: palette.bg,
+          borderColor: palette.border,
+          opacity: disabled ? 0.4 : 1,
+          transform: [{ scale: pressed ? 0.97 : 1 }],
+        },
         style,
       ]}
     >
-      {busy ? <ActivityIndicator color={fg} /> : <Text style={[styles.buttonText, { color: fg }]}>{title}</Text>}
+      {busy ? (
+        <ActivityIndicator color={palette.fg} />
+      ) : (
+        <>
+          {icon && <Icon name={icon} size={20} color={palette.fg} />}
+          <Text style={[styles.buttonText, { color: palette.fg }]}>{title}</Text>
+        </>
+      )}
     </Pressable>
   );
 }
 
-/** Round floating button used over the map. */
-export function Fab({
-  label,
-  onPress,
-  active,
-  size = 52,
-}: {
-  label: string;
-  onPress: () => void;
-  active?: boolean;
-  size?: number;
-}) {
-  return (
-    <Pressable
-      onPress={onPress}
-      hitSlop={6}
-      style={({ pressed }) => [
-        styles.fab,
-        { width: size, height: size, borderRadius: size / 2 },
-        active && { backgroundColor: C.info, borderColor: C.info },
-        pressed && { opacity: 0.7 },
-      ]}
-    >
-      <Text style={[styles.fabText, active && { color: '#000' }]}>{label}</Text>
-    </Pressable>
-  );
+export function Card({ children, style }: { children: ReactNode; style?: StyleProp<ViewStyle> }) {
+  return <View style={[styles.card, style]}>{children}</View>;
 }
 
-export function Section({ title, children }: { title: string; children: ReactNode }) {
+export function Eyebrow({ children, style }: { children: ReactNode; style?: StyleProp<ViewStyle> }) {
   return (
-    <View style={styles.section}>
-      <Text style={styles.sectionTitle}>{title}</Text>
-      {children}
+    <View style={style}>
+      <Text style={eyebrow}>{children}</Text>
     </View>
   );
 }
 
+export function Avatar({ name, color, size = 40, dim }: { name: string; color: string; size?: number; dim?: boolean }) {
+  const initials =
+    name
+      .trim()
+      .split(/\s+/)
+      .map((w) => w[0])
+      .join('')
+      .slice(0, 2)
+      .toUpperCase() || '?';
+  return (
+    <View
+      style={{
+        width: size,
+        height: size,
+        borderRadius: size / 2,
+        backgroundColor: color + '26',
+        borderWidth: 1.5,
+        borderColor: color,
+        alignItems: 'center',
+        justifyContent: 'center',
+        opacity: dim ? 0.45 : 1,
+      }}
+    >
+      <Text style={{ color, fontFamily: F.bold, fontSize: size * 0.38 }}>{initials}</Text>
+    </View>
+  );
+}
+
+export function Badge({ text, color = C.dim }: { text: string; color?: string }) {
+  return (
+    <View style={[styles.badge, { borderColor: color + '55', backgroundColor: color + '1A' }]}>
+      <Text style={[styles.badgeText, { color }]}>{text}</Text>
+    </View>
+  );
+}
+
+/** Bottom sheet over a dimmed backdrop. */
+export function Sheet({
+  visible,
+  onClose,
+  children,
+}: {
+  visible: boolean;
+  onClose: () => void;
+  children: ReactNode;
+}) {
+  const insets = useSafeAreaInsets();
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose} statusBarTranslucent>
+      <Pressable style={styles.backdrop} onPress={onClose} />
+      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <View style={[styles.sheet, { paddingBottom: insets.bottom + 20 }]}>
+          <View style={styles.grabber} />
+          {children}
+        </View>
+      </KeyboardAvoidingView>
+    </Modal>
+  );
+}
+
 const styles = StyleSheet.create({
+  glassFill: {
+    overflow: 'hidden',
+    backgroundColor: Platform.OS === 'ios' ? C.glass : C.glassStrong,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: C.lineStrong,
+  },
   button: {
-    minHeight: 46,
-    paddingHorizontal: 16,
-    borderRadius: 10,
+    minHeight: 52,
+    paddingHorizontal: 18,
+    borderRadius: R.md,
+    borderWidth: 1,
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    gap: 8,
   },
-  secondary: { borderWidth: 1, borderColor: C.border },
-  buttonText: { fontSize: 16, fontWeight: '600' },
-  fab: {
-    backgroundColor: C.panel,
+  buttonText: { fontSize: 16, fontFamily: F.semibold, letterSpacing: 0.2 },
+  card: {
+    backgroundColor: C.surface,
+    borderRadius: R.lg,
+    padding: 16,
+    gap: 12,
     borderWidth: 1,
-    borderColor: C.border,
-    alignItems: 'center',
-    justifyContent: 'center',
+    borderColor: C.line,
   },
-  fabText: { color: C.text, fontSize: 22, fontWeight: '600' },
-  section: {
-    backgroundColor: C.card,
-    borderRadius: 12,
-    padding: 14,
-    gap: 10,
-    borderWidth: 1,
-    borderColor: C.border,
+  badge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: R.pill, borderWidth: 1 },
+  badgeText: { fontSize: 11, fontFamily: F.semibold, letterSpacing: 0.6 },
+  backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' },
+  sheet: {
+    backgroundColor: C.surface,
+    paddingHorizontal: 20,
+    paddingTop: 10,
+    gap: 16,
+    borderTopLeftRadius: R.xl,
+    borderTopRightRadius: R.xl,
+    borderTopWidth: 1,
+    borderColor: C.lineStrong,
   },
-  sectionTitle: { color: C.muted, fontSize: 13, fontWeight: '600', textTransform: 'uppercase' },
+  grabber: {
+    alignSelf: 'center',
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: C.lineStrong,
+    marginBottom: 4,
+  },
 });

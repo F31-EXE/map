@@ -1,8 +1,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getApp, getApps, initializeApp, type FirebaseApp } from 'firebase/app';
 import * as authModule from 'firebase/auth';
-import { getAuth, initializeAuth, type Auth, type Persistence } from 'firebase/auth';
-import { getFirestore, type Firestore } from 'firebase/firestore';
+import { connectAuthEmulator, getAuth, initializeAuth, type Auth, type Persistence } from 'firebase/auth';
+import { connectFirestoreEmulator, getFirestore, type Firestore } from 'firebase/firestore';
 import { Platform } from 'react-native';
 
 const config = {
@@ -13,6 +13,9 @@ const config = {
   messagingSenderId: process.env.EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
   appId: process.env.EXPO_PUBLIC_FIREBASE_APP_ID,
 };
+
+/** Local development against `firebase emulators:start`, e.g. "localhost" or "192.168.1.5". */
+const emulatorHost = process.env.EXPO_PUBLIC_FIREBASE_EMULATOR_HOST;
 
 /** Teams and live positions need Firebase; the map, imports and solo markers work without it. */
 export const isFirebaseConfigured = Boolean(config.apiKey && config.projectId && config.appId);
@@ -42,11 +45,15 @@ export function firebaseAuth(): Auth {
       Platform.OS === 'web'
         ? getAuth(a)
         : initializeAuth(a, { persistence: getReactNativePersistence(AsyncStorage) });
+    if (emulatorHost) connectAuthEmulator(auth, `http://${emulatorHost}:9099`, { disableWarnings: true });
   }
   return auth;
 }
 
 export function firestore(): Firestore {
-  if (!db) db = getFirestore(ensureApp());
+  if (!db) {
+    db = getFirestore(ensureApp());
+    if (emulatorHost) connectFirestoreEmulator(db, emulatorHost, 8080);
+  }
   return db;
 }
