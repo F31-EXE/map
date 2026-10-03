@@ -13,6 +13,7 @@ import { pickAvatar } from '../services/avatar';
 import * as recordings from '../services/recordings';
 import { useSession } from '../state/session';
 import { useSide } from '../state/side';
+import { confirmDestructive } from '../ui/confirm';
 import { QrCode } from '../ui/QrCode';
 import { Avatar, Badge, Button, Card, Eyebrow, Icon, KeyboardScroll, RoleIcon, tap, type IconName } from '../ui/components';
 import { C, F, R } from '../ui/theme';
@@ -52,6 +53,7 @@ export default function TeamScreen() {
   const callsignDirty = callsign.trim() !== s.callsign;
   const now = Date.now();
   const color = inTeam ? s.teamColor : C.accent;
+  const teamMarkerCount = s.markers.filter((m) => !m.personal && side.canDelete(m)).length;
 
   const sortedMembers = [...s.members].sort((a, b) => {
     if (a.id === s.uid) return -1;
@@ -372,6 +374,35 @@ export default function TeamScreen() {
               onChange={(v) => run('sound', () => s.setOrderSound(v))}
             />
           </Card>
+
+          {s.isOwner && (
+            <Card style={{ gap: 12 }}>
+              <View style={styles.inlineTitle}>
+                <Icon name="map-marker-remove-outline" size={20} color={C.dim} />
+                <Text style={[styles.cardTitle, { flex: 1 }]}>Метки отряда</Text>
+                <Badge text={String(teamMarkerCount)} />
+              </View>
+              <Text style={styles.text}>
+                Очистить карту перед новой игрой: удалит метки, приказы и стрелки всех бойцов отряда.
+                {side.mySquadSide ? ' Приказы командира стороны останутся.' : ''}
+              </Text>
+              <Button
+                title="Удалить все метки"
+                icon="delete-sweep-outline"
+                kind="danger"
+                busy={busy === 'clear'}
+                disabled={teamMarkerCount === 0}
+                onPress={() =>
+                  confirmDestructive(
+                    'Удалить все метки отряда?',
+                    'Они исчезнут у всех бойцов. Отменить нельзя.',
+                    'Удалить',
+                    () => run('clear', async () => void (await s.clearTeamMarkers(side.canDelete)))
+                  )
+                }
+              />
+            </Card>
+          )}
 
           {/* Movement recording */}
           <Card style={{ gap: 12 }}>

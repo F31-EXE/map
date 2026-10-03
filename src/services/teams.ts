@@ -279,3 +279,8 @@ export async function voteMarker(teamId: string, markerId: string, uid: string, 
 export async function deleteTeamMarker(teamId: string, markerId: string): Promise<void> {
   await deleteDoc(doc(firestore(), 'teams', teamId, 'markers', markerId));
 }
+
+/** Deletes several markers; each delete is checked by the rules on its own. */
+export async function deleteTeamMarkers(teamId: string, markerIds: string[]): Promise<void> {
+  await Promise.all(markerIds.map((id) => deleteTeamMarker(teamId, id)));
+}

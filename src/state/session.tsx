@@ -72,6 +72,11 @@ type Session = {
   addMarker: (m: Pick<TacMarker, 'kind' | 'label' | 'lat' | 'lng' | 'points' | 'color'>, scope: MarkerScope) => Promise<void>;
   deleteMarker: (m: TacMarker) => Promise<void>;
   voteMarker: (m: TacMarker, vote: 'stale' | 'done') => Promise<void>;
+  /**
+   * Deletes every team marker `allowed` accepts, hidden ones (voted out, commanders-only)
+   * included. Returns how many were deleted.
+   */
+  clearTeamMarkers: (allowed: (m: TacMarker) => boolean) => Promise<number>;
 };
 
 const Ctx = createContext<Session | null>(null);
@@ -408,6 +413,16 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     [teamId, uid]
   );
 
+  const clearTeamMarkers = useCallback(
+    async (allowed: (m: TacMarker) => boolean) => {
+      if (!teamId) return 0;
+      const ids = teamMarkers.filter(allowed).map((m) => m.id);
+      await teams.deleteTeamMarkers(teamId, ids);
+      return ids.length;
+    },
+    [teamId, teamMarkers]
+  );
+
   const markers = useMemo(
     () =>
       inTeam
@@ -456,6 +471,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       addMarker,
       deleteMarker,
       voteMarker,
+      clearTeamMarkers,
     }),
     [
       ready,
@@ -489,6 +505,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       addMarker,
       deleteMarker,
       voteMarker,
+      clearTeamMarkers,
     ]
   );
 
