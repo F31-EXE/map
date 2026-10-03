@@ -202,6 +202,9 @@ export default function MapScreen() {
   // Votes apply to my own squad's shared markers.
   const canVote = (m: TacMarker) => inTeam && !m.personal && (!m.teamId || m.teamId === session.teamId);
 
+  const toolbarButtons = 3 + (inTeam ? 1 : 0) + (visibleMembers.length > 0 ? 1 : 0);
+  const toolbarWidth = toolbarButtons * 50 + 8;
+
   // Side commander without a squad of their own: the pill shows the side instead.
   const sideOnly = side.isSideCommander && !inTeam;
   const online = side.mapMembers.filter(
@@ -263,7 +266,7 @@ export default function MapScreen() {
         style={[
           styles.top,
           { top: insets.top + 10, left: 12 + insets.left, right: 12 + insets.right },
-          landscape && { right: undefined, width: Math.min(420, width - 100) },
+          landscape && { right: undefined, width: Math.min(420, width - toolbarWidth - 36 - insets.left - insets.right) },
         ]}
       >
         <Pressable
@@ -320,14 +323,16 @@ export default function MapScreen() {
         </Pressable>
       </View>
 
-      <View style={[styles.tools, { top: insets.top + (landscape ? 58 : 74), right: 12 + insets.right }]}>
-        <Glass radius={R.lg} style={styles.toolbar}>
+      {/* Portrait: a column under the team pill. Landscape: a row beside it, so it can't
+          run into the bottom-right buttons on short screens. */}
+      <View style={[styles.tools, { top: insets.top + (landscape ? 10 : 74), right: 12 + insets.right }]}>
+        <Glass radius={R.lg} style={[styles.toolbar, landscape && styles.toolbarRow]}>
           <ToolbarButton icon="layers-triple-outline" label="Подложка" onPress={() => setLayerPicker(true)} />
-          <View style={styles.toolbarSep} />
+          <View style={[styles.toolbarSep, landscape && styles.toolbarSepRow]} />
           <ToolbarButton icon="map-plus" label="Карты полигона" onPress={() => router.push('/maps')} />
           {inTeam && (
             <>
-              <View style={styles.toolbarSep} />
+              <View style={[styles.toolbarSep, landscape && styles.toolbarSepRow]} />
               <View>
                 <ToolbarButton icon="chat-outline" label="Чат отряда" onPress={() => router.push('/chat')} />
                 {chat.unread > 0 && (
@@ -338,7 +343,7 @@ export default function MapScreen() {
               </View>
             </>
           )}
-          <View style={styles.toolbarSep} />
+          <View style={[styles.toolbarSep, landscape && styles.toolbarSepRow]} />
           <ToolbarButton
             icon="draw"
             label="Нарисовать стрелку"
@@ -349,9 +354,9 @@ export default function MapScreen() {
           />
           {visibleMembers.length > 0 && (
             <>
-              <View style={styles.toolbarSep} />
+              <View style={[styles.toolbarSep, landscape && styles.toolbarSepRow]} />
               <ToolbarButton
-                icon="account-group-outline"
+                icon="fit-to-screen-outline"
                 label="Показать всех"
                 onPress={() => mapRef.current?.fitPoints(visibleMembers)}
               />
@@ -732,6 +737,8 @@ const styles = StyleSheet.create({
   toolbar: { paddingVertical: 4, width: 50, alignItems: 'center' },
   toolbarButton: { width: 50, height: 46, alignItems: 'center', justifyContent: 'center' },
   toolbarSep: { width: 26, height: StyleSheet.hairlineWidth, backgroundColor: C.lineStrong },
+  toolbarRow: { flexDirection: 'row', width: 'auto', paddingVertical: 0, paddingHorizontal: 4, height: 46 },
+  toolbarSepRow: { width: StyleSheet.hairlineWidth, height: 24 },
 
   banner: {
     position: 'absolute',
