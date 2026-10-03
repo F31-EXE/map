@@ -3,9 +3,12 @@ import { useEffect, useState } from 'react';
 import { Alert, Pressable, ScrollView, Share, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 
 import { timeAgo } from '../lib/geo';
+import { ROLE_ORDER, ROLES, TEAM_COLORS } from '../lib/roles';
+import type { Member } from '../lib/types';
 import { STALE_MS } from '../map/TacticalMap';
+import { pickAvatar } from '../services/avatar';
 import { useSession } from '../state/session';
-import { Avatar, Badge, Button, Card, Eyebrow, Icon } from '../ui/components';
+import { Avatar, Badge, Button, Card, Eyebrow, Icon, RoleIcon, tap, type IconName } from '../ui/components';
 import { C, F, R } from '../ui/theme';
 
 function useAction() {
@@ -35,44 +38,91 @@ export default function TeamScreen() {
   useEffect(() => setCallsign(s.callsign), [s.callsign]);
 
   const inTeam = Boolean(s.teamId && s.uid);
-  const isOwner = s.team?.ownerId === s.uid;
   const callsignDirty = callsign.trim() !== s.callsign;
   const now = Date.now();
+  const color = inTeam ? s.teamColor : C.accent;
 
   const sortedMembers = [...s.members].sort((a, b) => {
     if (a.id === s.uid) return -1;
     if (b.id === s.uid) return 1;
-    return (b.updatedAt ?? 0) - (a.updatedAt ?? 0);
+    return ROLE_ORDER.indexOf(a.role) - ROLE_ORDER.indexOf(b.role) || a.callsign.localeCompare(b.callsign);
   });
+
+  const changeAvatar = () => {
+    const pick = () =>
+      run('avatar', async () => {
+        const uri = await pickAvatar();
+        if (uri) await s.setAvatar(uri);
+      });
+    if (!s.avatar) return pick();
+    Alert.alert('Аватар', undefined, [
+      { text: 'Выбрать другое фото', onPress: pick },
+      { text: 'Удалить фото', style: 'destructive', onPress: () => run('avatar', () => s.setAvatar(null)) },
+      { text: 'Отмена', style: 'cancel' },
+    ]);
+  };
 
   return (
     <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-      {/* Callsign */}
-      <Card style={styles.profile}>
-        <Avatar name={callsign || '?'} color={C.accent} size={56} />
-        <View style={{ flex: 1, gap: 6 }}>
-          <Eyebrow>Позывной</Eyebrow>
-          <TextInput
-            value={callsign}
-            onChangeText={setCallsign}
-            placeholder="Например: Гром"
-            placeholderTextColor={C.faint}
-            maxLength={24}
-            style={styles.callsignInput}
-            selectionColor={C.accent}
-            returnKeyType="done"
-            onSubmitEditing={() => callsignDirty && run('cs', () => s.setCallsign(callsign))}
-          />
-        </View>
-        {callsignDirty && (
-          <Pressable
-            style={styles.saveIcon}
-            onPress={() => run('cs', () => s.setCallsign(callsign))}
-            accessibilityLabel="Сохранить позывной"
-          >
-            <Icon name="check" size={22} color={C.accentInk} />
+      {/* Profile: avatar, callsign, role */}
+      <Card style={{ gap: 16 }}>
+        <View style={styles.profile}>
+          <Pressable onPress={changeAvatar} accessibilityLabel="Сменить аватар">
+            <Avatar name={callsign || '?'} color={color} uri={s.avatar} size={64} />
+            <View style={[styles.avatarEdit, { backgroundColor: color }]}>
+              <Icon name="camera" size={14} color={C.accentInk} />
+            </View>
           </Pressable>
-        )}
+          <View style={{ flex: 1, gap: 6 }}>
+            <Eyebrow>Позывной</Eyebrow>
+            <TextInput
+              value={callsign}
+              onChangeText={setCallsign}
+              placeholder="Например: Гром"
+              placeholderTextColor={C.faint}
+              maxLength={24}
+              style={styles.callsignInput}
+              selectionColor={C.accent}
+              returnKeyType="done"
+              onSubmitEditing={() => callsignDirty && run('cs', () => s.setCallsign(callsign))}
+            />
+          </View>
+          {callsignDirty && (
+            <Pressable
+              style={styles.saveIcon}
+              onPress={() => run('cs', () => s.setCallsign(callsign))}
+              accessibilityLabel="Сохранить позывной"
+            >
+              <Icon name="check" size={22} color={C.accentInk} />
+            </Pressable>
+          )}
+        </View>
+
+        <View style={{ gap: 10 }}>
+          <Eyebrow>Роль · так вас видят на карте</Eyebrow>
+          <View style={styles.roles}>
+            {ROLE_ORDER.map((r) => {
+              const selected = r === s.role;
+              return (
+                <Pressable
+                  key={r}
+                  onPress={() => {
+                    tap();
+                    run('role', () => s.setRole(r));
+                  }}
+                  style={[styles.role, selected && { borderColor: color, backgroundColor: color + '1A' }]}
+                >
+                  <View style={[styles.rolePin, { backgroundColor: selected ? color : C.bg, borderColor: color }]}>
+                    <RoleIcon role={r} size={22} color={selected ? C.accentInk : color} />
+                  </View>
+                  <Text style={[styles.roleText, selected && { color: C.text }]} numberOfLines={1}>
+                    {ROLES[r].title}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
       </Card>
 
       {!s.firebaseEnabled ? (
@@ -126,7 +176,9 @@ export default function TeamScreen() {
             </>
           ) : (
             <>
-              <Text style={styles.text}>Вы станете командиром и получите код для товарищей.</Text>
+              <Text style={styles.text}>
+                Вы станете создателем команды: выбираете её цвет и раздаёте право отдавать приказы.
+              </Text>
               <TextInput
                 value={teamName}
                 onChangeText={setTeamName}
@@ -147,21 +199,26 @@ export default function TeamScreen() {
         </Card>
       ) : (
         <>
-          {/* Team + invite code */}
+          {/* Team, invite code, color */}
           <Card style={{ gap: 14 }}>
             <View style={styles.teamHeader}>
+              <View style={[styles.teamSwatch, { backgroundColor: color }]} />
               <View style={{ flex: 1 }}>
                 <Eyebrow>Команда</Eyebrow>
                 <Text style={styles.teamName} numberOfLines={1}>
                   {s.team?.name ?? '…'}
                 </Text>
               </View>
-              {isOwner && <Badge text="КОМАНДИР" color={C.accent} />}
+              {s.isOwner ? (
+                <Badge text="СОЗДАТЕЛЬ" color={C.accent} />
+              ) : s.canCommand ? (
+                <Badge text="ОТДАЁТ ПРИКАЗЫ" color={C.warn} />
+              ) : null}
             </View>
             <View style={styles.codeRow}>
               {(s.team?.code ?? '······').split('').map((ch, i) => (
-                <View key={i} style={styles.codeCell}>
-                  <Text style={styles.codeChar}>{ch}</Text>
+                <View key={i} style={[styles.codeCell, { borderColor: color + '40' }]}>
+                  <Text style={[styles.codeChar, { color }]}>{ch}</Text>
                 </View>
               ))}
             </View>
@@ -188,72 +245,75 @@ export default function TeamScreen() {
                 }
               />
             </View>
+            {s.isOwner && (
+              <View style={{ gap: 10 }}>
+                <Eyebrow>Цвет команды на карте</Eyebrow>
+                <View style={styles.palette}>
+                  {TEAM_COLORS.map((c) => (
+                    <Pressable
+                      key={c}
+                      accessibilityLabel={`Цвет ${c}`}
+                      onPress={() => {
+                        tap();
+                        run('color', () => s.setTeamColor(c));
+                      }}
+                      style={[styles.colorDot, { backgroundColor: c }, c === color && styles.colorDotActive]}
+                    >
+                      {c === color && <Icon name="check" size={18} color={C.accentInk} />}
+                    </Pressable>
+                  ))}
+                </View>
+              </View>
+            )}
             {s.teamError && <Text style={styles.error}>{s.teamError}</Text>}
           </Card>
 
-          {/* Location sharing */}
-          <Card style={styles.switchCard}>
-            <View style={[styles.switchIcon, s.shareLocation && { backgroundColor: C.accentSoft }]}>
-              <Icon name={s.shareLocation ? 'access-point' : 'access-point-off'} size={22} color={s.shareLocation ? C.accent : C.dim} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.cardTitle}>Передавать позицию</Text>
-              <Text style={styles.sub}>{s.shareLocation ? 'Команда видит вас на карте' : 'Вы скрыты от команды'}</Text>
-            </View>
-            <Switch
+          {/* Settings */}
+          <Card style={{ gap: 0, paddingVertical: 6 }}>
+            <SettingRow
+              icon={s.shareLocation ? 'access-point' : 'access-point-off'}
+              title="Передавать позицию"
+              sub={s.shareLocation ? 'Команда видит вас на карте' : 'Вы скрыты от команды'}
               value={s.shareLocation}
-              onValueChange={(v) => run('share', () => s.setShareLocation(v))}
-              trackColor={{ true: C.accent, false: C.elevated }}
-              thumbColor="#fff"
+              onChange={(v) => run('share', () => s.setShareLocation(v))}
+            />
+            <View style={styles.divider} />
+            <SettingRow
+              icon={s.orderSound ? 'volume-high' : 'volume-off'}
+              title="Звук приказов"
+              sub={s.orderSound ? 'Вибрация и сигнал' : 'Только вибрация'}
+              value={s.orderSound}
+              onChange={(v) => run('sound', () => s.setOrderSound(v))}
             />
           </Card>
 
           {/* Roster */}
           <View style={{ gap: 10 }}>
-            <Eyebrow style={{ paddingHorizontal: 4 }}>Состав · {s.members.length}</Eyebrow>
+            <Eyebrow style={{ paddingHorizontal: 4 }}>
+              Состав · {s.members.length}
+              {s.isOwner ? ' · ★ — право отдавать приказы' : ''}
+            </Eyebrow>
             <Card style={{ gap: 0, paddingVertical: 6 }}>
-              {sortedMembers.map((m, i) => {
-                const fresh = m.lat != null && m.updatedAt != null && now - m.updatedAt < STALE_MS;
-                const me = m.id === s.uid;
-                return (
-                  <View key={m.id} style={[styles.member, i > 0 && styles.memberBorder]}>
-                    <View>
-                      <Avatar name={m.callsign} color={m.color} size={42} dim={!fresh} />
-                      <View style={[styles.presence, { backgroundColor: fresh ? C.online : C.faint }]} />
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <View style={styles.memberNameRow}>
-                        <Text style={styles.memberName} numberOfLines={1}>
-                          {m.callsign}
-                        </Text>
-                        {me && <Badge text="Я" />}
-                        {m.id === s.team?.ownerId && <Icon name="star-four-points" size={14} color={C.accent} />}
-                      </View>
-                      <Text style={styles.sub}>
-                        {m.lat == null
-                          ? 'Позиция скрыта'
-                          : m.updatedAt
-                            ? `${fresh ? 'На связи' : 'Был'} ${timeAgo(m.updatedAt)}`
-                            : '—'}
-                      </Text>
-                    </View>
-                    {isOwner && !me && (
-                      <Pressable
-                        hitSlop={8}
-                        style={styles.kick}
-                        onPress={() =>
-                          Alert.alert('Исключить из команды?', m.callsign, [
-                            { text: 'Отмена', style: 'cancel' },
-                            { text: 'Исключить', style: 'destructive', onPress: () => run('kick', () => s.kickMember(m.id)) },
-                          ])
-                        }
-                      >
-                        <Icon name="account-remove-outline" size={20} color={C.dim} />
-                      </Pressable>
-                    )}
-                  </View>
-                );
-              })}
+              {sortedMembers.map((m, i) => (
+                <MemberRow
+                  key={m.id}
+                  m={m}
+                  first={i === 0}
+                  me={m.id === s.uid}
+                  owner={m.id === s.team?.ownerId}
+                  color={color}
+                  avatar={m.id === s.uid ? s.avatar : s.avatars[m.id]}
+                  fresh={m.lat != null && m.updatedAt != null && now - m.updatedAt < STALE_MS}
+                  manage={s.isOwner && m.id !== s.uid}
+                  onToggleCommand={() => run('cmd', () => s.setMemberCanCommand(m.id, !m.canCommand))}
+                  onKick={() =>
+                    Alert.alert('Исключить из команды?', m.callsign, [
+                      { text: 'Отмена', style: 'cancel' },
+                      { text: 'Исключить', style: 'destructive', onPress: () => run('kick', () => s.kickMember(m.id)) },
+                    ])
+                  }
+                />
+              ))}
             </Card>
           </View>
 
@@ -275,9 +335,119 @@ export default function TeamScreen() {
   );
 }
 
+function SettingRow({
+  icon,
+  title,
+  sub,
+  value,
+  onChange,
+}: {
+  icon: IconName;
+  title: string;
+  sub: string;
+  value: boolean;
+  onChange: (v: boolean) => void;
+}) {
+  return (
+    <View style={styles.switchRow}>
+      <View style={[styles.switchIcon, value && { backgroundColor: C.accentSoft }]}>
+        <Icon name={icon} size={22} color={value ? C.accent : C.dim} />
+      </View>
+      <View style={{ flex: 1 }}>
+        <Text style={styles.cardTitle}>{title}</Text>
+        <Text style={styles.sub}>{sub}</Text>
+      </View>
+      <Switch value={value} onValueChange={onChange} trackColor={{ true: C.accent, false: C.elevated }} thumbColor="#fff" />
+    </View>
+  );
+}
+
+function MemberRow({
+  m,
+  first,
+  me,
+  owner,
+  color,
+  avatar,
+  fresh,
+  manage,
+  onToggleCommand,
+  onKick,
+}: {
+  m: Member;
+  first: boolean;
+  me: boolean;
+  owner: boolean;
+  color: string;
+  avatar: string | null | undefined;
+  fresh: boolean;
+  manage: boolean;
+  onToggleCommand: () => void;
+  onKick: () => void;
+}) {
+  const commands = owner || m.canCommand;
+  return (
+    <View style={[styles.member, !first && styles.memberBorder]}>
+      <View>
+        <Avatar name={m.callsign} color={color} uri={avatar} size={44} dim={!fresh} />
+        <View style={[styles.memberRole, { backgroundColor: color }]}>
+          <RoleIcon role={m.role} size={13} color={C.accentInk} />
+        </View>
+      </View>
+      <View style={{ flex: 1 }}>
+        <View style={styles.memberNameRow}>
+          <Text style={styles.memberName} numberOfLines={1}>
+            {m.callsign}
+          </Text>
+          {me && <Badge text="Я" />}
+          {commands && <Icon name="star" size={15} color={C.warn} />}
+        </View>
+        <Text style={styles.sub} numberOfLines={1}>
+          {ROLES[m.role].title} ·{' '}
+          {m.lat == null
+            ? 'позиция скрыта'
+            : m.updatedAt
+              ? `${fresh ? 'на связи' : 'был'} ${timeAgo(m.updatedAt)}`
+              : '—'}
+        </Text>
+      </View>
+      {manage && (
+        <>
+          <Pressable
+            hitSlop={6}
+            accessibilityLabel={m.canCommand ? 'Забрать право приказов' : 'Дать право приказов'}
+            style={[styles.iconButton, m.canCommand && { backgroundColor: C.warn }]}
+            onPress={() => {
+              tap();
+              onToggleCommand();
+            }}
+          >
+            <Icon name="star" size={18} color={m.canCommand ? C.accentInk : C.dim} />
+          </Pressable>
+          <Pressable hitSlop={6} accessibilityLabel="Исключить" style={styles.iconButton} onPress={onKick}>
+            <Icon name="account-remove-outline" size={18} color={C.dim} />
+          </Pressable>
+        </>
+      )}
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
-  content: { padding: 16, gap: 14, paddingBottom: 48 },
+  content: { padding: 16, gap: 14, paddingBottom: 48, width: '100%', maxWidth: 640, alignSelf: 'center' },
   profile: { flexDirection: 'row', alignItems: 'center', gap: 14 },
+  avatarEdit: {
+    position: 'absolute',
+    right: -2,
+    bottom: -2,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: C.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   callsignInput: { color: C.text, fontSize: 22, fontFamily: F.bold, padding: 0 },
   saveIcon: {
     width: 40,
@@ -287,6 +457,27 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  roles: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  role: {
+    flexBasis: '30%',
+    flexGrow: 1,
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 10,
+    borderRadius: R.md,
+    borderWidth: 1.5,
+    borderColor: C.line,
+    backgroundColor: C.elevated,
+  },
+  rolePin: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    borderWidth: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  roleText: { color: C.dim, fontSize: 12, fontFamily: F.semibold },
   inlineTitle: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   cardTitle: { color: C.text, fontSize: 16, fontFamily: F.semibold },
   text: { color: C.dim, fontSize: 15, lineHeight: 21, fontFamily: F.regular },
@@ -315,31 +506,38 @@ const styles = StyleSheet.create({
     letterSpacing: 10,
     textAlign: 'center',
   },
-  segment: {
-    flexDirection: 'row',
-    backgroundColor: C.elevated,
-    borderRadius: R.md,
-    padding: 4,
-  },
+  segment: { flexDirection: 'row', backgroundColor: C.elevated, borderRadius: R.md, padding: 4 },
   segmentItem: { flex: 1, height: 40, borderRadius: R.sm, alignItems: 'center', justifyContent: 'center' },
   segmentActive: { backgroundColor: C.accent },
   segmentText: { color: C.dim, fontSize: 15, fontFamily: F.semibold },
-  teamHeader: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  teamHeader: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  teamSwatch: { width: 10, alignSelf: 'stretch', borderRadius: 5 },
   teamName: { color: C.text, fontSize: 24, fontFamily: F.bold, marginTop: 2 },
   codeRow: { flexDirection: 'row', gap: 6 },
   codeCell: {
     flex: 1,
     aspectRatio: 0.82,
+    maxHeight: 76,
     borderRadius: R.sm,
     backgroundColor: C.elevated,
     borderWidth: 1,
-    borderColor: C.accent + '40',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  codeChar: { color: C.accent, fontSize: 28, fontFamily: F.mono },
+  codeChar: { fontSize: 28, fontFamily: F.mono },
   row: { flexDirection: 'row', gap: 10 },
-  switchCard: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  palette: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
+  colorDot: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: 'transparent',
+  },
+  colorDotActive: { borderColor: C.text },
+  switchRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10 },
   switchIcon: {
     width: 44,
     height: 44,
@@ -348,21 +546,24 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  divider: { height: StyleSheet.hairlineWidth, backgroundColor: C.line },
   member: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10 },
   memberBorder: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: C.line },
-  presence: {
+  memberRole: {
     position: 'absolute',
-    right: -1,
-    bottom: -1,
-    width: 12,
-    height: 12,
-    borderRadius: 6,
+    right: -4,
+    bottom: -4,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
     borderWidth: 2,
     borderColor: C.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   memberNameRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   memberName: { color: C.text, fontSize: 16, fontFamily: F.semibold, flexShrink: 1 },
-  kick: {
+  iconButton: {
     width: 38,
     height: 38,
     borderRadius: 19,

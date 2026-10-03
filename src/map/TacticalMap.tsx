@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useImperativeHandle, useRef, useState, type Ref } from 'react';
 
-import { MARKER_KINDS } from '../lib/markerKinds';
+import { isOrder, MARKER_KINDS } from '../lib/markerKinds';
+import { ROLES } from '../lib/roles';
 import type { LatLng, Member, OverlayMeta, SelfPosition, TacMarker } from '../lib/types';
 import { loadOverlayPayload } from '../services/overlays';
 import { MapFrame, type MapFrameHandle } from './MapFrame';
@@ -38,6 +39,10 @@ type Props = {
   members: Member[];
   /** Own uid — excluded from the members layer (drawn as `self`). */
   selfId: string | null;
+  /** Every teammate is drawn in the team color. */
+  teamColor: string;
+  /** Team creator: shown with the command badge like granted commanders. */
+  ownerId: string | null;
   markers: TacMarker[];
   overlays: OverlayMeta[];
   /** Overlay to zoom to as soon as it is drawn; `onFocusHandled` fires afterwards. */
@@ -105,18 +110,29 @@ export function TacticalMap(props: Props) {
         lat: m.lat,
         lng: m.lng,
         callsign: m.callsign,
-        color: m.color,
+        color: props.teamColor,
+        rolePath: ROLES[m.role].path,
+        commander: m.canCommand || m.id === props.ownerId,
         heading: m.heading,
         stale: !m.updatedAt || now - m.updatedAt > STALE_MS,
       }));
     send({ type: 'setMembers', payload: list });
-  }, [ready, generation, props.members, props.selfId, now, send]);
+  }, [ready, generation, props.members, props.selfId, props.teamColor, props.ownerId, now, send]);
 
   useEffect(() => {
     if (!ready) return;
     const list = props.markers.map((m) => {
       const k = MARKER_KINDS[m.kind] ?? MARKER_KINDS.note;
-      return { id: m.id, lat: m.lat, lng: m.lng, label: m.label, path: k.path, color: k.color };
+      return {
+        id: m.id,
+        lat: m.lat,
+        lng: m.lng,
+        label: m.label,
+        path: k.path,
+        color: k.color,
+        order: isOrder(m.kind),
+        personal: Boolean(m.personal),
+      };
     });
     send({ type: 'setMarkers', payload: list });
   }, [ready, generation, props.markers, send]);

@@ -2,9 +2,10 @@ rules_version = '2';
 
 // Data model:
 //   teamCodes/{code}                 -> { teamId }            join code lookup
-//   teams/{teamId}                   -> { name, code, ownerId, createdAt }
-//   teams/{teamId}/members/{uid}     -> { callsign, color, joinCode, lat, lng, heading, accuracy, updatedAt }
+//   teams/{teamId}                   -> { name, code, ownerId, color, createdAt }
+//   teams/{teamId}/members/{uid}     -> { callsign, role, canCommand?, joinCode, lat, lng, heading, accuracy, updatedAt }
 //   teams/{teamId}/markers/{id}      -> { kind, label, lat, lng, createdBy, createdByName, createdAt }
+//   teams/{teamId}/avatars/{uid}     -> { data, updatedAt }   small JPEG data URI
 service cloud.firestore {
   match /databases/{database}/documents {
     function signedIn() {
@@ -13,8 +14,30 @@ service cloud.firestore {
     function teamPath(teamId) {
       return /databases/$(database)/documents/teams/$(teamId);
     }
+    function memberPath(teamId, uid) {
+      return /databases/$(database)/documents/teams/$(teamId)/members/$(uid);
+    }
     function isMember(teamId) {
-      return signedIn() && exists(/databases/$(database)/documents/teams/$(teamId)/members/$(request.auth.uid));
+      return signedIn() && exists(memberPath(teamId, request.auth.uid));
+    }
+    function isOwner(teamId) {
+      return signedIn() && get(teamPath(teamId)).data.ownerId == request.auth.uid;
+    }
+    // Team creator, or a member the creator granted command rights to.
+    function canCommand(teamId) {
+      return isOwner(teamId)
+        || (isMember(teamId) && get(memberPath(teamId, request.auth.uid)).data.get('canCommand', false) == true);
+    }
+    function isOrderKind(kind) {
+      return kind in ['order-move', 'order-attack', 'order-defend'];
+    }
+    function validColor(c) {
+      return c is string && c.matches('^#[0-9A-Fa-f]{6}$');
+    }
+    function validProfile(d) {
+      return d.callsign is string
+        && d.callsign.size() <= 24
+        && (!('role' in d) || (d.role is string && d.role.size() <= 20));
     }
 
     match /teamCodes/{code} {
@@ -32,29 +55,37 @@ service cloud.firestore {
       allow create: if signedIn()
         && request.resource.data.ownerId == request.auth.uid
         && request.resource.data.name is string
-        && request.resource.data.name.size() <= 40;
+        && request.resource.data.name.size() <= 40
+        && (!('color' in request.resource.data) || validColor(request.resource.data.color));
+      // The creator may rename the team or change its color; code and owner are fixed.
       allow update: if signedIn()
         && resource.data.ownerId == request.auth.uid
-        && request.resource.data.ownerId == resource.data.ownerId
-        && request.resource.data.code == resource.data.code;
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'color'])
+        && request.resource.data.name is string
+        && request.resource.data.name.size() <= 40
+        && (!('color' in request.resource.data) || validColor(request.resource.data.color));
       allow delete: if false;
 
       match /members/{uid} {
         allow read: if isMember(teamId);
-        // Joining requires knowing the team's code.
+        // Joining requires knowing the team's code; nobody grants themselves command rights.
         allow create: if signedIn()
           && uid == request.auth.uid
           && request.resource.data.joinCode == getAfter(teamPath(teamId)).data.code
-          && request.resource.data.callsign is string
-          && request.resource.data.callsign.size() <= 24;
-        allow update: if signedIn()
-          && uid == request.auth.uid
-          && request.resource.data.joinCode == resource.data.joinCode
-          && request.resource.data.callsign is string
-          && request.resource.data.callsign.size() <= 24;
-        // Leave, or be removed by the team owner.
-        allow delete: if signedIn()
-          && (uid == request.auth.uid || get(teamPath(teamId)).data.ownerId == request.auth.uid);
+          && request.resource.data.get('canCommand', false) == false
+          && validProfile(request.resource.data);
+        allow update: if signedIn() && (
+          // Own profile and position.
+          (uid == request.auth.uid
+            && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['joinCode', 'canCommand'])
+            && validProfile(request.resource.data))
+          // The creator grants or revokes command rights, and nothing else.
+          || (isOwner(teamId)
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['canCommand'])
+            && request.resource.data.canCommand is bool)
+        );
+        // Leave, or be removed by the team creator.
+        allow delete: if signedIn() && (uid == request.auth.uid || isOwner(teamId));
       }
 
       match /markers/{markerId} {
@@ -65,9 +96,21 @@ service cloud.firestore {
           && request.resource.data.lat is number
           && request.resource.data.lng is number
           && request.resource.data.label is string
-          && request.resource.data.label.size() <= 40;
+          && request.resource.data.label.size() <= 40
+          && (!isOrderKind(request.resource.data.kind) || canCommand(teamId));
         allow update: if false;
-        allow delete: if isMember(teamId);
+        // Anyone clears plain markers; only commanders cancel orders.
+        allow delete: if isMember(teamId) && (!isOrderKind(resource.data.kind) || canCommand(teamId));
+      }
+
+      match /avatars/{uid} {
+        allow read: if isMember(teamId);
+        allow write: if isMember(teamId)
+          && uid == request.auth.uid
+          && request.resource.data.data is string
+          && request.resource.data.data.size() < 60000
+          && request.resource.data.data.matches('^data:image/(jpeg|png);base64,.*');
+        allow delete: if signedIn() && (uid == request.auth.uid || isOwner(teamId));
       }
     }
   }

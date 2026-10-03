@@ -1,7 +1,11 @@
 import * as Location from 'expo-location';
 import { useEffect, useRef, useState } from 'react';
 
+import { angleDiff, HeadingSmoother } from '../lib/heading';
 import type { SelfPosition } from '../lib/types';
+
+const HEADING_STEP = 4;
+const HEADING_MIN_INTERVAL_MS = 120;
 
 export type LocationStatus = 'pending' | 'granted' | 'denied' | 'error';
 
@@ -17,6 +21,8 @@ export function useSelfPosition(enabled = true) {
   useEffect(() => {
     if (!enabled) return;
     let cancelled = false;
+    let lastEmit = 0;
+    const smoother = new HeadingSmoother();
     const subs: Location.LocationSubscription[] = [];
 
     (async () => {
@@ -48,12 +54,16 @@ export function useSelfPosition(enabled = true) {
         try {
           subs.push(
             await Location.watchHeadingAsync((h) => {
-              const v = h.trueHeading >= 0 ? h.trueHeading : h.magHeading;
-              // Quantize so the map isn't flooded with tiny rotations.
-              const q = Math.round(v / 5) * 5;
-              if (q === heading.current) return;
-              heading.current = q;
-              setPosition((p) => (p ? { ...p, heading: q } : p));
+              const raw = h.trueHeading >= 0 ? h.trueHeading : h.magHeading;
+              if (raw < 0) return;
+              const v = smoother.push(raw);
+              const now = Date.now();
+              // Ignore compass noise: only small-but-real turns, at most ~8 times a second.
+              if (heading.current != null && angleDiff(v, heading.current) < HEADING_STEP) return;
+              if (now - lastEmit < HEADING_MIN_INTERVAL_MS) return;
+              lastEmit = now;
+              heading.current = Math.round(v);
+              setPosition((p) => (p ? { ...p, heading: heading.current } : p));
             })
           );
         } catch {

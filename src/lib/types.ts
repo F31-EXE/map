@@ -1,3 +1,5 @@
+import type { RoleId } from './roles';
+
 export type LatLng = { lat: number; lng: number };
 
 export type SelfPosition = LatLng & {
@@ -11,19 +13,33 @@ export type Team = {
   name: string;
   code: string;
   ownerId: string;
+  /** Chosen by the commander; every teammate is drawn in it. */
+  color: string;
 };
 
 export type Member = {
   id: string;
   callsign: string;
-  color: string;
+  role: RoleId;
+  /** May issue orders (granted by the team creator). */
+  canCommand: boolean;
   lat: number | null;
   lng: number | null;
   heading: number | null;
   updatedAt: number | null;
 };
 
-export type MarkerKind = 'enemy' | 'friendly' | 'objective' | 'danger' | 'rally' | 'medic' | 'note';
+export type OrderKind = 'order-move' | 'order-attack' | 'order-defend';
+
+export type MarkerKind =
+  | 'enemy'
+  | 'friendly'
+  | 'objective'
+  | 'danger'
+  | 'rally'
+  | 'medic'
+  | 'note'
+  | OrderKind;
 
 export type TacMarker = {
   id: string;
@@ -34,6 +50,8 @@ export type TacMarker = {
   createdBy: string;
   createdByName: string;
   createdAt: number;
+  /** Stored only on this device, never sent to the team. */
+  personal?: boolean;
 };
 
 export type OverlayFormat = 'kml' | 'kmz' | 'gpx' | 'geojson';

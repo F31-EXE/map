@@ -4,16 +4,29 @@ import {
   mdiMapMarkerRadius,
   mdiMedicalBag,
   mdiNoteText,
+  mdiRunFast,
   mdiShield,
+  mdiShieldHalfFull,
+  mdiSwordCross,
   mdiTarget,
 } from '@mdi/js';
 
-import type { MarkerKind } from './types';
+import type { MarkerKind, OrderKind } from './types';
 
 type KindDef = {
   title: string;
   /** MaterialCommunityIcons glyph name, for the RN UI. */
-  icon: 'target' | 'shield' | 'flag-variant' | 'alert' | 'map-marker-radius' | 'medical-bag' | 'note-text';
+  icon:
+    | 'target'
+    | 'shield'
+    | 'flag-variant'
+    | 'alert'
+    | 'map-marker-radius'
+    | 'medical-bag'
+    | 'note-text'
+    | 'run-fast'
+    | 'sword-cross'
+    | 'shield-half-full';
   /** Same icon as an SVG path, for markers drawn inside the map WebView. */
   path: string;
   color: string;
@@ -27,7 +40,17 @@ export const MARKER_KINDS: Record<MarkerKind, KindDef> = {
   rally: { title: 'Сбор', icon: 'map-marker-radius', path: mdiMapMarkerRadius, color: '#4ADE80' },
   medic: { title: 'Медик', icon: 'medical-bag', path: mdiMedicalBag, color: '#F472B6' },
   note: { title: 'Заметка', icon: 'note-text', path: mdiNoteText, color: '#B79CFF' },
+  'order-move': { title: 'Двигаться сюда', icon: 'run-fast', path: mdiRunFast, color: '#B4E34A' },
+  'order-attack': { title: 'Атаковать', icon: 'sword-cross', path: mdiSwordCross, color: '#FF4D4D' },
+  'order-defend': { title: 'Оборонять', icon: 'shield-half-full', path: mdiShieldHalfFull, color: '#3D9BFF' },
 };
+
+/** Orders: only commanders may place them, and teammates get a buzz + sound. */
+export const ORDER_KINDS: OrderKind[] = ['order-move', 'order-attack', 'order-defend'];
+
+export function isOrder(kind: MarkerKind): kind is OrderKind {
+  return (ORDER_KINDS as string[]).includes(kind);
+}
 
 export const MARKER_KIND_ORDER: MarkerKind[] = [
   'enemy',
@@ -37,15 +60,4 @@ export const MARKER_KIND_ORDER: MarkerKind[] = [
   'rally',
   'medic',
   'note',
-];
-
-export const MEMBER_COLORS = [
-  '#4ADE80',
-  '#3D9BFF',
-  '#FFC83D',
-  '#FF8A3D',
-  '#B79CFF',
-  '#22D3EE',
-  '#F472B6',
-  '#A3E635',
 ];

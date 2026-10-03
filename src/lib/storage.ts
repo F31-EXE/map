@@ -5,7 +5,11 @@ export const KEYS = {
   teamId: 'tacmap.teamId',
   shareLocation: 'tacmap.shareLocation',
   baseLayer: 'tacmap.baseLayer',
-  soloMarkers: 'tacmap.soloMarkers',
+  role: 'tacmap.role',
+  avatar: 'tacmap.avatar',
+  orderSound: 'tacmap.orderSound',
+  // Historical key name: these used to be "solo" markers.
+  personalMarkers: 'tacmap.soloMarkers',
   overlays: 'tacmap.overlays',
 } as const;
 

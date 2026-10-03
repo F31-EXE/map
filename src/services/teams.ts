@@ -15,7 +15,7 @@ import {
 } from 'firebase/firestore';
 
 import { firestore } from '../lib/firebase';
-import { MEMBER_COLORS } from '../lib/markerKinds';
+import { DEFAULT_TEAM_COLOR, roleOf, type RoleId } from '../lib/roles';
 import type { Member, SelfPosition, TacMarker, Team } from '../lib/types';
 
 // No 0/O/1/I/L to keep codes easy to dictate over the radio.
@@ -31,19 +31,13 @@ export function normalizeCode(code: string): string {
   return code.toUpperCase().replace(/[^A-Z0-9]/g, '');
 }
 
-function colorFor(uid: string): string {
-  let h = 0;
-  for (let i = 0; i < uid.length; i++) h = (h * 31 + uid.charCodeAt(i)) >>> 0;
-  return MEMBER_COLORS[h % MEMBER_COLORS.length];
-}
-
 function millis(v: unknown): number | null {
   if (v instanceof Timestamp) return v.toMillis();
   if (typeof v === 'number') return v;
   return null;
 }
 
-export async function createTeam(uid: string, callsign: string, name: string): Promise<string> {
+export async function createTeam(uid: string, callsign: string, role: RoleId, name: string): Promise<string> {
   const db = firestore();
   for (let attempt = 0; attempt < 5; attempt++) {
     const code = randomCode();
@@ -51,11 +45,11 @@ export async function createTeam(uid: string, callsign: string, name: string): P
     if ((await getDoc(codeRef)).exists()) continue;
     const teamRef = doc(collection(db, 'teams'));
     const batch = writeBatch(db);
-    batch.set(teamRef, { name, code, ownerId: uid, createdAt: serverTimestamp() });
+    batch.set(teamRef, { name, code, ownerId: uid, color: DEFAULT_TEAM_COLOR, createdAt: serverTimestamp() });
     batch.set(codeRef, { teamId: teamRef.id });
     batch.set(doc(teamRef, 'members', uid), {
       callsign,
-      color: colorFor(uid),
+      role,
       joinCode: code,
       joinedAt: serverTimestamp(),
     });
@@ -65,7 +59,7 @@ export async function createTeam(uid: string, callsign: string, name: string): P
   throw new Error('Не удалось подобрать свободный код команды, попробуйте ещё раз');
 }
 
-export async function joinTeam(uid: string, callsign: string, rawCode: string): Promise<string> {
+export async function joinTeam(uid: string, callsign: string, role: RoleId, rawCode: string): Promise<string> {
   const db = firestore();
   const code = normalizeCode(rawCode);
   const snap = await getDoc(doc(db, 'teamCodes', code));
@@ -73,7 +67,7 @@ export async function joinTeam(uid: string, callsign: string, rawCode: string): 
   const teamId = snap.data().teamId as string;
   await setDoc(doc(db, 'teams', teamId, 'members', uid), {
     callsign,
-    color: colorFor(uid),
+    role,
     joinCode: code,
     joinedAt: serverTimestamp(),
   });
@@ -106,8 +100,51 @@ export async function kickMember(teamId: string, memberId: string): Promise<void
   await deleteDoc(doc(firestore(), 'teams', teamId, 'members', memberId));
 }
 
-export async function updateCallsign(teamId: string, uid: string, callsign: string): Promise<void> {
-  await updateDoc(doc(firestore(), 'teams', teamId, 'members', uid), { callsign });
+export async function updateProfile(
+  teamId: string,
+  uid: string,
+  profile: { callsign?: string; role?: RoleId }
+): Promise<void> {
+  await updateDoc(doc(firestore(), 'teams', teamId, 'members', uid), profile);
+}
+
+/** Team creator only (enforced by rules). */
+export async function setCanCommand(teamId: string, memberId: string, canCommand: boolean): Promise<void> {
+  await updateDoc(doc(firestore(), 'teams', teamId, 'members', memberId), { canCommand });
+}
+
+/** Team creator only (enforced by rules). */
+export async function setTeamColor(teamId: string, color: string): Promise<void> {
+  await updateDoc(doc(firestore(), 'teams', teamId), { color });
+}
+
+/**
+ * Avatars live in their own collection: they change rarely, so keeping them out of
+ * member docs avoids resending a few KB to everyone on every position update.
+ */
+export async function setAvatar(teamId: string, uid: string, data: string | null): Promise<void> {
+  const ref = doc(firestore(), 'teams', teamId, 'avatars', uid);
+  if (data) await setDoc(ref, { data, updatedAt: serverTimestamp() });
+  else await deleteDoc(ref);
+}
+
+export function subscribeAvatars(
+  teamId: string,
+  onAvatars: (a: Record<string, string>) => void,
+  onError: (e: Error) => void
+): Unsubscribe {
+  return onSnapshot(
+    collection(firestore(), 'teams', teamId, 'avatars'),
+    (s) => {
+      const out: Record<string, string> = {};
+      s.docs.forEach((d) => {
+        const v = d.data().data;
+        if (typeof v === 'string') out[d.id] = v;
+      });
+      onAvatars(out);
+    },
+    onError
+  );
 }
 
 export async function publishPosition(teamId: string, uid: string, p: SelfPosition): Promise<void> {
@@ -138,7 +175,11 @@ export function subscribeTeam(
     doc(firestore(), 'teams', teamId),
     (s) => {
       const d = s.data();
-      onTeam(d ? { id: s.id, name: d.name, code: d.code, ownerId: d.ownerId } : null);
+      onTeam(
+        d
+          ? { id: s.id, name: d.name, code: d.code, ownerId: d.ownerId, color: d.color ?? DEFAULT_TEAM_COLOR }
+          : null
+      );
     },
     onError
   );
@@ -158,7 +199,8 @@ export function subscribeMembers(
           return {
             id: d.id,
             callsign: v.callsign ?? '???',
-            color: v.color ?? '#43a047',
+            role: roleOf(v.role),
+            canCommand: v.canCommand === true,
             lat: typeof v.lat === 'number' ? v.lat : null,
             lng: typeof v.lng === 'number' ? v.lng : null,
             heading: typeof v.heading === 'number' ? v.heading : null,
@@ -201,7 +243,7 @@ export function subscribeTeamMarkers(
 
 export async function addTeamMarker(
   teamId: string,
-  m: Omit<TacMarker, 'id' | 'createdAt'>
+  m: Omit<TacMarker, 'id' | 'createdAt' | 'personal'>
 ): Promise<void> {
   await addDoc(collection(firestore(), 'teams', teamId, 'markers'), {
     ...m,

@@ -73,9 +73,6 @@ body,
 }
 
 /* ---------- own position ---------- */
-.self-icon {
-  position: relative;
-}
 .self-dot {
   position: absolute;
   left: 31px;
@@ -111,6 +108,7 @@ body,
     rgba(56, 189, 248, 0) 56deg,
     rgba(56, 189, 248, 0) 360deg
   );
+  transition: transform 0.35s ease-out;
   -webkit-mask: radial-gradient(circle, #000 0, #000 40%, transparent 70%);
   mask: radial-gradient(circle, #000 0, #000 40%, transparent 70%);
 }
@@ -126,43 +124,77 @@ body,
 }
 
 /* ---------- teammates ---------- */
-.member-icon {
-  position: relative;
-}
-.member-dot {
-  position: absolute;
-  left: 5px;
-  top: 5px;
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  border: 2.5px solid #0b0f0c;
-  box-sizing: border-box;
-  box-shadow: 0 0 0 1.5px rgba(255, 255, 255, 0.85), 0 2px 6px rgba(0, 0, 0, 0.6);
-}
-.member-arrow {
+.member-pin {
   position: absolute;
   left: 0;
   top: 0;
-  width: 28px;
-  height: 28px;
-  filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.7));
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 2px solid #0b0f0c;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 0 0 1.5px rgba(255, 255, 255, 0.9), 0 3px 8px rgba(0, 0, 0, 0.6);
+}
+.member-pin svg {
+  width: 22px;
+  height: 22px;
+}
+.member-dir {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 32px;
+  height: 32px;
+  transition: transform 0.4s ease-out;
+  pointer-events: none;
+}
+.member-dir-tip {
+  position: absolute;
+  left: 10px;
+  top: -9px;
+  width: 0;
+  height: 0;
+  border-left: 6px solid transparent;
+  border-right: 6px solid transparent;
+  border-bottom: 10px solid;
+  filter: drop-shadow(0 0 1.5px rgba(0, 0, 0, 0.9));
+}
+.member-badge {
+  position: absolute;
+  right: -6px;
+  top: -6px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #ffc83d;
+  border: 1.5px solid #0b0f0c;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.member-badge svg {
+  width: 10px;
+  height: 10px;
 }
 .member-halo {
   position: absolute;
   left: 0;
   top: 0;
-  width: 28px;
-  height: 28px;
+  width: 32px;
+  height: 32px;
   border-radius: 50%;
   opacity: 0.25;
   animation: pulse 2.8s ease-out infinite;
 }
 .member-icon .chip {
-  top: 30px;
+  top: 36px;
 }
-.member-icon.stale .member-dot,
-.member-icon.stale .member-arrow {
+.member-icon.stale .member-pin,
+.member-icon.stale .member-dir {
   opacity: 0.4;
   filter: grayscale(0.7);
 }
@@ -171,9 +203,6 @@ body,
 }
 
 /* ---------- tactical markers ---------- */
-.tac-icon {
-  position: relative;
-}
 .tac-pin {
   width: 36px;
   height: 36px;
@@ -192,11 +221,33 @@ body,
 .tac-chip {
   top: 40px;
 }
+.tac-icon.personal .tac-pin {
+  border-style: dashed;
+}
+
+/* Orders: diamond pin with a pulsing ring, so they stand out from plain markers. */
+.tac-icon.order .tac-pin {
+  border-radius: 9px;
+  transform: rotate(45deg);
+  border-width: 2.5px;
+}
+.tac-icon.order .tac-pin svg {
+  transform: rotate(-45deg);
+}
+.order-ring {
+  position: absolute;
+  left: -6px;
+  top: -6px;
+  width: 48px;
+  height: 48px;
+  box-sizing: border-box;
+  border: 2px solid;
+  border-radius: 50%;
+  animation: pulse 1.8s ease-out infinite;
+  pointer-events: none;
+}
 
 /* ---------- imported points ---------- */
-.kml-point {
-  position: relative;
-}
 .kml-dot {
   width: 12px;
   height: 12px;

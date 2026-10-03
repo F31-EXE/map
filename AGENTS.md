@@ -50,3 +50,6 @@ Docs: https://docs.expo.dev/eas/index.md
 - `npx expo install` can't reach api.expo.dev from some sandboxes; pin versions from `node_modules/expo/bundledNativeModules.json` instead.
 - UI tokens live in `src/ui/theme.ts` (colors `C`, fonts `F`: Exo 2 + JetBrains Mono, radii `R`); reuse `src/ui/components.tsx` (Glass, Sheet, Button, Avatar…) rather than ad-hoc styles. Icons: MaterialCommunityIcons in RN, the same glyphs as `@mdi/js` paths inside the map.
 - Security rules tests: `npm run test:rules` (Firestore emulator, needs Java).
+- Roles, team colors: `src/lib/roles.ts` (rifle and machine-gun glyphs are custom SVG paths; others are `@mdi/js`). Orders are marker kinds `order-*` (`src/lib/markerKinds.ts`); rules restrict them to the team creator and members with `canCommand`.
+- Leaflet marker icons must stay `position: absolute` (Leaflet's own class). Never add `position: relative` to a divIcon className — icons then stack in document flow and drift on zoom.
+- `scripts/make-order-sound.mjs` regenerates `assets/sounds/order.wav`.

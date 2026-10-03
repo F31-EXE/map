@@ -36,7 +36,8 @@ async function createTeam(db: Firestore, uid: string, code = CODE, teamCode = CO
 const join = (db: Firestore, uid: string, code = CODE) =>
   setDoc(doc(db, 'teams', TEAM, 'members', uid), { callsign: 'Тень', color: '#fff', joinCode: code });
 
-const marker = (by: string) => ({ kind: 'enemy', label: 'x', lat: 55, lng: 37, createdBy: by, createdByName: 'n' });
+const marker = (by: string, kind = 'enemy') => ({ kind, label: 'x', lat: 55, lng: 37, createdBy: by, createdByName: 'n' });
+const AVATAR = 'data:image/jpeg;base64,' + 'A'.repeat(4000);
 
 before(async () => {
   env = await initializeTestEnvironment({
@@ -129,5 +130,74 @@ describe('as a member', () => {
   });
   test('owner can kick', async () => {
     await assertSucceeds(deleteDoc(doc(as('alice'), 'teams', TEAM, 'members', 'bob')));
+  });
+});
+
+describe('roles, colors and avatars', () => {
+  beforeEach(async () => {
+    await createTeam(as('alice'), 'alice');
+    await join(as('bob'), 'bob');
+  });
+
+  test('members set their own role', async () => {
+    await assertSucceeds(updateDoc(doc(as('bob'), 'teams', TEAM, 'members', 'bob'), { role: 'sniper' }));
+  });
+  test('cannot join with command rights already set', async () => {
+    await assertFails(
+      setDoc(doc(as('carol'), 'teams', TEAM, 'members', 'carol'), {
+        callsign: 'C',
+        joinCode: CODE,
+        canCommand: true,
+      })
+    );
+  });
+  test('owner changes team color; others cannot; color must be a hex', async () => {
+    await assertSucceeds(updateDoc(doc(as('alice'), 'teams', TEAM), { color: '#FF4D4D' }));
+    await assertFails(updateDoc(doc(as('bob'), 'teams', TEAM), { color: '#3D9BFF' }));
+    await assertFails(updateDoc(doc(as('alice'), 'teams', TEAM), { color: 'red; drop' }));
+  });
+  test('members upload only their own small image avatar', async () => {
+    await assertSucceeds(setDoc(doc(as('bob'), 'teams', TEAM, 'avatars', 'bob'), { data: AVATAR }));
+    await assertFails(setDoc(doc(as('bob'), 'teams', TEAM, 'avatars', 'alice'), { data: AVATAR }));
+    await assertFails(setDoc(doc(as('bob'), 'teams', TEAM, 'avatars', 'bob'), { data: 'x'.repeat(70000) }));
+    await assertFails(setDoc(doc(as('mallory'), 'teams', TEAM, 'avatars', 'mallory'), { data: AVATAR }));
+  });
+});
+
+describe('command rights and orders', () => {
+  beforeEach(async () => {
+    await createTeam(as('alice'), 'alice');
+    await join(as('bob'), 'bob');
+    await join(as('carol'), 'carol');
+  });
+  const grant = (by: string, to: string, v = true) =>
+    updateDoc(doc(as(by), 'teams', TEAM, 'members', to), { canCommand: v });
+  const order = (by: string, id = 'o1') => setDoc(doc(as(by), 'teams', TEAM, 'markers', id), marker(by, 'order-attack'));
+
+  test('only the creator grants command rights', async () => {
+    await assertFails(grant('bob', 'bob'));
+    await assertFails(grant('bob', 'carol'));
+    await assertSucceeds(grant('alice', 'bob'));
+  });
+  test('the creator cannot touch anything but rights on someone else', async () => {
+    await assertFails(updateDoc(doc(as('alice'), 'teams', TEAM, 'members', 'bob'), { canCommand: true, lat: 1 }));
+  });
+  test('members cannot change their own rights', async () => {
+    await grant('alice', 'bob');
+    await assertFails(grant('bob', 'bob', false));
+  });
+  test('orders: creator and granted members only', async () => {
+    await assertSucceeds(order('alice', 'o1'));
+    await assertFails(order('bob', 'o2'));
+    await grant('alice', 'bob');
+    await assertSucceeds(order('bob', 'o3'));
+  });
+  test('plain members cannot cancel orders but can clear markers', async () => {
+    await order('alice', 'o1');
+    await setDoc(doc(as('alice'), 'teams', TEAM, 'markers', 'm1'), marker('alice'));
+    await assertFails(deleteDoc(doc(as('carol'), 'teams', TEAM, 'markers', 'o1')));
+    await assertSucceeds(deleteDoc(doc(as('carol'), 'teams', TEAM, 'markers', 'm1')));
+    await grant('alice', 'carol');
+    await assertSucceeds(deleteDoc(doc(as('carol'), 'teams', TEAM, 'markers', 'o1')));
   });
 });

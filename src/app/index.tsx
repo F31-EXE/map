@@ -1,14 +1,15 @@
 import * as Haptics from 'expo-haptics';
 import { router } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, Platform, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useSelfPosition } from '../hooks/useSelfPosition';
 import { bearingDegrees, distanceMeters, formatCoords, formatDistance, timeAgo } from '../lib/geo';
-import { MARKER_KINDS } from '../lib/markerKinds';
+import { isOrder, MARKER_KINDS } from '../lib/markerKinds';
+import { ROLES } from '../lib/roles';
 import { KEYS, loadJson, saveJson } from '../lib/storage';
-import type { LatLng, MarkerKind, SelfPosition } from '../lib/types';
+import type { LatLng, MarkerKind, SelfPosition, TacMarker } from '../lib/types';
 import {
   BASE_LAYERS,
   STALE_MS,
@@ -17,9 +18,9 @@ import {
   type TacticalMapHandle,
 } from '../map/TacticalMap';
 import { useOverlays } from '../state/overlays';
-import { useSession } from '../state/session';
+import { useSession, type MarkerScope } from '../state/session';
 import { AddMarkerModal } from '../ui/AddMarkerModal';
-import { Avatar, Button, Glass, GlassButton, Icon, Sheet, tap } from '../ui/components';
+import { Avatar, Button, Glass, GlassButton, Icon, RoleIcon, Sheet, tap } from '../ui/components';
 import { InfoSheet, type Stat } from '../ui/InfoSheet';
 import { C, eyebrow, F, R } from '../ui/theme';
 
@@ -34,6 +35,32 @@ function vectorStats(from: SelfPosition | null, to: LatLng): Stat[] {
   ];
 }
 
+function markerSubtitle(m: TacMarker): string {
+  const parts = [
+    m.label ? MARKER_KINDS[m.kind].title : null,
+    m.personal ? 'личная метка' : isOrder(m.kind) ? `приказ: ${m.createdByName}` : m.createdByName,
+    timeAgo(m.createdAt),
+  ];
+  return parts.filter(Boolean).join(' · ');
+}
+
+function KindBadge({ kind }: { kind: MarkerKind }) {
+  const def = MARKER_KINDS[kind];
+  return (
+    <View
+      style={[
+        styles.kindBadge,
+        { borderColor: def.color, backgroundColor: def.color + '22' },
+        isOrder(kind) && { borderRadius: 14, transform: [{ rotate: '45deg' }] },
+      ]}
+    >
+      <View style={isOrder(kind) ? { transform: [{ rotate: '-45deg' }] } : undefined}>
+        <Icon name={def.icon} size={26} color={def.color} />
+      </View>
+    </View>
+  );
+}
+
 function gpsColor(acc: number | null | undefined) {
   if (acc == null) return C.faint;
   if (acc <= 10) return C.online;
@@ -43,6 +70,8 @@ function gpsColor(acc: number | null | undefined) {
 
 export default function MapScreen() {
   const insets = useSafeAreaInsets();
+  const { width, height } = useWindowDimensions();
+  const landscape = width > height;
   const session = useSession();
   const { overlays, focusRequest, requestFocus } = useOverlays();
   const { position, status } = useSelfPosition();
@@ -94,10 +123,10 @@ export default function MapScreen() {
   const onMarkerPress = useCallback((id: string) => setSelection({ type: 'marker', id }), []);
   const onMemberPress = useCallback((id: string) => setSelection({ type: 'member', id }), []);
 
-  const saveMarker = async (kind: MarkerKind, label: string) => {
+  const saveMarker = async (kind: MarkerKind, label: string, scope: MarkerScope) => {
     if (!addAt) return;
     try {
-      await session.addMarker({ kind, label, lat: addAt.lat, lng: addAt.lng });
+      await session.addMarker({ kind, label, lat: addAt.lat, lng: addAt.lng }, scope);
       setAddAt(null);
       if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
     } catch (e) {
@@ -136,6 +165,8 @@ export default function MapScreen() {
         follow={follow}
         members={session.members}
         selfId={session.uid}
+        teamColor={session.teamColor}
+        ownerId={session.team?.ownerId ?? null}
         markers={session.markers}
         overlays={overlays}
         focusOverlay={focusRequest}
@@ -151,7 +182,13 @@ export default function MapScreen() {
       <Reticle />
 
       {/* Top: team status + tools */}
-      <View style={[styles.top, { top: insets.top + 10 }]}>
+      <View
+        style={[
+          styles.top,
+          { top: insets.top + 10, left: 12 + insets.left, right: 12 + insets.right },
+          landscape && { right: undefined, width: Math.min(420, width - 100) },
+        ]}
+      >
         <Pressable
           style={({ pressed }) => [{ flex: 1 }, pressed && { opacity: 0.8 }]}
           onPress={() => {
@@ -179,7 +216,7 @@ export default function MapScreen() {
         </Pressable>
       </View>
 
-      <View style={[styles.tools, { top: insets.top + 74 }]}>
+      <View style={[styles.tools, { top: insets.top + 74, right: 12 + insets.right }]}>
         <Glass radius={R.lg} style={styles.toolbar}>
           <ToolbarButton icon="layers-triple-outline" label="Подложка" onPress={() => setLayerPicker(true)} />
           <View style={styles.toolbarSep} />
@@ -188,14 +225,27 @@ export default function MapScreen() {
       </View>
 
       {banner && (
-        <Glass radius={R.md} style={[styles.banner, { top: insets.top + 74 }]}>
+        <Glass
+          radius={R.md}
+          style={[
+            styles.banner,
+            { top: insets.top + 74, left: 12 + insets.left },
+            landscape && { right: undefined, width: Math.min(420, width - 100) },
+          ]}
+        >
           <Icon name="alert-circle" size={18} color={C.danger} />
           <Text style={styles.bannerText}>{banner}</Text>
         </Glass>
       )}
 
       {/* Bottom-right actions */}
-      <View style={[styles.actions, { bottom: insets.bottom + 108 }]}>
+      <View
+        style={[
+          styles.actions,
+          { bottom: insets.bottom + (landscape ? 12 : 108), right: 12 + insets.right },
+          landscape && { flexDirection: 'row-reverse' },
+        ]}
+      >
         <GlassButton
           icon={follow ? 'crosshairs-gps' : 'crosshairs'}
           label="Моё местоположение"
@@ -223,7 +273,14 @@ export default function MapScreen() {
       </View>
 
       {/* Bottom HUD */}
-      <Glass radius={R.lg} style={[styles.hud, { bottom: insets.bottom + 12 }]}>
+      <Glass
+        radius={R.lg}
+        style={[
+          styles.hud,
+          { bottom: insets.bottom + 12, left: 12 + insets.left, right: 12 + insets.right },
+          landscape && { right: undefined, width: Math.min(520, width - 200 - insets.left - insets.right) },
+        ]}
+      >
         <View style={{ flex: 1.3 }}>
           <Text style={eyebrow}>Перекрестие</Text>
           <Text style={styles.hudValue} numberOfLines={1}>
@@ -247,43 +304,36 @@ export default function MapScreen() {
         </View>
       </Glass>
 
-      <AddMarkerModal at={addAt} shared={inTeam} onCancel={() => setAddAt(null)} onSave={saveMarker} />
+      <AddMarkerModal
+        at={addAt}
+        inTeam={inTeam}
+        canCommand={session.canCommand}
+        onCancel={() => setAddAt(null)}
+        onSave={saveMarker}
+      />
 
       {/* Marker details */}
       <InfoSheet
         visible={!!selectedMarker}
         onClose={() => setSelection(null)}
-        leading={
-          selectedMarker && (
-            <View
-              style={[
-                styles.kindBadge,
-                { borderColor: MARKER_KINDS[selectedMarker.kind].color, backgroundColor: MARKER_KINDS[selectedMarker.kind].color + '22' },
-              ]}
-            >
-              <Icon name={MARKER_KINDS[selectedMarker.kind].icon} size={26} color={MARKER_KINDS[selectedMarker.kind].color} />
-            </View>
-          )
-        }
+        leading={selectedMarker && <KindBadge kind={selectedMarker.kind} />}
         title={selectedMarker?.label || (selectedMarker ? MARKER_KINDS[selectedMarker.kind].title : '')}
-        subtitle={
-          selectedMarker &&
-          `${selectedMarker.label ? MARKER_KINDS[selectedMarker.kind].title + ' · ' : ''}${selectedMarker.createdByName}, ${timeAgo(selectedMarker.createdAt)}`
-        }
+        subtitle={selectedMarker && markerSubtitle(selectedMarker)}
         stats={selectedMarker ? vectorStats(position, selectedMarker) : []}
       >
-        <Button
-          title="Удалить метку"
-          kind="danger"
-          icon="trash-can-outline"
-          onPress={() => {
-            if (!selectedMarker) return;
-            session
-              .deleteMarker(selectedMarker.id)
-              .then(() => setSelection(null))
-              .catch((e: Error) => Alert.alert('Ошибка', e.message));
-          }}
-        />
+        {selectedMarker && (!isOrder(selectedMarker.kind) || session.canCommand) && (
+          <Button
+            title={isOrder(selectedMarker.kind) ? 'Отменить приказ' : 'Удалить метку'}
+            kind="danger"
+            icon="trash-can-outline"
+            onPress={() => {
+              session
+                .deleteMarker(selectedMarker)
+                .then(() => setSelection(null))
+                .catch((e: Error) => Alert.alert('Ошибка', e.message));
+            }}
+          />
+        )}
       </InfoSheet>
 
       {/* Teammate details */}
@@ -292,16 +342,31 @@ export default function MapScreen() {
         onClose={() => setSelection(null)}
         leading={
           selectedMember && (
-            <Avatar
-              name={selectedMember.callsign}
-              color={selectedMember.color}
-              size={52}
-              dim={!selectedMember.updatedAt || now - selectedMember.updatedAt > STALE_MS}
-            />
+            <View>
+              <Avatar
+                name={selectedMember.callsign}
+                color={session.teamColor}
+                uri={session.avatars[selectedMember.id]}
+                size={56}
+                dim={!selectedMember.updatedAt || now - selectedMember.updatedAt > STALE_MS}
+              />
+              <View style={[styles.roleBadge, { backgroundColor: session.teamColor }]}>
+                <RoleIcon role={selectedMember.role} size={16} color={C.accentInk} />
+              </View>
+            </View>
           )
         }
         title={selectedMember?.callsign ?? ''}
-        subtitle={selectedMember?.updatedAt ? `На связи ${timeAgo(selectedMember.updatedAt)}` : 'Нет данных'}
+        subtitle={
+          selectedMember &&
+          [
+            ROLES[selectedMember.role].title,
+            selectedMember.canCommand || selectedMember.id === session.team?.ownerId ? 'отдаёт приказы' : null,
+            selectedMember.updatedAt ? `на связи ${timeAgo(selectedMember.updatedAt)}` : null,
+          ]
+            .filter(Boolean)
+            .join(' · ')
+        }
         stats={
           selectedMember && selectedMember.lat != null && selectedMember.lng != null
             ? vectorStats(position, { lat: selectedMember.lat, lng: selectedMember.lng })
@@ -439,6 +504,18 @@ const styles = StyleSheet.create({
   gpsDot: { width: 8, height: 8, borderRadius: 4 },
   gpsText: { color: C.dim, fontSize: 11, fontFamily: F.mono },
 
+  roleBadge: {
+    position: 'absolute',
+    right: -4,
+    bottom: -4,
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    borderWidth: 2,
+    borderColor: C.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   kindBadge: {
     width: 52,
     height: 52,

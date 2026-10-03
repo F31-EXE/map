@@ -110,7 +110,7 @@ export default function MapsScreen() {
 }
 
 const styles = StyleSheet.create({
-  content: { padding: 16, gap: 10, paddingBottom: 48 },
+  content: { padding: 16, gap: 10, paddingBottom: 48, width: '100%', maxWidth: 640, alignSelf: 'center' },
   drop: {
     alignItems: 'center',
     gap: 6,

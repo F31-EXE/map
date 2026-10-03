@@ -52,6 +52,8 @@
     tapHold: false,
   }).setView([55.751, 37.618], 10);
   map.attributionControl.setPrefix(false);
+  // Exposed for automated layout tests.
+  window.__tacmapMap = map;
   L.control.scale({ imperial: false, position: 'bottomleft' }).addTo(map);
 
   var baseGroup = L.layerGroup().addTo(map);
@@ -88,23 +90,35 @@
   var selfAccuracy = null;
   var follow = false;
 
-  function selfIcon(heading) {
-    var cone =
-      heading == null
-        ? ''
-        : '<div class="self-cone" style="transform: rotate(' + heading + 'deg)"></div>';
-    return L.divIcon({
-      className: 'self-icon',
-      html: cone + '<div class="self-pulse"></div><div class="self-dot"></div>',
-      iconSize: [80, 80],
-      iconAnchor: [40, 40],
-    });
+  // Built once; heading updates only rotate the cone so the pulse animation
+  // isn't restarted and the marker doesn't flicker.
+  var selfIcon = L.divIcon({
+    className: 'self-icon',
+    html: '<div class="self-cone"></div><div class="self-pulse"></div><div class="self-dot"></div>',
+    iconSize: [80, 80],
+    iconAnchor: [40, 40],
+  });
+  var coneAngle = null;
+
+  function setHeading(heading) {
+    var el = selfMarker && selfMarker.getElement();
+    var cone = el && el.querySelector('.self-cone');
+    if (!cone) return;
+    if (heading == null) {
+      cone.style.display = 'none';
+      return;
+    }
+    // Unwrap so 359° → 1° turns 2° forward instead of spinning all the way back.
+    coneAngle = coneAngle == null ? heading : coneAngle + ((((heading - coneAngle) % 360) + 540) % 360) - 180;
+    cone.style.display = '';
+    cone.style.transform = 'rotate(' + coneAngle + 'deg)';
   }
 
   function setSelf(p) {
     if (!p) {
       selfLayer.clearLayers();
       selfMarker = selfAccuracy = null;
+      coneAngle = null;
       return;
     }
     var ll = [p.lat, p.lng];
@@ -117,15 +131,13 @@
         opacity: 0.5,
         fillOpacity: 0.08,
       }).addTo(selfLayer);
-      selfMarker = L.marker(ll, { icon: selfIcon(p.heading), interactive: false, zIndexOffset: 1000 }).addTo(
-        selfLayer
-      );
+      selfMarker = L.marker(ll, { icon: selfIcon, interactive: false, zIndexOffset: 1000 }).addTo(selfLayer);
     } else {
       selfMarker.setLatLng(ll);
-      selfMarker.setIcon(selfIcon(p.heading));
       selfAccuracy.setLatLng(ll);
       selfAccuracy.setRadius(p.accuracy || 0);
     }
+    setHeading(p.heading);
     if (follow) map.panTo(ll, { animate: true });
   }
 
@@ -169,24 +181,43 @@
   var membersLayer = L.layerGroup().addTo(map);
   var memberMarkers = {};
 
-  var NAV_PATH = 'M12,2L4.5,20.29L5.21,21L12,18L18.79,21L19.5,20.29L12,2Z';
+  var STAR_PATH = 'M12,17.27L18.18,21L16.54,13.97L22,9.24L14.81,8.62L12,2L9.19,8.62L2,9.24L7.45,13.97L5.82,21L12,17.27Z';
 
+  // Teammate: team-colored disc with the role glyph, a heading tip outside the disc,
+  // and a star badge for anyone allowed to issue orders.
   function memberIcon(m) {
     var c = escapeHtml(m.color);
-    var body =
-      m.heading == null
-        ? '<div class="member-dot" style="background:' + c + '"></div>'
-        : '<svg class="member-arrow" viewBox="0 0 24 24" style="transform: rotate(' + m.heading + 'deg)">' +
-          '<path d="' + NAV_PATH + '" fill="' + c + '" stroke="#0B0F0C" stroke-width="1.2" stroke-linejoin="round"/></svg>';
     return L.divIcon({
       className: 'member-icon' + (m.stale ? ' stale' : ''),
       html:
         (m.stale ? '' : '<div class="member-halo" style="background:' + c + '"></div>') +
-        body +
-        '<div class="chip"><span class="chip-dot" style="background:' + c + '"></span>' + escapeHtml(m.callsign) + '</div>',
-      iconSize: [28, 28],
-      iconAnchor: [14, 14],
+        '<div class="member-dir"><div class="member-dir-tip" style="border-bottom-color:' + c + '"></div></div>' +
+        '<div class="member-pin" style="background:' + c + '">' +
+        '<svg viewBox="0 0 24 24"><path d="' + escapeHtml(m.rolePath) + '" fill="#0B0F0C"/></svg></div>' +
+        (m.commander
+          ? '<div class="member-badge"><svg viewBox="0 0 24 24"><path d="' + STAR_PATH + '" fill="#0B0F0C"/></svg></div>'
+          : '') +
+        '<div class="chip">' + escapeHtml(m.callsign) + '</div>',
+      iconSize: [32, 32],
+      iconAnchor: [16, 16],
     });
+  }
+
+  // Heading changes often; rotate in place instead of rebuilding the icon.
+  function applyMemberHeading(mk, heading) {
+    var el = mk.getElement && mk.getElement();
+    var dir = el && el.querySelector('.member-dir');
+    if (!dir) return;
+    if (heading == null) {
+      dir.style.display = 'none';
+      return;
+    }
+    dir.style.display = '';
+    dir.style.transform = 'rotate(' + heading + 'deg)';
+  }
+
+  function memberKey(m) {
+    return JSON.stringify([m.callsign, m.color, m.stale, m.rolePath, m.commander]);
   }
 
   function setMembers(list) {
@@ -199,17 +230,23 @@
         mk.on('click', function () {
           post('memberTap', { id: mk._tacId });
         });
+        mk.on('add', function () {
+          applyMemberHeading(mk, mk._heading);
+        });
         mk._tacId = m.id;
-        mk._tacKey = JSON.stringify([m.callsign, m.color, m.stale, m.heading]);
+        mk._tacKey = memberKey(m);
+        mk._heading = m.heading;
         return mk;
       },
       function (mk, m) {
         mk.setLatLng([m.lat, m.lng]);
-        var key = JSON.stringify([m.callsign, m.color, m.stale, m.heading]);
+        var key = memberKey(m);
         if (key !== mk._tacKey) {
           mk._tacKey = key;
           mk.setIcon(memberIcon(m));
         }
+        mk._heading = m.heading;
+        applyMemberHeading(mk, m.heading);
       }
     );
   }
@@ -221,10 +258,11 @@
     var c = escapeHtml(m.color);
     var label = m.label ? '<div class="chip tac-chip">' + escapeHtml(m.label) + '</div>' : '';
     return L.divIcon({
-      className: 'tac-icon',
+      className: 'tac-icon' + (m.order ? ' order' : '') + (m.personal ? ' personal' : ''),
       html:
         '<div class="tac-pin" style="border-color:' + c + ';box-shadow:0 0 0 4px ' + c + '33, 0 4px 14px rgba(0,0,0,.6)">' +
         '<svg viewBox="0 0 24 24"><path d="' + escapeHtml(m.path) + '" fill="' + c + '"/></svg></div>' +
+        (m.order ? '<div class="order-ring" style="border-color:' + c + '"></div>' : '') +
         label,
       iconSize: [36, 36],
       iconAnchor: [18, 18],
@@ -239,7 +277,7 @@
       function (m) {
         var mk = L.marker([m.lat, m.lng], { icon: tacIcon(m) });
         mk._tacId = m.id;
-        mk._tacKey = JSON.stringify([m.path, m.color, m.label]);
+        mk._tacKey = JSON.stringify([m.path, m.color, m.label, m.order, m.personal]);
         mk.on('click', function () {
           post('markerTap', { id: mk._tacId });
         });
@@ -247,7 +285,7 @@
       },
       function (mk, m) {
         mk.setLatLng([m.lat, m.lng]);
-        var key = JSON.stringify([m.path, m.color, m.label]);
+        var key = JSON.stringify([m.path, m.color, m.label, m.order, m.personal]);
         if (key !== mk._tacKey) {
           mk._tacKey = key;
           mk.setIcon(tacIcon(m));

@@ -4,6 +4,9 @@ import * as Haptics from 'expo-haptics';
 import type { ComponentProps, ReactNode } from 'react';
 import {
   ActivityIndicator,
+  Image,
+  ScrollView,
+  useWindowDimensions,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -15,6 +18,9 @@ import {
   type ViewStyle,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import Svg, { Path } from 'react-native-svg';
+
+import { ROLES, type RoleId } from '../lib/roles';
 
 import { C, eyebrow, F, R, shadow } from './theme';
 
@@ -159,7 +165,20 @@ export function Eyebrow({ children, style }: { children: ReactNode; style?: Styl
   );
 }
 
-export function Avatar({ name, color, size = 40, dim }: { name: string; color: string; size?: number; dim?: boolean }) {
+export function Avatar({
+  name,
+  color,
+  size = 40,
+  dim,
+  uri,
+}: {
+  name: string;
+  color: string;
+  size?: number;
+  dim?: boolean;
+  /** Photo (data URI); falls back to initials. */
+  uri?: string | null;
+}) {
   const initials =
     name
       .trim()
@@ -168,22 +187,28 @@ export function Avatar({ name, color, size = 40, dim }: { name: string; color: s
       .join('')
       .slice(0, 2)
       .toUpperCase() || '?';
+  const frame = {
+    width: size,
+    height: size,
+    borderRadius: size / 2,
+    borderWidth: 1.5,
+    borderColor: color,
+    opacity: dim ? 0.45 : 1,
+  };
+  if (uri) return <Image source={{ uri }} style={[frame, { backgroundColor: C.elevated }]} />;
   return (
-    <View
-      style={{
-        width: size,
-        height: size,
-        borderRadius: size / 2,
-        backgroundColor: color + '26',
-        borderWidth: 1.5,
-        borderColor: color,
-        alignItems: 'center',
-        justifyContent: 'center',
-        opacity: dim ? 0.45 : 1,
-      }}
-    >
+    <View style={[frame, { backgroundColor: color + '26', alignItems: 'center', justifyContent: 'center' }]}>
       <Text style={{ color, fontFamily: F.bold, fontSize: size * 0.38 }}>{initials}</Text>
     </View>
+  );
+}
+
+/** Squad-style role glyph (see src/lib/roles.ts). */
+export function RoleIcon({ role, size = 22, color = C.text }: { role: RoleId; size?: number; color?: string }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <Path d={ROLES[role].path} fill={color} />
+    </Svg>
   );
 }
 
@@ -206,13 +231,33 @@ export function Sheet({
   children: ReactNode;
 }) {
   const insets = useSafeAreaInsets();
+  const { width, height } = useWindowDimensions();
+  const wide = width > 640;
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose} statusBarTranslucent>
+    <Modal visible={visible} supportedOrientations={['portrait', 'landscape']} transparent animationType="slide" onRequestClose={onClose} statusBarTranslucent>
       <Pressable style={styles.backdrop} onPress={onClose} />
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <View style={[styles.sheet, { paddingBottom: insets.bottom + 20 }]}>
+        <View
+          style={[
+            styles.sheet,
+            {
+              maxHeight: height * 0.9,
+              paddingLeft: 20 + insets.left,
+              paddingRight: 20 + insets.right,
+            },
+            wide && styles.sheetWide,
+          ]}
+        >
           <View style={styles.grabber} />
-          {children}
+          {/* Scrolls when the content doesn't fit, e.g. in landscape. */}
+          <ScrollView
+            contentContainerStyle={{ gap: 16, paddingBottom: insets.bottom + 20 }}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+            bounces={false}
+          >
+            {children}
+          </ScrollView>
         </View>
       </KeyboardAvoidingView>
     </Modal>
@@ -248,11 +293,11 @@ const styles = StyleSheet.create({
   badge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: R.pill, borderWidth: 1 },
   badgeText: { fontSize: 11, fontFamily: F.semibold, letterSpacing: 0.6 },
   backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' },
+  sheetWide: { width: 600, alignSelf: 'center' },
   sheet: {
     backgroundColor: C.surface,
-    paddingHorizontal: 20,
     paddingTop: 10,
-    gap: 16,
+    gap: 12,
     borderTopLeftRadius: R.xl,
     borderTopRightRadius: R.xl,
     borderTopWidth: 1,
