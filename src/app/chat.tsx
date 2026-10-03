@@ -10,6 +10,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { useHeaderHeight } from 'expo-router/react-navigation';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { formatClock } from '../lib/geo';
@@ -26,6 +27,7 @@ export default function ChatScreen() {
   const { messages, markRead, send } = useChat();
   const { uid, teamId, teamColor } = useSession();
   const insets = useSafeAreaInsets();
+  const headerHeight = useHeaderHeight();
   const [text, setText] = useState('');
   const list = useRef<FlatList<ChatMessage>>(null);
 
@@ -53,8 +55,8 @@ export default function ChatScreen() {
   return (
     <KeyboardAvoidingView
       style={styles.root}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
+      behavior="padding"
+      keyboardVerticalOffset={headerHeight}
     >
       <FlatList
         ref={list}

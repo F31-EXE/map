@@ -851,6 +851,12 @@
       map.fitBounds(b, { padding: [70, 70], maxZoom: 17 });
     },
     setDraw: setDraw,
+    // Keeps the scale bar and attribution above the native bottom panel.
+    setInsets: function (p) {
+      var b = Math.max(0, Math.round(p.bottom || 0)) + 'px';
+      var corners = map.getContainer().querySelectorAll('.leaflet-bottom');
+      for (var i = 0; i < corners.length; i++) corners[i].style.marginBottom = b;
+    },
     setAnalysis: setAnalysis,
     setMembers: setMembers,
     setMarkers: setMarkers,

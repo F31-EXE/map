@@ -1,7 +1,8 @@
 import * as Clipboard from 'expo-clipboard';
 import { router } from 'expo-router';
+import { useHeaderHeight } from 'expo-router/react-navigation';
 import { useEffect, useState } from 'react';
-import { Alert, Pressable, ScrollView, Share, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
+import { Alert, Pressable, Share, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 
 import { formatClock, timeAgo } from '../lib/geo';
 import { inviteUrl } from '../lib/invite';
@@ -13,7 +14,7 @@ import * as recordings from '../services/recordings';
 import { useSession } from '../state/session';
 import { useSide } from '../state/side';
 import { QrCode } from '../ui/QrCode';
-import { Avatar, Badge, Button, Card, Eyebrow, Icon, RoleIcon, tap, type IconName } from '../ui/components';
+import { Avatar, Badge, Button, Card, Eyebrow, Icon, KeyboardScroll, RoleIcon, tap, type IconName } from '../ui/components';
 import { C, F, R } from '../ui/theme';
 
 function useAction() {
@@ -33,6 +34,7 @@ function useAction() {
 
 export default function TeamScreen() {
   const s = useSession();
+  const headerHeight = useHeaderHeight();
   const { busy, run } = useAction();
   const [callsign, setCallsign] = useState(s.callsign);
   const [teamName, setTeamName] = useState('');
@@ -72,7 +74,7 @@ export default function TeamScreen() {
   };
 
   return (
-    <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+    <KeyboardScroll contentContainerStyle={styles.content} headerOffset={headerHeight}>
       {/* Profile: avatar, callsign, role */}
       <Card style={{ gap: 16 }}>
         <View style={styles.profile}>
@@ -477,7 +479,7 @@ export default function TeamScreen() {
           </Card>
         </Pressable>
       )}
-    </ScrollView>
+    </KeyboardScroll>
   );
 }
 

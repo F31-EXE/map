@@ -59,3 +59,5 @@ Docs: https://docs.expo.dev/eas/index.md
 - Invite QR/links: `src/lib/invite.ts` (`grimmap://join?team=…|side=…`), scanner `src/app/scan.tsx`, deep-link route `src/app/join.tsx`.
 - Marker votes (`staleVotes`/`doneVotes`, threshold in `voteThreshold`), arrows (`kind: 'arrow'` + `points` + `color`, drawn by `setDraw`/`drawChanged` in map.js), chat (`src/services/chat.ts`, client-generated ids so a future Bluetooth relay can dedupe), recordings (`src/services/recordings.ts`; heatmap via `leaflet.heat`, inlined by build-map-html; samples are resampled by time in `src/lib/tracks.ts`).
 - `npm test` uses `scripts/ts-resolve.mjs` so tests can import app modules with extensionless imports.
+- Marker deletion follows the chain of command (`src/lib/ranks.ts`, mirrored by `rank()` in firestore.rules): own markers or strictly lower rank.
+- Use `KeyboardScroll` (components.tsx) for screens with text inputs; `Sheet` already keeps the focused input above the keyboard.

@@ -44,6 +44,17 @@ service cloud.firestore {
       let t = get(teamPath(teamId)).data;
       return isSideOwner(t.get('sideId', null));
     }
+    // 4 side commander, 3 squad creator, 2 member with command rights, 1 fighter.
+    // Mirrors src/lib/ranks.ts.
+    function rank(teamId, uid) {
+      let t = get(teamPath(teamId)).data;
+      let sideId = t.get('sideId', null);
+      let m = memberPath(teamId, uid);
+      return sideId != null && get(sidePath(sideId)).data.ownerId == uid ? 4
+        : t.ownerId == uid ? 3
+        : exists(m) && get(m).data.get('canCommand', false) == true ? 2
+        : 1;
+    }
     function isOrderKind(kind) {
       return kind in ['order-move', 'order-attack', 'order-defend'];
     }
@@ -172,9 +183,10 @@ service cloud.firestore {
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['staleVotes', 'doneVotes'])
           && votedOnlyAsSelf('staleVotes')
           && votedOnlyAsSelf('doneVotes');
-        // Anyone clears plain markers; only commanders cancel orders.
-        allow delete: if (isMember(teamId) && (!isOrderKind(resource.data.kind) || canCommand(teamId)))
-          || isSideCommanderOf(teamId);
+        // Chain of command: your own markers, or those of anyone strictly below you.
+        allow delete: if (isMember(teamId) || isSideCommanderOf(teamId))
+          && (resource.data.createdBy == request.auth.uid
+            || rank(teamId, request.auth.uid) > rank(teamId, resource.data.createdBy));
       }
 
       // Movement recordings: commanders start/stop, everyone appends to their own track.

@@ -131,6 +131,8 @@ export default function MapScreen() {
   const [addAt, setAddAt] = useState<LatLng | null>(null);
   const [selection, setSelection] = useState<Selection>(null);
   const [drawing, setDrawing] = useState<Drawing | null>(null);
+  // Top edge of the bottom HUD, measured, so the map's scale bar sits above it.
+  const [hudTop, setHudTop] = useState<number | null>(null);
   const drawingRef = useRef(false);
   drawingRef.current = drawing != null;
   const centeredOnce = useRef(false);
@@ -249,6 +251,7 @@ export default function MapScreen() {
         onViewChanged={setCenter}
         onFollowChanged={setFollow}
         onOverlayError={onOverlayError}
+        bottomInset={hudTop == null ? undefined : height - hudTop + 6}
         drawing={drawing}
         onDrawChanged={(points) => setDrawing((d) => (d ? { ...d, points } : d))}
       />
@@ -441,6 +444,7 @@ export default function MapScreen() {
       {/* Bottom HUD */}
       <Glass
         radius={R.lg}
+        onLayout={(e) => setHudTop(e.nativeEvent.layout.y)}
         style={[
           drawing && { display: 'none' },
           styles.hud,
@@ -503,8 +507,7 @@ export default function MapScreen() {
             }
           />
         )}
-        {selectedMarker &&
-          (!isOrder(selectedMarker.kind) || session.canCommand || side.isSideCommander) && (
+        {selectedMarker && side.canDelete(selectedMarker) && (
           <Button
             title={isOrder(selectedMarker.kind) ? 'Отменить приказ' : 'Удалить метку'}
             kind="danger"

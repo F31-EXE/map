@@ -63,6 +63,8 @@ type Props = {
     showTracks: boolean;
     showHeat: boolean;
   } | null;
+  /** Pixels at the bottom covered by native panels (scale bar goes above). */
+  bottomInset?: number;
   /** Arrow drawing mode: taps add points (reported via onDrawChanged). */
   drawing?: { color: string; points: LatLng[] } | null;
   onDrawChanged?: (points: LatLng[]) => void;
@@ -157,6 +159,11 @@ export function TacticalMap(props: Props) {
   useEffect(() => {
     if (ready) send({ type: 'setAnalysis', payload: analysis ?? null });
   }, [ready, generation, analysis, send]);
+
+  const { bottomInset } = props;
+  useEffect(() => {
+    if (ready && bottomInset != null) send({ type: 'setInsets', payload: { bottom: bottomInset } });
+  }, [ready, generation, bottomInset, send]);
 
   const drawing = props.drawing;
   useEffect(() => {

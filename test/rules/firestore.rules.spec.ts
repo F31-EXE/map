@@ -195,13 +195,25 @@ describe('command rights and orders', () => {
     await grant('alice', 'bob');
     await assertSucceeds(order('bob', 'o3'));
   });
-  test('plain members cannot cancel orders but can clear markers', async () => {
+  test('chain of command decides who may delete', async () => {
+    // alice: squad creator (3), bob: sergeant (2), carol: fighter (1)
+    await grant('alice', 'bob');
+    const put = (by: string, id: string) => setDoc(doc(as(by), 'teams', TEAM, 'markers', id), marker(by));
+    const del = (by: string, id: string) => deleteDoc(doc(as(by), 'teams', TEAM, 'markers', id));
     await order('alice', 'o1');
-    await setDoc(doc(as('alice'), 'teams', TEAM, 'markers', 'm1'), marker('alice'));
-    await assertFails(deleteDoc(doc(as('carol'), 'teams', TEAM, 'markers', 'o1')));
-    await assertSucceeds(deleteDoc(doc(as('carol'), 'teams', TEAM, 'markers', 'm1')));
-    await grant('alice', 'carol');
-    await assertSucceeds(deleteDoc(doc(as('carol'), 'teams', TEAM, 'markers', 'o1')));
+    await put('bob', 'b1');
+    await put('carol', 'c1');
+    await put('carol', 'c2');
+    await assertFails(del('carol', 'o1')); // fighter vs creator's order
+    await assertFails(del('carol', 'b1')); // fighter vs sergeant
+    await assertFails(del('bob', 'o1')); // sergeant vs creator
+    await assertSucceeds(del('carol', 'c1')); // own
+    await assertSucceeds(del('bob', 'c2')); // sergeant over fighter
+    await assertSucceeds(del('alice', 'b1')); // creator over sergeant
+  });
+  test('fighters cannot delete each other', async () => {
+    await setDoc(doc(as('bob'), 'teams', TEAM, 'markers', 'b1'), marker('bob'));
+    await assertFails(deleteDoc(doc(as('carol'), 'teams', TEAM, 'markers', 'b1')));
   });
 });
 
@@ -256,6 +268,13 @@ describe('sides', () => {
     await assertFails(sideOrder('sam', 's2', null));
     await assertFails(setDoc(doc(as('sam'), 'teams', TEAM, 'markers', 'p1'), marker('sam')));
     await assertFails(updateDoc(doc(as('sam'), 'teams', TEAM, 'members', 'bob'), { canCommand: true }));
+  });
+  test('squad commander cannot delete the side commander\'s order; side commander deletes theirs', async () => {
+    await attach('alice');
+    await sideOrder('sam');
+    await setDoc(doc(as('alice'), 'teams', TEAM, 'markers', 'a1'), marker('alice'));
+    await assertFails(deleteDoc(doc(as('alice'), 'teams', TEAM, 'markers', 's1')));
+    await assertSucceeds(deleteDoc(doc(as('sam'), 'teams', TEAM, 'markers', 'a1')));
   });
   test('side commander cancels own orders and can drop the squad, not hijack it', async () => {
     await attach('alice');

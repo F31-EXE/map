@@ -11,6 +11,7 @@ import {
 
 import type { Invite } from '../lib/invite';
 import { isVotedOut } from '../lib/markerKinds';
+import { canDeleteMarker, rankOf, type RankContext } from '../lib/ranks';
 import { KEYS, loadJson, saveJson } from '../lib/storage';
 import type { Member, OrderKind, Side, TacMarker, Team } from '../lib/types';
 import * as sides from '../services/sides';
@@ -54,6 +55,10 @@ type SideState = {
     target: OrderTarget
   ) => Promise<void>;
   deleteMarker: (m: TacMarker) => Promise<void>;
+  /** Chain of command: own markers and those of anyone below me. */
+  canDelete: (m: TacMarker) => boolean;
+  /** My rank in my own squad (see src/lib/ranks.ts). */
+  myRank: number;
   /** Handles a scanned or opened invite link. */
   acceptInvite: (invite: Invite) => Promise<string>;
 };
@@ -288,6 +293,32 @@ export function SideProvider({ children }: { children: ReactNode }) {
     [isSideCommander, markers, sideMarkers, teamId, session]
   );
 
+  const rankContext = useCallback(
+    (teamOf: string | undefined): RankContext => {
+      const sq = teamOf && teamOf !== teamId ? squads.find((x) => x.id === teamOf) : undefined;
+      if (sq) {
+        return {
+          ownerId: sq.ownerId,
+          sideOwnerId: side?.ownerId,
+          commanders: new Set(sq.members.filter((m) => m.canCommand).map((m) => m.id)),
+        };
+      }
+      return {
+        ownerId: team?.ownerId,
+        sideOwnerId: mySquadSide?.ownerId,
+        commanders: new Set(members.filter((m) => m.canCommand).map((m) => m.id)),
+      };
+    },
+    [teamId, squads, side?.ownerId, team?.ownerId, mySquadSide?.ownerId, members]
+  );
+
+  const canDelete = useCallback(
+    (m: TacMarker) => canDeleteMarker(uid, m, rankContext(m.teamId)),
+    [uid, rankContext]
+  );
+
+  const myRank = rankOf(uid, rankContext(teamId ?? undefined));
+
   const acceptInvite = useCallback(
     async (invite: Invite) => {
       if (invite.kind === 'team') {
@@ -318,6 +349,8 @@ export function SideProvider({ children }: { children: ReactNode }) {
       mapMarkers,
       placeOrder,
       deleteMarker,
+      canDelete,
+      myRank,
       acceptInvite,
     }),
     [
@@ -337,6 +370,8 @@ export function SideProvider({ children }: { children: ReactNode }) {
       mapMarkers,
       placeOrder,
       deleteMarker,
+      canDelete,
+      myRank,
       acceptInvite,
     ]
   );

@@ -17,12 +17,9 @@ body,
   font-family: -apple-system, 'SF Pro Text', Roboto, 'Segoe UI', sans-serif;
 }
 
-/* Leave room for the native HUD drawn over the WebView. */
-.leaflet-bottom.leaflet-left {
-  margin-bottom: 104px;
-}
-.leaflet-bottom.leaflet-right {
-  margin-bottom: 96px;
+/* Room for the native HUD; the real value arrives via setInsets once it's measured. */
+.leaflet-bottom {
+  margin-bottom: 110px;
 }
 
 .leaflet-control-attribution {

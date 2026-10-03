@@ -1,10 +1,12 @@
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { BlurView } from 'expo-blur';
 import * as Haptics from 'expo-haptics';
-import type { ComponentProps, ReactNode } from 'react';
+import { useEffect, useRef, type ComponentProps, type ReactNode, type RefObject } from 'react';
 import {
   ActivityIndicator,
   Image,
+  Keyboard,
+  TextInput,
   ScrollView,
   useWindowDimensions,
   KeyboardAvoidingView,
@@ -15,6 +17,7 @@ import {
   Text,
   View,
   type StyleProp,
+  type ViewProps,
   type ViewStyle,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -43,15 +46,17 @@ export function Glass({
   style,
   radius = R.lg,
   fill,
+  onLayout,
 }: {
   children?: ReactNode;
   style?: StyleProp<ViewStyle>;
   radius?: number;
   /** Solid color instead of frosted glass (e.g. an active toggle). */
   fill?: string;
+  onLayout?: ViewProps['onLayout'];
 }) {
   return (
-    <View style={[{ borderRadius: radius }, shadow, style]}>
+    <View style={[{ borderRadius: radius }, shadow, style]} onLayout={onLayout}>
       {fill ? (
         <View style={[StyleSheet.absoluteFill, { borderRadius: radius, backgroundColor: fill }]} />
       ) : (
@@ -233,10 +238,12 @@ export function Sheet({
   const insets = useSafeAreaInsets();
   const { width, height } = useWindowDimensions();
   const wide = width > 640;
+  const scrollRef = useRef<ScrollView>(null);
+  const onOffset = useKeepFocusedInputVisible(scrollRef);
   return (
     <Modal visible={visible} supportedOrientations={['portrait', 'landscape']} transparent animationType="slide" onRequestClose={onClose} statusBarTranslucent>
       <Pressable style={styles.backdrop} onPress={onClose} />
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <KeyboardAvoidingView behavior="padding">
         <View
           style={[
             styles.sheet,
@@ -251,6 +258,9 @@ export function Sheet({
           <View style={styles.grabber} />
           {/* Scrolls when the content doesn't fit, e.g. in landscape. */}
           <ScrollView
+            ref={scrollRef}
+            onScroll={(e) => onOffset(e.nativeEvent.contentOffset.y)}
+            scrollEventThrottle={32}
             contentContainerStyle={{ gap: 16, paddingBottom: insets.bottom + 20 }}
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}
@@ -312,3 +322,55 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
 });
+
+/**
+ * After the keyboard opens, scrolls just enough to bring the focused field above it.
+ * Android's ScrollView doesn't do this on its own.
+ */
+export function useKeepFocusedInputVisible(scroll: RefObject<ScrollView | null>) {
+  const offset = useRef(0);
+  useEffect(() => {
+    const sub = Keyboard.addListener('keyboardDidShow', (e) => {
+      // Let the keyboard-avoiding layout settle first.
+      setTimeout(() => {
+        const input = TextInput.State.currentlyFocusedInput();
+        input?.measureInWindow((_x, y, _w, h) => {
+          const overlap = y + h + 24 - e.endCoordinates.screenY;
+          if (overlap > 0) scroll.current?.scrollTo({ y: offset.current + overlap, animated: true });
+        });
+      }, 80);
+    });
+    return () => sub.remove();
+  }, [scroll]);
+  return (y: number) => {
+    offset.current = y;
+  };
+}
+
+/** Screen-level scroll view that stays usable with the keyboard open. */
+export function KeyboardScroll({
+  children,
+  contentContainerStyle,
+  headerOffset = 0,
+}: {
+  children: ReactNode;
+  contentContainerStyle?: StyleProp<ViewStyle>;
+  /** Height of the navigation header above this view. */
+  headerOffset?: number;
+}) {
+  const ref = useRef<ScrollView>(null);
+  const onOffset = useKeepFocusedInputVisible(ref);
+  return (
+    <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding" keyboardVerticalOffset={headerOffset}>
+      <ScrollView
+        ref={ref}
+        contentContainerStyle={contentContainerStyle}
+        keyboardShouldPersistTaps="handled"
+        onScroll={(e) => onOffset(e.nativeEvent.contentOffset.y)}
+        scrollEventThrottle={32}
+      >
+        {children}
+      </ScrollView>
+    </KeyboardAvoidingView>
+  );
+}

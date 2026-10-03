@@ -1,6 +1,7 @@
 import * as Clipboard from 'expo-clipboard';
+import { useHeaderHeight } from 'expo-router/react-navigation';
 import { useState } from 'react';
-import { Alert, Pressable, ScrollView, Share, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
+import { Alert, Pressable, Share, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 
 import { timeAgo } from '../lib/geo';
 import { inviteUrl } from '../lib/invite';
@@ -8,12 +9,13 @@ import { TEAM_COLORS } from '../lib/roles';
 import { STALE_MS } from '../map/TacticalMap';
 import { useSession } from '../state/session';
 import { useSide, type Squad } from '../state/side';
-import { Button, Card, Eyebrow, Icon, tap } from '../ui/components';
+import { Button, Card, Eyebrow, Icon, KeyboardScroll, tap } from '../ui/components';
 import { QrCode } from '../ui/QrCode';
 import { C, F, R } from '../ui/theme';
 
 export default function SideScreen() {
   const session = useSession();
+  const headerHeight = useHeaderHeight();
   const side = useSide();
   const [name, setName] = useState('');
   const [busy, setBusy] = useState(false);
@@ -43,7 +45,7 @@ export default function SideScreen() {
 
   if (!side.isSideCommander) {
     return (
-      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+      <KeyboardScroll contentContainerStyle={styles.content} headerOffset={headerHeight}>
         <Card style={{ gap: 14 }}>
           <View style={styles.inline}>
             <Icon name="flag-variant" size={26} color={C.accent} />
@@ -67,7 +69,7 @@ export default function SideScreen() {
           />
           <Button title="Создать сторону" icon="flag-plus" busy={busy} onPress={() => run(() => side.createSide(name))} />
         </Card>
-      </ScrollView>
+      </KeyboardScroll>
     );
   }
 
@@ -77,7 +79,7 @@ export default function SideScreen() {
   const totalFighters = side.squads.reduce((n, sq) => n + sq.members.length, 0);
 
   return (
-    <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+    <KeyboardScroll contentContainerStyle={styles.content} headerOffset={headerHeight}>
       <Card style={{ gap: 14, alignItems: 'center' }}>
         <View style={{ alignSelf: 'stretch' }}>
           <Eyebrow>Сторона</Eyebrow>
@@ -175,7 +177,7 @@ export default function SideScreen() {
           )
         }
       />
-    </ScrollView>
+    </KeyboardScroll>
   );
 }
 
