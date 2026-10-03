@@ -1,8 +1,11 @@
 import * as Location from 'expo-location';
 import { useEffect, useRef, useState } from 'react';
+import { Platform } from 'react-native';
 
 import { angleDiff, HeadingSmoother } from '../lib/heading';
 import type { SelfPosition } from '../lib/types';
+
+import { watchWebCompass } from './webCompass';
 
 const HEADING_STEP = 4;
 const HEADING_MIN_INTERVAL_MS = 120;
@@ -25,7 +28,7 @@ export function useSelfPosition(enabled = true) {
     let cancelled = false;
     let lastEmit = 0;
     const smoother = new HeadingSmoother();
-    const subs: Location.LocationSubscription[] = [];
+    const subs: { remove: () => void }[] = [];
 
     (async () => {
       try {
@@ -53,24 +56,31 @@ export function useSelfPosition(enabled = true) {
           )
         );
 
-        try {
-          subs.push(
-            await Location.watchHeadingAsync((h) => {
-              const raw = h.trueHeading >= 0 ? h.trueHeading : h.magHeading;
-              if (raw < 0) return;
-              const v = smoother.push(raw);
-              const now = Date.now();
-              // Ignore compass noise: only small-but-real turns, at most ~8 times a second.
-              if (heading.current != null && angleDiff(v, heading.current) < HEADING_STEP) return;
-              if (now - lastEmit < HEADING_MIN_INTERVAL_MS) return;
-              lastEmit = now;
-              heading.current = Math.round(v);
-              setCompass(heading.current);
-              setPosition((p) => (p ? { ...p, heading: heading.current } : p));
-            })
-          );
-        } catch {
-          // No compass (e.g. emulator) — GPS course only.
+        const onRawHeading = (raw: number) => {
+          const v = smoother.push(raw);
+          const now = Date.now();
+          // Ignore compass noise: only small-but-real turns, at most ~8 times a second.
+          if (heading.current != null && angleDiff(v, heading.current) < HEADING_STEP) return;
+          if (now - lastEmit < HEADING_MIN_INTERVAL_MS) return;
+          lastEmit = now;
+          heading.current = Math.round(v);
+          setCompass(heading.current);
+          setPosition((p) => (p ? { ...p, heading: heading.current } : p));
+        };
+
+        if (Platform.OS === 'web') {
+          subs.push({ remove: watchWebCompass(onRawHeading) });
+        } else {
+          try {
+            subs.push(
+              await Location.watchHeadingAsync((h) => {
+                const raw = h.trueHeading >= 0 ? h.trueHeading : h.magHeading;
+                if (raw >= 0) onRawHeading(raw);
+              })
+            );
+          } catch {
+            // No compass (e.g. emulator) — GPS course only.
+          }
         }
       } catch {
         if (!cancelled) setStatus('error');

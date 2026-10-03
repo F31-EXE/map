@@ -1,0 +1,58 @@
+# Builds the web version and publishes it to GitHub Pages:
+# https://f31-exe.github.io/map/
+# One-time setup: repository Settings → Pages → Source: "GitHub Actions".
+name: Web version
+
+on:
+  push:
+    branches: [claude/friendly-pasteur-su6kfi, main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      # Pages serves the site under /map/, so the bundle needs that prefix. Patched here
+      # only, so local `expo start` keeps working at the root.
+      - name: Set base URL
+        run: node -e "const f='app.json',j=JSON.parse(require('fs').readFileSync(f));j.expo.experiments={...j.expo.experiments,baseUrl:'/map'};require('fs').writeFileSync(f,JSON.stringify(j,null,2))"
+      - name: Export web
+        # Public Firebase web config, same as eas.json.
+        env:
+          EXPO_PUBLIC_FIREBASE_API_KEY: AIzaSyDOQqQAbRsYvImiaw0Bx0Xwr0gx4e-SV70
+          EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN: airsoftcalendar.firebaseapp.com
+          EXPO_PUBLIC_FIREBASE_PROJECT_ID: airsoftcalendar
+          EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET: airsoftcalendar.firebasestorage.app
+          EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID: '54382632962'
+          EXPO_PUBLIC_FIREBASE_APP_ID: 1:54382632962:web:19462dc47ad704c997071b
+        run: npx expo export --platform web --output-dir dist
+      # Single-page app: unknown paths (/map/team, /map/join?team=…) load index.html.
+      - run: cp dist/index.html dist/404.html && touch dist/.nojekyll
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
