@@ -1,0 +1,46 @@
+{
+  "expo": {
+    "name": "TacMap",
+    "slug": "tacmap",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.f31exe.tacmap",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "Нужно, чтобы показывать вашу позицию на карте и передавать её команде.",
+        "NSMotionUsageDescription": "Компас для направления взгляда на карте."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#141816",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false,
+      "package": "com.f31exe.tacmap",
+      "permissions": [
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "scheme": "tacmap",
+    "plugins": [
+      "expo-router",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Нужно, чтобы показывать вашу позицию на карте и передавать её команде."
+        }
+      ],
+      "expo-document-picker"
+    ]
+  }
+}
