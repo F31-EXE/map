@@ -6,6 +6,8 @@ rules_version = '2';
 //   teams/{teamId}/members/{uid}     -> { callsign, role, canCommand?, joinCode, lat, lng, heading, accuracy, updatedAt }
 //   teams/{teamId}/markers/{id}      -> { kind, label, lat, lng, createdBy, createdByName, createdAt }
 //   teams/{teamId}/avatars/{uid}     -> { data, updatedAt }   small JPEG data URI
+//   teams/{teamId}/messages/{id}    -> { uid, callsign, text, createdAt }   team chat
+//   teams/{teamId}/recordings/{id}  -> { name, startedAt, endedAt, startedBy }; tracks/{uid} -> { points }
 //   sides/{sideId}                   -> { name, code, ownerId, createdAt }   several squads under one side commander
 //   sideCodes/{code}                 -> { sideId }
 // A squad joins a side when its leader writes { sideId, sideCode } into the team doc.
@@ -44,6 +46,13 @@ service cloud.firestore {
     }
     function isOrderKind(kind) {
       return kind in ['order-move', 'order-attack', 'order-defend'];
+    }
+    // Field is unchanged, or is the old list plus the caller's uid.
+    function votedOnlyAsSelf(field) {
+      let before = resource.data.get(field, []);
+      let after = request.resource.data.get(field, []);
+      return after == before
+        || (after.toSet() == before.toSet().union([request.auth.uid].toSet()) && after.size() <= 50);
     }
     function validColor(c) {
       return c is string && c.matches('^#[0-9A-Fa-f]{6}$');
@@ -105,6 +114,9 @@ service cloud.firestore {
           && (!('color' in request.resource.data) || validColor(request.resource.data.color))
           && (request.resource.data.get('sideId', null) == null
             || request.resource.data.get('sideCode', null) == get(sidePath(request.resource.data.sideId)).data.code))
+        // Commanders start and stop movement recording.
+        || (canCommand(teamId)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['recordingId']))
         // The side commander may drop a squad from the side, and nothing else.
         || (isSideOwner(resource.data.get('sideId', null))
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['sideId', 'sideCode'])
@@ -143,6 +155,10 @@ service cloud.firestore {
           && request.resource.data.lng is number
           && request.resource.data.label is string
           && request.resource.data.label.size() <= 40
+          && (!('points' in request.resource.data)
+            || (request.resource.data.points is list && request.resource.data.points.size() <= 40))
+          && !('staleVotes' in request.resource.data)
+          && !('doneVotes' in request.resource.data)
           && (
             // Squad members; orders only from the squad's commanders.
             (isMember(teamId) && (!isOrderKind(request.resource.data.kind) || canCommand(teamId)))
@@ -151,10 +167,50 @@ service cloud.firestore {
               && isOrderKind(request.resource.data.kind)
               && request.resource.data.get('audience', null) == 'commanders')
           );
-        allow update: if false;
+        // Voting: a squad member adds themselves to staleVotes or doneVotes, nothing else.
+        allow update: if isMember(teamId)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['staleVotes', 'doneVotes'])
+          && votedOnlyAsSelf('staleVotes')
+          && votedOnlyAsSelf('doneVotes');
         // Anyone clears plain markers; only commanders cancel orders.
         allow delete: if (isMember(teamId) && (!isOrderKind(resource.data.kind) || canCommand(teamId)))
           || isSideCommanderOf(teamId);
+      }
+
+      // Movement recordings: commanders start/stop, everyone appends to their own track.
+      match /recordings/{recId} {
+        allow read: if isMember(teamId) || isSideCommanderOf(teamId);
+        allow create: if canCommand(teamId)
+          && request.resource.data.startedBy == request.auth.uid
+          && request.resource.data.name is string
+          && request.resource.data.name.size() <= 60;
+        allow update: if canCommand(teamId)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['endedAt']);
+        allow delete: if isOwner(teamId);
+
+        match /tracks/{uid} {
+          allow read: if isMember(teamId) || isSideCommanderOf(teamId);
+          allow write: if isMember(teamId)
+            && uid == request.auth.uid
+            && request.resource.data.points is list
+            && request.resource.data.points.size() <= 20000
+            && request.resource.data.callsign is string
+            && request.resource.data.callsign.size() <= 24;
+        }
+      }
+
+      // Team chat. Ids are generated on the phone so relayed copies collapse into one.
+      match /messages/{messageId} {
+        allow read: if isMember(teamId);
+        allow create: if isMember(teamId)
+          && request.resource.data.uid == request.auth.uid
+          && request.resource.data.text is string
+          && request.resource.data.text.size() > 0
+          && request.resource.data.text.size() <= 500
+          && request.resource.data.callsign is string
+          && request.resource.data.callsign.size() <= 24;
+        allow update: if false;
+        allow delete: if isMember(teamId) && resource.data.uid == request.auth.uid;
       }
 
       match /avatars/{uid} {

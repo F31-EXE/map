@@ -28,6 +28,7 @@
     "firebase": "^12.19.0",
     "jszip": "^3.10.2",
     "leaflet": "^1.9.4",
+    "leaflet.heat": "^0.2.0",
     "qrcode-generator": "^2.0.4",
     "react": "19.2.3",
     "react-dom": "^19.2.3",
@@ -52,8 +53,8 @@
     "build:map": "node scripts/build-map-html.mjs",
     "typecheck": "tsc --noEmit",
     "postinstall": "node scripts/build-map-html.mjs",
-    "test": "node --experimental-strip-types --test test/*.test.ts",
-    "test:rules": "npx -y firebase-tools emulators:exec --only firestore --project demo-tacmap \"node --experimental-strip-types --test test/rules/*.spec.ts\""
+    "test": "node --experimental-strip-types --import ./scripts/ts-resolve.mjs --test test/*.test.ts",
+    "test:rules": "npx -y firebase-tools emulators:exec --only firestore --project demo-tacmap \"node --experimental-strip-types --import ./scripts/ts-resolve.mjs --test test/rules/*.spec.ts\""
   },
   "private": true
 }

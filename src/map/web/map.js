@@ -258,7 +258,9 @@
 
   function tacIcon(m) {
     var c = escapeHtml(m.color);
-    var label = m.label ? '<div class="chip tac-chip">' + escapeHtml(m.label) + '</div>' : '';
+    // Label plus the time it was placed ("Пулемёт · 14:05"); time alone when unlabeled.
+    var time = m.time ? '<span class="chip-role">' + (m.label ? ' · ' : '') + escapeHtml(m.time) + '</span>' : '';
+    var label = m.label || m.time ? '<div class="chip tac-chip">' + escapeHtml(m.label || '') + time + '</div>' : '';
     return L.divIcon({
       className: 'tac-icon' + (m.order ? ' order' : '') + (m.personal ? ' personal' : ''),
       html:
@@ -271,7 +273,141 @@
     });
   }
 
-  function setMarkers(list) {
+  // ---------------------------------------------------------------------------
+  // Arrows: drawn paths with a head at the last point.
+  // ---------------------------------------------------------------------------
+  var arrowsLayer = L.layerGroup().addTo(map);
+  var arrowShapes = {};
+
+  // Mercator is conformal, so the on-screen angle of the last segment doesn't change
+  // with zoom: compute it once from projected points.
+  function headAngle(points) {
+    var a = map.project(points[points.length - 2], 18);
+    var b = map.project(points[points.length - 1], 18);
+    return (Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI + 90;
+  }
+
+  function buildArrow(m, opts) {
+    var pts = m.points.map(function (p) { return [p.lat, p.lng]; });
+    var g = L.featureGroup();
+    var dashed = m.personal || (opts && opts.draft);
+    L.polyline(pts, { color: '#0B0F0C', weight: 8, opacity: 0.55, interactive: false, lineCap: 'round', lineJoin: 'round' }).addTo(g);
+    L.polyline(pts, {
+      color: m.color,
+      weight: 4.5,
+      opacity: 0.95,
+      lineCap: 'round',
+      lineJoin: 'round',
+      dashArray: dashed ? '10 8' : null,
+      interactive: !(opts && opts.draft),
+    }).addTo(g);
+    if (pts.length >= 2) {
+      L.marker(pts[pts.length - 1], {
+        interactive: false,
+        icon: L.divIcon({
+          className: 'arrow-head',
+          html:
+            '<svg viewBox="0 0 24 24" style="transform: rotate(' + headAngle(pts) + 'deg)">' +
+            '<path d="M12 2 L22 21 L12 16 L2 21 Z" fill="' + escapeHtml(m.color) + '" stroke="#0B0F0C" stroke-width="1.5" stroke-linejoin="round"/></svg>',
+          iconSize: [26, 26],
+          iconAnchor: [13, 13],
+        }),
+      }).addTo(g);
+    } else {
+      L.circleMarker(pts[0], { radius: 5, color: '#0B0F0C', weight: 2, fillColor: m.color, fillOpacity: 1, interactive: false }).addTo(g);
+    }
+    return g;
+  }
+
+  function setArrows(list) {
+    var seen = {};
+    list.forEach(function (m) {
+      seen[m.id] = true;
+      var key = JSON.stringify([m.points, m.color, m.personal]);
+      var cur = arrowShapes[m.id];
+      if (cur && cur._tacKey === key) return;
+      if (cur) arrowsLayer.removeLayer(cur);
+      var g = buildArrow(m);
+      g._tacKey = key;
+      g.on('click', function () {
+        post('markerTap', { id: m.id });
+      });
+      arrowShapes[m.id] = g.addTo(arrowsLayer);
+    });
+    Object.keys(arrowShapes).forEach(function (id) {
+      if (!seen[id]) {
+        arrowsLayer.removeLayer(arrowShapes[id]);
+        delete arrowShapes[id];
+      }
+    });
+  }
+
+  // Drawing: while on, taps add points to a draft arrow and are reported to RN.
+  var drawing = null;
+  var draftLayer = L.layerGroup().addTo(map);
+
+  function renderDraft() {
+    draftLayer.clearLayers();
+    if (drawing && drawing.points.length) {
+      buildArrow({ points: drawing.points, color: drawing.color }, { draft: true }).addTo(draftLayer);
+    }
+  }
+
+  function setDraw(p) {
+    drawing = p && p.on ? { color: p.color, points: p.points || [] } : null;
+    map.getContainer().classList.toggle('drawing', !!drawing);
+    renderDraft();
+  }
+
+  map.on('click', function (e) {
+    if (!drawing) return;
+    drawing.points.push({ lat: e.latlng.lat, lng: e.latlng.lng });
+    renderDraft();
+    post('drawChanged', { points: drawing.points });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Game analysis: recorded tracks and a time-weighted heatmap.
+  // ---------------------------------------------------------------------------
+  var analysisLayer = L.layerGroup().addTo(map);
+  var analysisFitted = false;
+
+  function setAnalysis(a) {
+    analysisLayer.clearLayers();
+    if (!a) {
+      analysisFitted = false;
+      return;
+    }
+    var bounds = L.latLngBounds([]);
+    if (a.showHeat && a.heat && a.heat.length && L.heatLayer) {
+      L.heatLayer(a.heat, {
+        radius: 24,
+        blur: 20,
+        maxZoom: 17,
+        minOpacity: 0.3,
+        gradient: { 0.2: '#1e3a8a', 0.4: '#22d3ee', 0.6: '#a3e635', 0.8: '#facc15', 1: '#ef4444' },
+      }).addTo(analysisLayer);
+    }
+    (a.tracks || []).forEach(function (t) {
+      t.segments.forEach(function (seg) {
+        if (seg.length < 2) return;
+        if (a.showTracks) {
+          L.polyline(seg, { color: '#0B0F0C', weight: 5, opacity: 0.5, interactive: false }).addTo(analysisLayer);
+          L.polyline(seg, { color: t.color, weight: 2.5, opacity: 0.95, interactive: false }).addTo(analysisLayer);
+        }
+        seg.forEach(function (p) { bounds.extend(p); });
+      });
+    });
+    (a.heat || []).forEach(function (p) { bounds.extend(p); });
+    if (!analysisFitted && bounds.isValid()) {
+      analysisFitted = true;
+      map.fitBounds(bounds, { padding: [40, 40], maxZoom: 17 });
+    }
+  }
+
+  function setMarkers(all) {
+    setArrows(all.filter(function (m) { return m.points; }));
+    var list = all.filter(function (m) { return !m.points; });
     syncKeyed(
       tacMarkers,
       markersLayer,
@@ -279,7 +415,7 @@
       function (m) {
         var mk = L.marker([m.lat, m.lng], { icon: tacIcon(m) });
         mk._tacId = m.id;
-        mk._tacKey = JSON.stringify([m.path, m.color, m.label, m.order, m.personal]);
+        mk._tacKey = JSON.stringify([m.path, m.color, m.label, m.order, m.personal, m.time]);
         mk.on('click', function () {
           post('markerTap', { id: mk._tacId });
         });
@@ -287,7 +423,7 @@
       },
       function (mk, m) {
         mk.setLatLng([m.lat, m.lng]);
-        var key = JSON.stringify([m.path, m.color, m.label, m.order, m.personal]);
+        var key = JSON.stringify([m.path, m.color, m.label, m.order, m.personal, m.time]);
         if (key !== mk._tacKey) {
           mk._tacKey = key;
           mk.setIcon(tacIcon(m));
@@ -645,6 +781,7 @@
       pressTimer = setTimeout(function () {
         var ll = map.mouseEventToLatLng({ clientX: pressStart.x, clientY: pressStart.y });
         cancelPress();
+        if (drawing) return;
         post('longPress', { lat: ll.lat, lng: ll.lng });
       }, LONG_PRESS_MS);
     },
@@ -713,6 +850,8 @@
       post('followChanged', { follow: false });
       map.fitBounds(b, { padding: [70, 70], maxZoom: 17 });
     },
+    setDraw: setDraw,
+    setAnalysis: setAnalysis,
     setMembers: setMembers,
     setMarkers: setMarkers,
     addOverlay: addOverlay,

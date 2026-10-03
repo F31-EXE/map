@@ -10,6 +10,7 @@ import {
 } from 'react';
 
 import type { Invite } from '../lib/invite';
+import { isVotedOut } from '../lib/markerKinds';
 import { KEYS, loadJson, saveJson } from '../lib/storage';
 import type { Member, OrderKind, Side, TacMarker, Team } from '../lib/types';
 import * as sides from '../services/sides';
@@ -193,6 +194,7 @@ export function SideProvider({ children }: { children: ReactNode }) {
     for (const sq of squads) {
       if (sq.id === teamId) continue;
       for (const m of sideMarkers[sq.id] ?? []) {
+        if (isVotedOut(m, sq.members.length)) continue;
         // One side order lives in every squad it was sent to; draw it once.
         if (m.groupId) {
           if (seenGroups.has(m.groupId)) continue;

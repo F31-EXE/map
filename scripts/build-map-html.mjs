@@ -13,6 +13,7 @@ const leafletDir = dirname(require.resolve('leaflet/package.json'));
 const read = (p) => readFileSync(p, 'utf8');
 const leafletJs = read(join(leafletDir, 'dist/leaflet.js'));
 const leafletCss = read(join(leafletDir, 'dist/leaflet.css'));
+const heatJs = read(join(dirname(require.resolve('leaflet.heat/package.json')), 'dist/leaflet-heat.js'));
 const appJs = read(join(root, 'src/map/web/map.js'));
 const appCss = read(join(root, 'src/map/web/map.css'));
 
@@ -30,6 +31,7 @@ const html = `<!DOCTYPE html>
 <body>
 <div id="map"></div>
 <script>${safe(leafletJs)}</script>
+<script>${safe(heatJs)}</script>
 <script>${safe(appJs)}</script>
 </body>
 </html>`;

@@ -1,5 +1,6 @@
 import {
   addDoc,
+  arrayUnion,
   collection,
   deleteDoc,
   doc,
@@ -183,6 +184,7 @@ export function subscribeTeam(
               ownerId: d.ownerId,
               color: d.color ?? DEFAULT_TEAM_COLOR,
               sideId: typeof d.sideId === 'string' ? d.sideId : null,
+              recordingId: typeof d.recordingId === 'string' ? d.recordingId : null,
             }
           : null
       );
@@ -242,6 +244,10 @@ export function subscribeTeamMarkers(
             audience: v.audience === 'commanders' ? 'commanders' : undefined,
             groupId: typeof v.groupId === 'string' ? v.groupId : undefined,
             teamId,
+            staleVotes: Array.isArray(v.staleVotes) ? v.staleVotes : [],
+            doneVotes: Array.isArray(v.doneVotes) ? v.doneVotes : [],
+            points: Array.isArray(v.points) ? v.points : undefined,
+            color: typeof v.color === 'string' ? v.color : undefined,
           };
         })
       );
@@ -252,11 +258,21 @@ export function subscribeTeamMarkers(
 
 export async function addTeamMarker(
   teamId: string,
-  m: Pick<TacMarker, 'kind' | 'label' | 'lat' | 'lng' | 'createdBy' | 'createdByName'>
+  m: Pick<TacMarker, 'kind' | 'label' | 'lat' | 'lng' | 'createdBy' | 'createdByName' | 'points' | 'color'>
 ): Promise<void> {
+  const { points, color, ...rest } = m;
   await addDoc(collection(firestore(), 'teams', teamId, 'markers'), {
-    ...m,
+    ...rest,
+    ...(points ? { points } : {}),
+    ...(color ? { color } : {}),
     createdAt: serverTimestamp(),
+  });
+}
+
+/** "No longer relevant" / "done" vote; each player counts once. */
+export async function voteMarker(teamId: string, markerId: string, uid: string, vote: 'stale' | 'done'): Promise<void> {
+  await updateDoc(doc(firestore(), 'teams', teamId, 'markers', markerId), {
+    [vote === 'stale' ? 'staleVotes' : 'doneVotes']: arrayUnion(uid),
   });
 }
 

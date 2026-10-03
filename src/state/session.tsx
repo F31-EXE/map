@@ -12,11 +12,12 @@ import {
 
 import { firebaseAuth, isFirebaseConfigured } from '../lib/firebase';
 import { distanceMeters } from '../lib/geo';
-import { isOrder } from '../lib/markerKinds';
+import { isOrder, isVotedOut } from '../lib/markerKinds';
 import { DEFAULT_ROLE, DEFAULT_TEAM_COLOR, roleOf, type RoleId } from '../lib/roles';
 import { KEYS, loadJson, newId, saveJson } from '../lib/storage';
 import type { Member, SelfPosition, TacMarker, Team } from '../lib/types';
 import { signalNewOrder } from '../services/orderAlert';
+import * as recordings from '../services/recordings';
 import * as teams from '../services/teams';
 
 /** Re-send position at least this often so teammates can tell we're alive. */
@@ -68,8 +69,9 @@ type Session = {
 
   /** Team markers (when in a team) plus this device's personal ones. */
   markers: TacMarker[];
-  addMarker: (m: Pick<TacMarker, 'kind' | 'label' | 'lat' | 'lng'>, scope: MarkerScope) => Promise<void>;
+  addMarker: (m: Pick<TacMarker, 'kind' | 'label' | 'lat' | 'lng' | 'points' | 'color'>, scope: MarkerScope) => Promise<void>;
   deleteMarker: (m: TacMarker) => Promise<void>;
+  voteMarker: (m: TacMarker, vote: 'stale' | 'done') => Promise<void>;
 };
 
 const Ctx = createContext<Session | null>(null);
@@ -311,6 +313,12 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     [teamId]
   );
 
+  // Read inside reportPosition without re-creating it on every change.
+  const recordingRef = useRef<string | null>(null);
+  recordingRef.current = team?.recordingId ?? null;
+  const profileRef = useRef({ callsign, role });
+  profileRef.current = { callsign: callsign || 'Боец', role };
+
   // Throttled position publishing.
   const lastSent = useRef<{ at: number; pos: SelfPosition } | null>(null);
   const inFlight = useRef(false);
@@ -326,10 +334,16 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         if (elapsed < HEARTBEAT_MS && distanceMeters(last.pos, p) < MIN_MOVE_M) return;
       }
       inFlight.current = true;
+      const recId = recordingRef.current;
       teams
         .publishPosition(teamId, uid, p)
         .then(() => {
           lastSent.current = { at: now, pos: p };
+          if (recId) {
+            recordings
+              .appendTrackPoint(teamId, recId, uid, profileRef.current, { lat: p.lat, lng: p.lng, t: now })
+              .catch(() => {});
+          }
         })
         .catch(() => {})
         .finally(() => {
@@ -364,7 +378,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const addMarker = useCallback(
-    async (m: Pick<TacMarker, 'kind' | 'label' | 'lat' | 'lng'>, scope: MarkerScope) => {
+    async (m: Pick<TacMarker, 'kind' | 'label' | 'lat' | 'lng' | 'points' | 'color'>, scope: MarkerScope) => {
       const base = { ...m, label: m.label.trim().slice(0, 40), createdByName: callsign || 'Я' };
       if (scope === 'team' && teamId && uid) {
         await teams.addTeamMarker(teamId, { ...base, createdBy: uid });
@@ -386,12 +400,25 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     [teamId, personalMarkers, savePersonal]
   );
 
+  const voteMarker = useCallback(
+    async (m: TacMarker, vote: 'stale' | 'done') => {
+      if (!teamId || !uid || m.personal) return;
+      await teams.voteMarker(teamId, m.id, uid, vote);
+    },
+    [teamId, uid]
+  );
+
   const markers = useMemo(
     () =>
       inTeam
-        ? [...teamMarkers.filter((m) => m.audience !== 'commanders' || canCommand), ...personalMarkers]
+        ? [
+            ...teamMarkers.filter(
+              (m) => (m.audience !== 'commanders' || canCommand) && !isVotedOut(m, members.length)
+            ),
+            ...personalMarkers,
+          ]
         : personalMarkers,
-    [inTeam, teamMarkers, personalMarkers, canCommand]
+    [inTeam, teamMarkers, personalMarkers, canCommand, members.length]
   );
 
   const value = useMemo<Session>(
@@ -428,6 +455,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       markers,
       addMarker,
       deleteMarker,
+      voteMarker,
     }),
     [
       ready,
@@ -460,6 +488,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       markers,
       addMarker,
       deleteMarker,
+      voteMarker,
     ]
   );
 

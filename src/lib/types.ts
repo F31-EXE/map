@@ -17,6 +17,8 @@ export type Team = {
   color: string;
   /** Side this squad is attached to, if any. */
   sideId: string | null;
+  /** Movement recording in progress, if any. */
+  recordingId?: string | null;
 };
 
 /** A side: several squads under one side commander. */
@@ -55,6 +57,7 @@ export type MarkerKind =
   | 'rally'
   | 'medic'
   | 'note'
+  | 'arrow'
   | OrderKind;
 
 export type TacMarker = {
@@ -74,6 +77,13 @@ export type TacMarker = {
   groupId?: string;
   /** Squad the marker lives in. */
   teamId?: string;
+  /** Uids who voted "no longer relevant" / "done"; enough votes hide the marker. */
+  staleVotes?: string[];
+  doneVotes?: string[];
+  /** Arrow: the path, start to tip (lat/lng is the tip). */
+  points?: LatLng[];
+  /** Arrow color (other kinds use their kind's color). */
+  color?: string;
 };
 
 export type OverlayFormat = 'kml' | 'kmz' | 'gpx' | 'geojson';

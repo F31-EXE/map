@@ -306,3 +306,13 @@ body,
 .lod-dot .order-ring {
   visibility: hidden;
 }
+
+/* ---------- arrows ---------- */
+.arrow-head svg {
+  width: 26px;
+  height: 26px;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.6));
+}
+.drawing {
+  cursor: crosshair;
+}

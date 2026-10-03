@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useImperativeHandle, useRef, useState, type Ref } from 'react';
 
+import { formatClock } from '../lib/geo';
 import { isOrder, MARKER_KINDS } from '../lib/markerKinds';
 import { ROLES } from '../lib/roles';
 import type { LatLng, Member, OverlayMeta, SelfPosition, TacMarker } from '../lib/types';
@@ -55,6 +56,16 @@ type Props = {
   onViewChanged?: (p: LatLng & { zoom: number }) => void;
   onFollowChanged?: (follow: boolean) => void;
   onOverlayError?: (id: string, message: string) => void;
+  /** Game analysis overlay: tracks as [lat, lng] segments, heat as [lat, lng] samples. */
+  analysis?: {
+    tracks: { color: string; segments: [number, number][][] }[];
+    heat: [number, number][];
+    showTracks: boolean;
+    showHeat: boolean;
+  } | null;
+  /** Arrow drawing mode: taps add points (reported via onDrawChanged). */
+  drawing?: { color: string; points: LatLng[] } | null;
+  onDrawChanged?: (points: LatLng[]) => void;
 };
 
 type Outgoing = { type: string; payload?: unknown };
@@ -132,13 +143,26 @@ export function TacticalMap(props: Props) {
         lng: m.lng,
         label: m.label,
         path: k.path,
-        color: k.color,
+        color: m.color ?? k.color,
+        points: m.points,
         order: isOrder(m.kind),
         personal: Boolean(m.personal),
+        time: formatClock(m.createdAt),
       };
     });
     send({ type: 'setMarkers', payload: list });
   }, [ready, generation, props.markers, send]);
+
+  const analysis = props.analysis;
+  useEffect(() => {
+    if (ready) send({ type: 'setAnalysis', payload: analysis ?? null });
+  }, [ready, generation, analysis, send]);
+
+  const drawing = props.drawing;
+  useEffect(() => {
+    if (!ready) return;
+    send({ type: 'setDraw', payload: drawing ? { on: true, color: drawing.color, points: drawing.points } : null });
+  }, [ready, generation, drawing, send]);
 
   const { onOverlayError } = props;
   useEffect(() => {
@@ -202,6 +226,9 @@ export function TacticalMap(props: Props) {
           break;
         case 'viewChanged':
           props.onViewChanged?.(p);
+          break;
+        case 'drawChanged':
+          props.onDrawChanged?.(p.points);
           break;
         case 'followChanged':
           props.onFollowChanged?.(p.follow);

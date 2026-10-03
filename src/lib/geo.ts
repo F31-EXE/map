@@ -42,3 +42,9 @@ export function timeAgo(ts: number, now = Date.now()): string {
   if (m < 60) return `${m} мин назад`;
   return `${Math.round(m / 60)} ч назад`;
 }
+
+/** Local wall-clock time, e.g. "14:05". */
+export function formatClock(ts: number): string {
+  const d = new Date(ts);
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}

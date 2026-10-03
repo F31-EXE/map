@@ -5,8 +5,8 @@ import { Alert, Platform, Pressable, StyleSheet, Text, useWindowDimensions, View
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useSelfPosition } from '../hooks/useSelfPosition';
-import { bearingDegrees, distanceMeters, formatCoords, formatDistance, timeAgo } from '../lib/geo';
-import { isOrder, MARKER_KINDS } from '../lib/markerKinds';
+import { bearingDegrees, distanceMeters, formatClock, formatCoords, formatDistance, timeAgo } from '../lib/geo';
+import { isOrder, MARKER_KINDS, voteThreshold } from '../lib/markerKinds';
 import { ROLES } from '../lib/roles';
 import { KEYS, loadJson, saveJson } from '../lib/storage';
 import type { LatLng, MarkerKind, SelfPosition, TacMarker } from '../lib/types';
@@ -19,6 +19,7 @@ import {
 } from '../map/TacticalMap';
 import { useOverlays } from '../state/overlays';
 import { useSession, type MarkerScope } from '../state/session';
+import { useChat } from '../state/chat';
 import { useSide, type OrderTarget } from '../state/side';
 import { AddMarkerModal } from '../ui/AddMarkerModal';
 import { Avatar, Button, Glass, GlassButton, Icon, RoleIcon, Sheet, tap, type IconName } from '../ui/components';
@@ -44,9 +45,48 @@ function markerSubtitle(m: TacMarker): string {
       : isOrder(m.kind)
         ? `${m.audience === 'commanders' ? 'приказ стороны командирам' : 'приказ'}: ${m.createdByName}`
         : m.createdByName,
-    timeAgo(m.createdAt),
+    `в ${formatClock(m.createdAt)} (${timeAgo(m.createdAt)})`,
   ];
   return parts.filter(Boolean).join(' · ');
+}
+
+/** "Неактуально" for any marker, plus "Выполнено" for orders; enough votes hide it for everyone. */
+function VoteRow({
+  marker,
+  uid,
+  threshold,
+  onVote,
+}: {
+  marker: TacMarker;
+  uid: string | null;
+  threshold: number;
+  onVote: (vote: 'stale' | 'done') => void;
+}) {
+  const stale = marker.staleVotes ?? [];
+  const done = marker.doneVotes ?? [];
+  const voted = uid != null && (stale.includes(uid) || done.includes(uid));
+  return (
+    <View style={styles.voteRow}>
+      <Button
+        title={`Неактуально ${stale.length}/${threshold}`}
+        icon="clock-alert-outline"
+        kind="secondary"
+        disabled={voted}
+        style={{ flex: 1 }}
+        onPress={() => onVote('stale')}
+      />
+      {isOrder(marker.kind) && (
+        <Button
+          title={`Выполнено ${done.length}/${threshold}`}
+          icon="check-circle-outline"
+          kind="secondary"
+          disabled={voted}
+          style={{ flex: 1 }}
+          onPress={() => onVote('done')}
+        />
+      )}
+    </View>
+  );
 }
 
 function KindBadge({ kind }: { kind: MarkerKind }) {
@@ -79,6 +119,7 @@ export default function MapScreen() {
   const landscape = width > height;
   const session = useSession();
   const side = useSide();
+  const chat = useChat();
   const { overlays, focusRequest, requestFocus } = useOverlays();
   const { position, status } = useSelfPosition();
   const mapRef = useRef<TacticalMapHandle>(null);
@@ -89,6 +130,9 @@ export default function MapScreen() {
   const [center, setCenter] = useState<LatLng | null>(null);
   const [addAt, setAddAt] = useState<LatLng | null>(null);
   const [selection, setSelection] = useState<Selection>(null);
+  const [drawing, setDrawing] = useState<Drawing | null>(null);
+  const drawingRef = useRef(false);
+  drawingRef.current = drawing != null;
   const centeredOnce = useRef(false);
 
   useEffect(() => {
@@ -122,6 +166,7 @@ export default function MapScreen() {
   }, [requestFocus]);
 
   const openAdd = useCallback((p: LatLng) => {
+    if (drawingRef.current) return;
     if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
     setAddAt(p);
   }, []);
@@ -151,6 +196,9 @@ export default function MapScreen() {
   const visibleMembers = side.mapMembers
     .filter((m) => m.id !== session.uid && m.lat != null && m.lng != null)
     .map((m) => ({ lat: m.lat!, lng: m.lng! }));
+
+  // Votes apply to my own squad's shared markers.
+  const canVote = (m: TacMarker) => inTeam && !m.personal && (!m.teamId || m.teamId === session.teamId);
 
   // Side commander without a squad of their own: the pill shows the side instead.
   const sideOnly = side.isSideCommander && !inTeam;
@@ -201,6 +249,8 @@ export default function MapScreen() {
         onViewChanged={setCenter}
         onFollowChanged={setFollow}
         onOverlayError={onOverlayError}
+        drawing={drawing}
+        onDrawChanged={(points) => setDrawing((d) => (d ? { ...d, points } : d))}
       />
 
       <Reticle />
@@ -220,21 +270,23 @@ export default function MapScreen() {
             router.push(sideOnly ? '/side' : '/team');
           }}
         >
-          <Glass radius={R.pill} style={styles.teamPill}>
+          <Glass radius={R.pill} style={[styles.teamPill, landscape && styles.teamPillCompact]}>
             <View
               style={[
                 styles.teamIcon,
+                landscape && styles.teamIconCompact,
                 { backgroundColor: inTeam || sideOnly ? C.accentSoft : 'rgba(255,255,255,0.06)' },
               ]}
             >
               <Icon
                 name={sideOnly ? 'flag-variant' : inTeam ? 'account-group' : 'account'}
-                size={18}
+                size={landscape ? 15 : 18}
                 color={inTeam || sideOnly ? C.accent : C.dim}
               />
             </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.teamTitle} numberOfLines={1}>
+            {/* Landscape: one line, title and status side by side. */}
+            <View style={[{ flex: 1 }, landscape && styles.teamTextCompact]}>
+              <Text style={[styles.teamTitle, landscape && styles.teamTitleCompact]} numberOfLines={1}>
                 {sideOnly
                   ? (side.side?.name ?? '…')
                   : inTeam
@@ -254,16 +306,44 @@ export default function MapScreen() {
                 </Text>
               </View>
             </View>
-            <Icon name="chevron-right" size={20} color={C.faint} />
+            {session.team?.recordingId && (
+              <View style={styles.rec}>
+                <View style={styles.recDot} />
+                <Text style={styles.recText}>REC</Text>
+              </View>
+            )}
+            <Icon name="chevron-right" size={landscape ? 16 : 20} color={C.faint} />
           </Glass>
         </Pressable>
       </View>
 
-      <View style={[styles.tools, { top: insets.top + 74, right: 12 + insets.right }]}>
+      <View style={[styles.tools, { top: insets.top + (landscape ? 58 : 74), right: 12 + insets.right }]}>
         <Glass radius={R.lg} style={styles.toolbar}>
           <ToolbarButton icon="layers-triple-outline" label="Подложка" onPress={() => setLayerPicker(true)} />
           <View style={styles.toolbarSep} />
           <ToolbarButton icon="map-plus" label="Карты полигона" onPress={() => router.push('/maps')} />
+          {inTeam && (
+            <>
+              <View style={styles.toolbarSep} />
+              <View>
+                <ToolbarButton icon="chat-outline" label="Чат отряда" onPress={() => router.push('/chat')} />
+                {chat.unread > 0 && (
+                  <View pointerEvents="none" style={styles.badge}>
+                    <Text style={styles.badgeText}>{chat.unread > 9 ? '9+' : chat.unread}</Text>
+                  </View>
+                )}
+              </View>
+            </>
+          )}
+          <View style={styles.toolbarSep} />
+          <ToolbarButton
+            icon="draw"
+            label="Нарисовать стрелку"
+            onPress={() => {
+              setFollow(false);
+              setDrawing({ color: ARROW_COLORS[0], points: [], scope: 'team' });
+            }}
+          />
           {visibleMembers.length > 0 && (
             <>
               <View style={styles.toolbarSep} />
@@ -291,9 +371,42 @@ export default function MapScreen() {
         </Glass>
       )}
 
+      {drawing && (
+        <DrawBar
+          drawing={drawing}
+          inTeam={inTeam}
+          bottom={insets.bottom + 12}
+          left={12 + insets.left}
+          right={12 + insets.right}
+          onChange={setDrawing}
+          onCancel={() => setDrawing(null)}
+          onDone={async () => {
+            const pts = drawing.points;
+            try {
+              await session.addMarker(
+                {
+                  kind: 'arrow',
+                  label: '',
+                  lat: pts[pts.length - 1].lat,
+                  lng: pts[pts.length - 1].lng,
+                  points: pts,
+                  color: drawing.color,
+                },
+                inTeam ? drawing.scope : 'personal'
+              );
+              setDrawing(null);
+            } catch (e) {
+              Alert.alert('Не удалось сохранить стрелку', (e as Error).message);
+            }
+          }}
+        />
+      )}
+
       {/* Bottom-right actions */}
       <View
+        pointerEvents={drawing ? 'none' : 'auto'}
         style={[
+          drawing && { opacity: 0 },
           styles.actions,
           { bottom: insets.bottom + (landscape ? 12 : 108), right: 12 + insets.right },
           landscape && { flexDirection: 'row-reverse' },
@@ -329,27 +442,29 @@ export default function MapScreen() {
       <Glass
         radius={R.lg}
         style={[
+          drawing && { display: 'none' },
           styles.hud,
           { bottom: insets.bottom + 12, left: 12 + insets.left, right: 12 + insets.right },
-          landscape && { right: undefined, width: Math.min(520, width - 200 - insets.left - insets.right) },
+          landscape && styles.hudCompact,
+          landscape && { right: undefined, width: Math.min(460, width - 200 - insets.left - insets.right) },
         ]}
       >
         <View style={{ flex: 1.3 }}>
-          <Text style={eyebrow}>Перекрестие</Text>
-          <Text style={styles.hudValue} numberOfLines={1}>
+          {!landscape && <Text style={eyebrow}>Перекрестие</Text>}
+          <Text style={[styles.hudValue, landscape && styles.hudValueCompact]} numberOfLines={1}>
             {center ? formatCoords(center) : '—'}
           </Text>
         </View>
         <View style={styles.hudSep} />
         <View style={{ flex: 1 }}>
-          <Text style={eyebrow}>От меня</Text>
-          <Text style={styles.hudValue} numberOfLines={1}>
+          {!landscape && <Text style={eyebrow}>От меня</Text>}
+          <Text style={[styles.hudValue, landscape && styles.hudValueCompact]} numberOfLines={1}>
             {center && position
               ? `${formatDistance(distanceMeters(position, center))} · ${Math.round(bearingDegrees(position, center))}°`
               : '—'}
           </Text>
         </View>
-        <View style={styles.gps}>
+        <View style={[styles.gps, landscape && styles.gpsCompact]}>
           <View style={[styles.gpsDot, { backgroundColor: gpsColor(position?.accuracy) }]} />
           <Text style={styles.gpsText}>
             {position?.accuracy != null ? `±${Math.round(position.accuracy)}м` : 'GPS'}
@@ -375,6 +490,19 @@ export default function MapScreen() {
         subtitle={selectedMarker && markerSubtitle(selectedMarker)}
         stats={selectedMarker ? vectorStats(position, selectedMarker) : []}
       >
+        {selectedMarker && canVote(selectedMarker) && (
+          <VoteRow
+            marker={selectedMarker}
+            uid={session.uid}
+            threshold={voteThreshold(session.members.length)}
+            onVote={(vote) =>
+              session
+                .voteMarker(selectedMarker, vote)
+                .then(() => setSelection(null))
+                .catch((e: Error) => Alert.alert('Ошибка', e.message))
+            }
+          />
+        )}
         {selectedMarker &&
           (!isOrder(selectedMarker.kind) || session.canCommand || side.isSideCommander) && (
           <Button
@@ -461,6 +589,93 @@ export default function MapScreen() {
   );
 }
 
+type Drawing = { color: string; points: LatLng[]; scope: MarkerScope };
+
+const ARROW_COLORS = ['#FFC83D', '#FF4D4D', '#3D9BFF', '#4ADE80', '#F5F5F5'];
+
+/** Controls shown while drawing an arrow: color, audience, undo, cancel, done. */
+function DrawBar({
+  drawing,
+  inTeam,
+  bottom,
+  left,
+  right,
+  onChange,
+  onCancel,
+  onDone,
+}: {
+  drawing: Drawing;
+  inTeam: boolean;
+  bottom: number;
+  left: number;
+  right: number;
+  onChange: (d: Drawing) => void;
+  onCancel: () => void;
+  onDone: () => void;
+}) {
+  const n = drawing.points.length;
+  return (
+    <Glass radius={R.lg} style={[styles.drawBar, { bottom, left, right }]}>
+      <View style={styles.drawHeader}>
+        <Icon name="draw" size={20} color={drawing.color} />
+        <View style={{ flex: 1 }}>
+          <Text style={styles.drawTitle}>Стрелка · {n} {n === 1 ? 'точка' : n >= 2 && n <= 4 ? 'точки' : 'точек'}</Text>
+          <Text style={styles.drawHint} numberOfLines={1}>
+            Нажимайте по карте от начала к острию
+          </Text>
+        </View>
+        <Pressable
+          accessibilityLabel="Убрать последнюю точку"
+          disabled={n === 0}
+          hitSlop={6}
+          style={[styles.drawIcon, n === 0 && { opacity: 0.35 }]}
+          onPress={() => {
+            tap();
+            onChange({ ...drawing, points: drawing.points.slice(0, -1) });
+          }}
+        >
+          <Icon name="undo-variant" size={20} />
+        </Pressable>
+      </View>
+      <View style={styles.drawRow}>
+        {ARROW_COLORS.map((c) => (
+          <Pressable
+            key={c}
+            accessibilityLabel={`Цвет стрелки ${c}`}
+            onPress={() => {
+              tap();
+              onChange({ ...drawing, color: c });
+            }}
+            style={[styles.drawColor, { backgroundColor: c }, c === drawing.color && styles.drawColorActive]}
+          />
+        ))}
+        {inTeam && (
+          <Pressable
+            onPress={() => {
+              tap();
+              onChange({ ...drawing, scope: drawing.scope === 'team' ? 'personal' : 'team' });
+            }}
+            style={styles.drawScope}
+          >
+            <Icon name={drawing.scope === 'team' ? 'account-group' : 'eye-off-outline'} size={16} color={C.text} />
+            <Text style={styles.drawScopeText}>{drawing.scope === 'team' ? 'Бойцам' : 'Только мне'}</Text>
+          </Pressable>
+        )}
+      </View>
+      <View style={styles.drawRow}>
+        <Button title="Отмена" kind="secondary" onPress={onCancel} style={{ flex: 1, minHeight: 44 }} />
+        <Button
+          title="Готово"
+          icon="check"
+          disabled={n < 2}
+          onPress={onDone}
+          style={{ flex: 1.4, minHeight: 44 }}
+        />
+      </View>
+    </Glass>
+  );
+}
+
 function ToolbarButton({ icon, label, onPress }: { icon: IconName; label: string; onPress: () => void }) {
   return (
     <Pressable
@@ -505,6 +720,10 @@ const styles = StyleSheet.create({
   teamSubRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   liveDot: { width: 7, height: 7, borderRadius: 4 },
   teamSub: { color: C.dim, fontSize: 12, fontFamily: F.regular },
+  teamPillCompact: { height: 38, gap: 8, paddingLeft: 4, paddingRight: 10 },
+  teamIconCompact: { width: 30, height: 30, borderRadius: 15 },
+  teamTextCompact: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  teamTitleCompact: { fontSize: 14, flexShrink: 1 },
 
   tools: { position: 'absolute', right: 12 },
   toolbar: { paddingVertical: 4, width: 50, alignItems: 'center' },
@@ -550,6 +769,9 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   hudValue: { color: C.text, fontSize: 13, fontFamily: F.mono, marginTop: 3 },
+  hudCompact: { paddingVertical: 7, paddingHorizontal: 12, gap: 10 },
+  hudValueCompact: { fontSize: 12, marginTop: 0 },
+  gpsCompact: { flexDirection: 'row', gap: 5, paddingLeft: 0 },
   hudSep: { width: StyleSheet.hairlineWidth, alignSelf: 'stretch', backgroundColor: C.lineStrong },
   gps: {
     alignItems: 'center',
@@ -559,6 +781,57 @@ const styles = StyleSheet.create({
   gpsDot: { width: 8, height: 8, borderRadius: 4 },
   gpsText: { color: C.dim, fontSize: 11, fontFamily: F.mono },
 
+  voteRow: { flexDirection: 'row', gap: 10 },
+  rec: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 8,
+    height: 22,
+    borderRadius: R.pill,
+    backgroundColor: C.dangerSoft,
+  },
+  recDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: C.danger },
+  recText: { color: C.danger, fontSize: 11, fontFamily: F.bold, letterSpacing: 0.8 },
+  badge: {
+    position: 'absolute',
+    top: 4,
+    right: 4,
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    paddingHorizontal: 4,
+    backgroundColor: C.danger,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  badgeText: { color: '#fff', fontSize: 11, fontFamily: F.bold },
+  drawBar: { position: 'absolute', padding: 12, gap: 10, maxWidth: 520 },
+  drawHeader: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  drawTitle: { color: C.text, fontSize: 15, fontFamily: F.bold },
+  drawHint: { color: C.dim, fontSize: 12, fontFamily: F.regular },
+  drawIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: C.elevated,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  drawRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  drawColor: { width: 30, height: 30, borderRadius: 15, borderWidth: 2, borderColor: 'transparent' },
+  drawColorActive: { borderColor: C.text },
+  drawScope: {
+    marginLeft: 'auto',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    height: 32,
+    borderRadius: R.pill,
+    backgroundColor: C.elevated,
+  },
+  drawScopeText: { color: C.text, fontSize: 13, fontFamily: F.semibold },
   roleBadge: {
     position: 'absolute',
     right: -4,

@@ -6,6 +6,7 @@ import {
   type RulesTestEnvironment,
 } from '@firebase/rules-unit-testing';
 import {
+  arrayUnion,
   collection,
   deleteDoc,
   doc,
@@ -267,5 +268,102 @@ describe('sides', () => {
   test('squad leader detaches', async () => {
     await attach('alice');
     await assertSucceeds(updateDoc(doc(as('alice'), 'teams', TEAM), { sideId: null, sideCode: null }));
+  });
+});
+
+describe('marker votes and arrows', () => {
+  beforeEach(async () => {
+    await createTeam(as('alice'), 'alice');
+    await join(as('bob'), 'bob');
+    await setDoc(doc(as('alice'), 'teams', TEAM, 'markers', 'm1'), marker('alice'));
+  });
+  const vote = (by: string, field: string, value: unknown) =>
+    updateDoc(doc(as(by), 'teams', TEAM, 'markers', 'm1'), { [field]: value });
+
+  test('members add their own vote', async () => {
+    await assertSucceeds(vote('bob', 'staleVotes', arrayUnion('bob')));
+    await assertSucceeds(vote('alice', 'doneVotes', arrayUnion('alice')));
+  });
+  test('no voting for others, no rewriting votes, no editing the marker', async () => {
+    await assertFails(vote('bob', 'staleVotes', arrayUnion('alice')));
+    await vote('alice', 'staleVotes', arrayUnion('alice'));
+    await assertFails(vote('bob', 'staleVotes', ['bob']));
+    await assertFails(vote('bob', 'label', 'hacked'));
+  });
+  test('outsiders cannot vote', async () => {
+    await assertFails(vote('mallory', 'staleVotes', arrayUnion('mallory')));
+  });
+  test('markers cannot be created pre-voted', async () => {
+    await assertFails(
+      setDoc(doc(as('bob'), 'teams', TEAM, 'markers', 'm2'), { ...marker('bob'), staleVotes: ['a', 'b', 'c'] })
+    );
+  });
+  test('arrows carry a bounded list of points', async () => {
+    const pts = (n: number) => Array.from({ length: n }, (_, i) => ({ lat: 55 + i * 1e-4, lng: 37 }));
+    await assertSucceeds(setDoc(doc(as('bob'), 'teams', TEAM, 'markers', 'a1'), { ...marker('bob', 'arrow'), points: pts(5) }));
+    await assertFails(setDoc(doc(as('bob'), 'teams', TEAM, 'markers', 'a2'), { ...marker('bob', 'arrow'), points: pts(41) }));
+  });
+});
+
+describe('team chat', () => {
+  beforeEach(async () => {
+    await createTeam(as('alice'), 'alice');
+    await join(as('bob'), 'bob');
+  });
+  const msg = (by: string, text = 'Контакт!', uid = by) =>
+    setDoc(doc(as(by), 'teams', TEAM, 'messages', `${by}-1`), { uid, callsign: 'X', text });
+
+  test('members post as themselves and read', async () => {
+    await assertSucceeds(msg('bob'));
+    await assertSucceeds(getDocs(collection(as('alice'), 'teams', TEAM, 'messages')));
+  });
+  test('no impersonation, empty or huge messages', async () => {
+    await assertFails(msg('bob', 'hi', 'alice'));
+    await assertFails(msg('bob', ''));
+    await assertFails(msg('bob', 'x'.repeat(501)));
+  });
+  test('outsiders neither read nor post; nobody edits', async () => {
+    await assertFails(msg('mallory'));
+    await assertFails(getDocs(collection(as('mallory'), 'teams', TEAM, 'messages')));
+    await msg('bob');
+    await assertFails(updateDoc(doc(as('bob'), 'teams', TEAM, 'messages', 'bob-1'), { text: 'edited' }));
+  });
+});
+
+describe('movement recording', () => {
+  const start = (by: string) => {
+    const db = as(by);
+    const batch = writeBatch(db);
+    batch.set(doc(db, 'teams', TEAM, 'recordings', 'r1'), { name: 'Игра', startedBy: by, endedAt: null });
+    batch.update(doc(db, 'teams', TEAM), { recordingId: 'r1' });
+    return batch.commit();
+  };
+  const track = (by: string, uid = by) =>
+    setDoc(
+      doc(as(by), 'teams', TEAM, 'recordings', 'r1', 'tracks', uid),
+      { callsign: 'X', role: 'rifleman', points: arrayUnion({ lat: 55, lng: 37, t: 1 }) },
+      { merge: true }
+    );
+
+  beforeEach(async () => {
+    await createTeam(as('alice'), 'alice');
+    await join(as('bob'), 'bob');
+  });
+
+  test('only commanders start recording', async () => {
+    await assertFails(start('bob'));
+    await assertSucceeds(start('alice'));
+  });
+  test('members append to their own track only', async () => {
+    await start('alice');
+    await assertSucceeds(track('bob'));
+    await assertFails(track('bob', 'alice'));
+    await assertFails(track('mallory'));
+  });
+  test('only commanders stop it', async () => {
+    await start('alice');
+    await assertFails(updateDoc(doc(as('bob'), 'teams', TEAM, 'recordings', 'r1'), { endedAt: 1 }));
+    await assertFails(updateDoc(doc(as('bob'), 'teams', TEAM), { recordingId: null }));
+    await assertSucceeds(updateDoc(doc(as('alice'), 'teams', TEAM, 'recordings', 'r1'), { endedAt: 1 }));
   });
 });

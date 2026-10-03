@@ -3,12 +3,13 @@ import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Alert, Pressable, ScrollView, Share, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 
-import { timeAgo } from '../lib/geo';
+import { formatClock, timeAgo } from '../lib/geo';
 import { inviteUrl } from '../lib/invite';
 import { ROLE_ORDER, ROLES, TEAM_COLORS } from '../lib/roles';
 import type { Member } from '../lib/types';
 import { STALE_MS } from '../map/TacticalMap';
 import { pickAvatar } from '../services/avatar';
+import * as recordings from '../services/recordings';
 import { useSession } from '../state/session';
 import { useSide } from '../state/side';
 import { QrCode } from '../ui/QrCode';
@@ -45,6 +46,7 @@ export default function TeamScreen() {
   useEffect(() => setCallsign(s.callsign), [s.callsign]);
 
   const inTeam = Boolean(s.teamId && s.uid);
+  const recording = s.team?.recordingId ?? null;
   const callsignDirty = callsign.trim() !== s.callsign;
   const now = Date.now();
   const color = inTeam ? s.teamColor : C.accent;
@@ -367,6 +369,49 @@ export default function TeamScreen() {
               value={s.orderSound}
               onChange={(v) => run('sound', () => s.setOrderSound(v))}
             />
+          </Card>
+
+          {/* Movement recording */}
+          <Card style={{ gap: 12 }}>
+            <View style={styles.inlineTitle}>
+              <Icon
+                name={recording ? 'record-circle' : 'map-marker-path'}
+                size={20}
+                color={recording ? C.danger : C.dim}
+              />
+              <Text style={[styles.cardTitle, { flex: 1 }]}>Запись игры</Text>
+              {recording && <Badge text="REC" color={C.danger} />}
+            </View>
+            <Text style={styles.text}>
+              {recording
+                ? 'Идёт запись передвижений всех бойцов отряда. Анализ будет доступен после остановки.'
+                : 'Записывает, где ходили бойцы. После игры — маршруты и тепловая карта.'}
+            </Text>
+            <View style={styles.row}>
+              {s.canCommand && (
+                <Button
+                  title={recording ? 'Остановить' : 'Начать запись'}
+                  icon={recording ? 'stop' : 'record'}
+                  kind={recording ? 'danger' : 'primary'}
+                  busy={busy === 'rec'}
+                  style={{ flex: 1 }}
+                  onPress={() =>
+                    run('rec', async () => {
+                      if (!s.teamId || !s.uid) return;
+                      if (recording) await recordings.stopRecording(s.teamId, recording);
+                      else await recordings.startRecording(s.teamId, s.uid, `Игра ${new Date().toLocaleDateString('ru-RU')} ${formatClock(Date.now())}`);
+                    })
+                  }
+                />
+              )}
+              <Button
+                title="Записи игр"
+                icon="history"
+                kind="secondary"
+                style={{ flex: 1 }}
+                onPress={() => router.push('/replay')}
+              />
+            </View>
           </Card>
 
           {/* Roster */}
