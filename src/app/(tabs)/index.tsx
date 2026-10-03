@@ -116,8 +116,12 @@ function gpsColor(acc: number | null | undefined) {
 
 export default function MapScreen() {
   const safe = useSafeAreaInsets();
-  const { width, height } = useWindowDimensions();
-  const landscape = width > height;
+  const window = useWindowDimensions();
+  const landscape = window.width > window.height;
+  // This screen's own size: in landscape the tab bar takes a column on the left.
+  const [area, setArea] = useState<{ width: number; height: number } | null>(null);
+  const width = area?.width ?? window.width;
+  const height = area?.height ?? window.height;
   // The tab bar owns the bottom edge (portrait) or the left edge (landscape).
   const insets = { top: safe.top, bottom: 0, left: landscape ? 0 : safe.left, right: safe.right };
   const session = useSession();
@@ -210,6 +214,14 @@ export default function MapScreen() {
   const toolbarButtons = 4 + (visibleMembers.length > 0 ? 1 : 0);
   const toolbarWidth = toolbarButtons * 50 + 8;
 
+  // Landscape top row: [team pill][compass][toolbar], all sharing one line.
+  const topRow = width - insets.left - insets.right - 24 - toolbarWidth - 20;
+  const compassW = landscape ? Math.min(260, Math.max(0, topRow - 200)) : 0;
+  const showLandscapeCompass = landscape && compassW >= 150;
+  const pillW = topRow - (showLandscapeCompass ? compassW + 10 : 0);
+  // Landscape bottom row: [HUD][FAB][locate][status] — buttons are 64 + 52 + 52 plus gaps.
+  const actionsW = 64 + 52 + (inTeam ? 52 + 14 : 0) + 14;
+
   // Side commander without a squad of their own: the pill shows the side instead.
   const sideOnly = side.isSideCommander && !inTeam;
   const online = side.mapMembers.filter(
@@ -239,7 +251,13 @@ export default function MapScreen() {
         : null;
 
   return (
-    <View style={styles.root}>
+    <View
+      style={styles.root}
+      onLayout={(e) => {
+        const { width: w, height: h } = e.nativeEvent.layout;
+        setArea((a) => (a && a.width === w && a.height === h ? a : { width: w, height: h }));
+      }}
+    >
       <TacticalMap
         ref={mapRef}
         baseLayer={baseLayer}
@@ -247,7 +265,7 @@ export default function MapScreen() {
         selfRole={session.role}
         selfColor={session.teamColor}
         grid={session.showGrid}
-        topInset={landscape ? insets.top + 52 : pillTop + 58}
+        topInset={landscape ? insets.top + 60 : pillTop + 58}
         follow={follow}
         members={side.mapMembers}
         selfId={session.uid}
@@ -275,13 +293,18 @@ export default function MapScreen() {
           <CompassTape heading={heading} />
         </View>
       )}
+      {showLandscapeCompass && (
+        <View style={[styles.compass, { top: insets.top + 10, left: 12 + insets.left + pillW + 10, width: compassW }]}>
+          <CompassTape heading={heading} compact />
+        </View>
+      )}
 
       {/* Top: team status + tools */}
       <View
         style={[
           styles.top,
           { top: pillTop, left: 12 + insets.left, right: 12 + insets.right },
-          landscape && { right: undefined, width: Math.min(420, width - toolbarWidth - 36 - insets.left - insets.right) },
+          landscape && { right: undefined, width: pillW },
         ]}
       >
         <Pressable
@@ -323,7 +346,9 @@ export default function MapScreen() {
                   {sideOnly
                     ? `Сторона · ${side.squads.length} отр. · ${online} в сети`
                     : inTeam
-                      ? `${online} в сети · ${session.members.length} в составе${side.isSideCommander ? ' · сторона' : ''}`
+                      ? landscape
+                        ? `${online}/${session.members.length}`
+                        : `${online} в сети · ${session.members.length} в составе${side.isSideCommander ? ' · сторона' : ''}`
                       : 'Нажмите, чтобы собрать команду'}
                 </Text>
               </View>
@@ -381,7 +406,7 @@ export default function MapScreen() {
           style={[
             styles.banner,
             { top: pillTop + 64, left: 12 + insets.left },
-            landscape && { right: undefined, width: Math.min(420, width - 100) },
+            landscape && { right: undefined, width: Math.min(420, pillW) },
           ]}
         >
           <Icon name="alert-circle" size={18} color={C.danger} />
@@ -479,7 +504,10 @@ export default function MapScreen() {
           styles.hud,
           { bottom: insets.bottom + 12, left: 12 + insets.left, right: 12 + insets.right },
           landscape && styles.hudCompact,
-          landscape && { right: undefined, width: Math.min(460, width - 200 - insets.left - insets.right) },
+          landscape && {
+            right: undefined,
+            width: Math.min(460, width - insets.left - insets.right - 24 - actionsW - 12),
+          },
         ]}
       >
         <View style={{ flex: 1.3 }}>
@@ -761,10 +789,10 @@ const styles = StyleSheet.create({
   teamPill: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingLeft: 6, paddingRight: 12, height: 54 },
   teamIcon: { width: 42, height: 42, borderRadius: R.md, alignItems: 'center', justifyContent: 'center' },
   teamTitle: { color: C.text, fontSize: 14, fontFamily: F.mono, letterSpacing: 1, textTransform: 'uppercase' },
-  teamSubRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  teamSubRow: { flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 0 },
   liveDot: { width: 7, height: 7, borderRadius: 4 },
   teamSub: { color: C.dim, fontSize: 12, fontFamily: F.regular },
-  teamPillCompact: { height: 38, gap: 8, paddingLeft: 4, paddingRight: 10 },
+  teamPillCompact: { height: 46, gap: 8, paddingLeft: 6, paddingRight: 10 },
   teamIconCompact: { width: 30, height: 30, borderRadius: R.sm },
   teamTextCompact: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   teamTitleCompact: { fontSize: 14, flexShrink: 1 },

@@ -7,6 +7,8 @@ import { C, F, R } from './theme';
 const POINTS = ['С', 'СВ', 'В', 'ЮВ', 'Ю', 'ЮЗ', 'З', 'СЗ'];
 /** Degrees visible across the tape. */
 const SPAN = 110;
+/** Fewer degrees on the short landscape tape, so ticks don't crowd. */
+const SPAN_COMPACT = 80;
 
 function cardinal(deg: number): string {
   return POINTS[Math.round((((deg % 360) + 360) % 360) / 45) % 8];
@@ -16,20 +18,21 @@ function cardinal(deg: number): string {
  * Heading tape across the top of the map, like a rugged GPS unit: the scale slides
  * under a fixed center mark, with the exact bearing in the middle.
  */
-export function CompassTape({ heading }: { heading: number | null }) {
+export function CompassTape({ heading, compact }: { heading: number | null; compact?: boolean }) {
   const [width, setWidth] = useState(0);
   const h = heading ?? 0;
-  const pxPerDeg = width / SPAN;
+  const span = compact ? SPAN_COMPACT : SPAN;
+  const pxPerDeg = width / span;
   const ticks: { deg: number; x: number }[] = [];
   if (width > 0) {
-    const first = Math.ceil((h - SPAN / 2) / 5) * 5;
-    for (let d = first; d <= h + SPAN / 2; d += 5) ticks.push({ deg: d, x: width / 2 + (d - h) * pxPerDeg });
+    const first = Math.ceil((h - span / 2) / 5) * 5;
+    for (let d = first; d <= h + span / 2; d += 5) ticks.push({ deg: d, x: width / 2 + (d - h) * pxPerDeg });
   }
   const readout =
     heading == null ? '—' : `${cardinal(heading)} ${String(Math.round((heading + 360) % 360)).padStart(3, '0')}°`;
 
   return (
-    <Glass radius={R.md} style={styles.wrap}>
+    <Glass radius={R.md} style={[styles.wrap, compact && styles.wrapCompact]}>
       <View style={styles.tape} onLayout={(e) => setWidth(e.nativeEvent.layout.width)} pointerEvents="none">
         {heading != null &&
           ticks.map(({ deg, x }) => {
@@ -52,8 +55,8 @@ export function CompassTape({ heading }: { heading: number | null }) {
           <View style={styles.caret} />
         </View>
       </View>
-      <View style={styles.readout} pointerEvents="none">
-        <Text style={styles.readoutText}>{readout}</Text>
+      <View style={[styles.readout, compact && styles.readoutCompact]} pointerEvents="none">
+        <Text style={[styles.readoutText, compact && styles.readoutTextCompact]}>{readout}</Text>
       </View>
     </Glass>
   );
@@ -61,6 +64,7 @@ export function CompassTape({ heading }: { heading: number | null }) {
 
 const styles = StyleSheet.create({
   wrap: { height: 40, flexDirection: 'row', alignItems: 'stretch', overflow: 'hidden' },
+  wrapCompact: { height: 46 },
   tape: { flex: 1, overflow: 'hidden' },
   tickWrap: { position: 'absolute', top: 0, width: 30, alignItems: 'center' },
   tick: { width: 1, height: 6, backgroundColor: C.dim },
@@ -88,4 +92,6 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(142, 240, 122, 0.08)',
   },
   readoutText: { color: C.accent, fontFamily: F.mono, fontSize: 15, letterSpacing: 0.5 },
+  readoutCompact: { width: 74 },
+  readoutTextCompact: { fontSize: 13 },
 });
