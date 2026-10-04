@@ -103,6 +103,25 @@ export default function SettingsScreen() {
         />
         <View style={styles.divider} />
         <SettingRow
+          icon={s.mesh.enabled ? 'bluetooth-connect' : 'bluetooth-off'}
+          title="Связь без интернета"
+          sub={
+            !s.mesh.available
+              ? 'Bluetooth и Wi-Fi Direct между телефонами. Только в Android-приложении'
+              : s.mesh.error
+                ? `Ошибка: ${s.mesh.error}`
+                : s.mesh.enabled
+                  ? s.teamId
+                    ? `Рядом на связи: ${s.mesh.peers}. Позиции и чат передаются от бойца к бойцу`
+                    : 'Включится, когда вы в отряде'
+                  : 'Позиции и чат от телефона к телефону, когда нет сети'
+          }
+          value={s.mesh.enabled}
+          disabled={!s.mesh.available}
+          onChange={(v) => run(() => s.mesh.setEnabled(v))}
+        />
+        <View style={styles.divider} />
+        <SettingRow
           icon="grid"
           title="Сетка координат"
           sub="Квадраты UTM на карте, подписи по краям"
@@ -130,12 +149,14 @@ function SettingRow({
   sub,
   value,
   onChange,
+  disabled,
 }: {
   icon: IconName;
   title: string;
   sub: string;
   value: boolean;
   onChange: (v: boolean) => void;
+  disabled?: boolean;
 }) {
   return (
     <View style={styles.row}>
@@ -146,7 +167,13 @@ function SettingRow({
         <Text style={styles.rowTitle}>{title}</Text>
         <Text style={styles.sub}>{sub}</Text>
       </View>
-      <Switch value={value} onValueChange={onChange} trackColor={{ true: C.accent, false: C.elevated }} thumbColor="#fff" />
+      <Switch
+        value={value}
+        onValueChange={onChange}
+        disabled={disabled}
+        trackColor={{ true: C.accent, false: C.elevated }}
+        thumbColor="#fff"
+      />
     </View>
   );
 }

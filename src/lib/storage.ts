@@ -16,6 +16,7 @@ export const KEYS = {
   sideShowAll: 'tacmap.sideShowAll',
   grid: 'tacmap.grid',
   status: 'tacmap.status',
+  mesh: 'tacmap.mesh',
 } as const;
 
 export async function loadJson<T>(key: string, fallback: T): Promise<T> {

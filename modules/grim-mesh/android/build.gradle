@@ -1,0 +1,20 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'expo.modules.grimmesh'
+version = '0.1.0'
+
+android {
+  namespace "expo.modules.grimmesh"
+  defaultConfig {
+    versionCode 1
+    versionName '0.1.0'
+  }
+}
+
+dependencies {
+  // Google Nearby Connections: phone-to-phone over Bluetooth / BLE / Wi-Fi Direct, no internet.
+  implementation 'com.google.android.gms:play-services-nearby:19.3.0'
+}

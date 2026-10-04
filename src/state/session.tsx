@@ -13,12 +13,15 @@ import {
 import { firebaseAuth, isFirebaseConfigured } from '../lib/firebase';
 import { distanceMeters } from '../lib/geo';
 import { isOrder, isVotedOut } from '../lib/markerKinds';
+import { mergeMeshMembers } from '../lib/mesh';
 import { DEFAULT_ROLE, DEFAULT_TEAM_COLOR, roleOf, type RoleId } from '../lib/roles';
 import { KEYS, loadJson, newId, saveJson } from '../lib/storage';
 import type { LatLng, Member, MemberStatus, SelfPosition, TacMarker, Team } from '../lib/types';
 import { signalNewOrder } from '../services/orderAlert';
 import * as recordings from '../services/recordings';
 import * as teams from '../services/teams';
+
+import { useMesh, type Mesh } from './useMesh';
 
 /** Re-send position at least this often so teammates can tell we're alive. */
 const HEARTBEAT_MS = 30_000;
@@ -66,6 +69,8 @@ type Session = {
 
   orderSound: boolean;
   setOrderSound: (v: boolean) => Promise<void>;
+  /** Phone-to-phone link without internet (Android). */
+  mesh: Mesh;
   /** Coordinate grid on the map. */
   showGrid: boolean;
   setShowGrid: (v: boolean) => Promise<void>;
@@ -244,6 +249,13 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const canCommand = inTeam && (isOwner || Boolean(me?.canCommand));
   canCommandRef.current = canCommand;
 
+  const mesh = useMesh({ teamId, uid, callsign, role, status, canCommand });
+  // Positions and statuses heard over Bluetooth fill in while the server is out of reach.
+  const shownMembers = useMemo(
+    () => (mesh.positions.length ? mergeMeshMembers(members, mesh.positions) : members),
+    [members, mesh.positions]
+  );
+
   // A commander may change my role or status; the member doc wins over local state.
   const myRole = me?.role;
   const myStatus = me?.status;
@@ -403,8 +415,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const lastSent = useRef<{ at: number; pos: SelfPosition } | null>(null);
   const inFlight = useRef(false);
 
+  const { reportSelf } = mesh;
   const reportPosition = useCallback(
     (p: SelfPosition) => {
+      if (shareLocation) reportSelf(p);
       if (!teamId || !uid || !shareLocation || inFlight.current) return;
       const last = lastSent.current;
       const now = Date.now();
@@ -430,7 +444,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
           inFlight.current = false;
         });
     },
-    [teamId, uid, shareLocation]
+    [teamId, uid, shareLocation, reportSelf]
   );
 
   useEffect(() => {
@@ -538,7 +552,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       teamId,
       team,
       teamColor: team?.color ?? DEFAULT_TEAM_COLOR,
-      members,
+      members: shownMembers,
+      mesh,
       teamError,
       isOwner,
       canCommand,
@@ -580,7 +595,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       avatars,
       teamId,
       team,
-      members,
+      shownMembers,
+      mesh,
       teamError,
       isOwner,
       canCommand,

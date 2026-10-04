@@ -23,7 +23,11 @@ export type ChatMessage = {
   createdAt: number;
   /** Not yet confirmed by the server (sent offline or still in flight). */
   pending?: boolean;
+  /** Heard over Bluetooth only, not (yet) on the server. */
+  viaMesh?: boolean;
 };
+
+export const newMessageId = (uid: string) => `${uid.slice(0, 8)}-${newId()}`;
 
 export const MAX_MESSAGE = 500;
 const HISTORY = 200;
@@ -60,12 +64,36 @@ export function subscribeMessages(
   );
 }
 
-export async function sendMessage(teamId: string, uid: string, callsign: string, text: string): Promise<void> {
-  const id = `${uid.slice(0, 8)}-${newId()}`;
+export async function sendMessage(
+  teamId: string,
+  uid: string,
+  callsign: string,
+  text: string,
+  id = newMessageId(uid)
+): Promise<void> {
   await setDoc(doc(firestore(), 'teams', teamId, 'messages', id), {
     uid,
     callsign,
     text: text.trim().slice(0, MAX_MESSAGE),
     createdAt: serverTimestamp(),
+  });
+}
+
+/**
+ * Gateway: a message that reached this phone over Bluetooth goes to the server on the
+ * sender's behalf (rules check `relayedBy` and that the sender is in the squad). Same
+ * id, so if the sender or another phone got there first, this create is refused.
+ */
+export async function relayMessage(
+  teamId: string,
+  relayedBy: string,
+  m: { id: string; uid: string; callsign: string; text: string; t: number }
+): Promise<void> {
+  await setDoc(doc(firestore(), 'teams', teamId, 'messages', m.id), {
+    uid: m.uid,
+    callsign: m.callsign.slice(0, 24),
+    text: m.text.trim().slice(0, MAX_MESSAGE),
+    createdAt: Timestamp.fromMillis(m.t),
+    relayedBy,
   });
 }

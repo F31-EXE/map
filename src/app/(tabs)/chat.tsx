@@ -125,6 +125,9 @@ export default function ChatScreen() {
                 {showName && <Text style={[styles.author, { color: teamColor }]}>{item.callsign}</Text>}
                 <Text style={[styles.text, mine && { color: C.accentInk }]}>{item.text}</Text>
                 <View style={styles.meta}>
+                  {item.viaMesh && (
+                    <Icon name="bluetooth" size={12} color={mine ? 'rgba(11,15,12,0.6)' : C.info} />
+                  )}
                   <Text style={[styles.time, mine && { color: 'rgba(11,15,12,0.6)' }]}>
                     {formatClock(item.createdAt)}
                   </Text>

@@ -7,7 +7,7 @@ rules_version = '2';
 //     pinned = { id, text, callsign, uid, at }: chat message pinned by a commander
 //   teams/{teamId}/markers/{id}      -> { kind, label, lat, lng, createdBy, createdByName, createdAt }
 //   teams/{teamId}/avatars/{uid}     -> { data, updatedAt }   small JPEG data URI
-//   teams/{teamId}/messages/{id}    -> { uid, callsign, text, createdAt }   team chat
+//   teams/{teamId}/messages/{id}    -> { uid, callsign, text, createdAt, relayedBy? }   team chat
 //   teams/{teamId}/recordings/{id}  -> { name, startedAt, endedAt, startedBy }; tracks/{uid} -> { points }
 //   sides/{sideId}                   -> { name, code, ownerId, createdAt }   several squads under one side commander
 //   sideCodes/{code}                 -> { sideId }
@@ -234,8 +234,13 @@ service cloud.firestore {
       // Team chat. Ids are generated on the phone so relayed copies collapse into one.
       match /messages/{messageId} {
         allow read: if isMember(teamId);
+        // Own messages; or a gateway phone uploading a squadmate's message it received
+        // over Bluetooth (marked with relayedBy).
         allow create: if isMember(teamId)
-          && request.resource.data.uid == request.auth.uid
+          && (request.resource.data.uid == request.auth.uid
+            || (request.resource.data.get('relayedBy', null) == request.auth.uid
+              && request.resource.data.uid is string
+              && exists(memberPath(teamId, request.resource.data.uid))))
           && request.resource.data.text is string
           && request.resource.data.text.size() > 0
           && request.resource.data.text.size() <= 500

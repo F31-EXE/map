@@ -442,3 +442,25 @@ describe('moving markers', () => {
     await assertFails(move('bob', { lat: 'север' }));
   });
 });
+
+describe('chat relayed over Bluetooth', () => {
+  beforeEach(async () => {
+    await createTeam(as('alice'), 'alice');
+    await join(as('bob'), 'bob');
+  });
+  const relay = (by: string, from: string, extra: Record<string, unknown> = {}) =>
+    setDoc(doc(as(by), 'teams', TEAM, 'messages', 'm1'), { uid: from, callsign: 'Тень', text: 'Контакт!', createdAt: new Date(), relayedBy: by, ...extra });
+
+  test("a member uploads a squadmate's message, marked as relayed", async () => {
+    await assertSucceeds(relay('alice', 'bob'));
+  });
+  test('no relaying for strangers, outsiders, or without the mark', async () => {
+    await assertFails(relay('alice', 'mallory'));
+    await assertFails(relay('carol', 'bob'));
+    await assertFails(relay('alice', 'bob', { relayedBy: 'bob' }));
+  });
+  test('the second upload of the same message is refused', async () => {
+    await relay('alice', 'bob');
+    await assertFails(setDoc(doc(as('bob'), 'teams', TEAM, 'messages', 'm1'), { uid: 'bob', callsign: 'Тень', text: 'Контакт!', createdAt: new Date() }));
+  });
+});

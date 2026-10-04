@@ -53,6 +53,8 @@ export type Member = {
   leader?: boolean;
   /** Squad the member belongs to (side view). */
   teamId?: string;
+  /** Last position came over Bluetooth, not from the server. */
+  viaMesh?: boolean;
 };
 
 export type OrderKind = 'order-move' | 'order-attack' | 'order-defend';

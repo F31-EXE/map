@@ -365,6 +365,12 @@ export default function MapScreen() {
                 </Text>
               </View>
             </View>
+            {session.mesh.enabled && session.mesh.available && inTeam && (
+              <View style={[styles.meshChip, session.mesh.peers > 0 && styles.meshChipOn]}>
+                <Icon name="bluetooth" size={13} color={session.mesh.peers > 0 ? C.info : C.faint} />
+                <Text style={[styles.meshText, session.mesh.peers > 0 && { color: C.info }]}>{session.mesh.peers}</Text>
+              </View>
+            )}
             {session.team?.recordingId && (
               <View style={styles.rec}>
                 <View style={styles.recDot} />
@@ -877,6 +883,18 @@ const styles = StyleSheet.create({
     borderRadius: R.pill,
     backgroundColor: C.dangerSoft,
   },
+  meshChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+    paddingHorizontal: 6,
+    height: 22,
+    borderRadius: R.sm,
+    borderWidth: 1,
+    borderColor: C.line,
+  },
+  meshChipOn: { borderColor: 'rgba(92, 200, 255, 0.5)' },
+  meshText: { color: C.faint, fontSize: 11, fontFamily: F.mono },
   recDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: C.danger },
   recText: { color: C.danger, fontSize: 11, fontFamily: F.bold, letterSpacing: 0.8 },
   drawBar: { position: 'absolute', padding: 12, gap: 10, maxWidth: 520 },
