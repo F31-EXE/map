@@ -65,3 +65,7 @@ Docs: https://docs.expo.dev/eas/index.md
 - Role badges: `src/lib/roles.ts` builds glyphs with `xf()` (absolute M/L/C/Z paths only) and frames (`roleFrame`); `RoleIcon framed` draws the full badge, without `framed` only the glyph (viewBox `4 4 16 16`, also used for map pins and the self marker).
 - Member `status` (`alive`/`dead`/`afk`, `src/lib/status.ts`): set by the fighter or by anyone ranked above them (rules: `rank()` comparison, keys `role`/`status` only). Team `pinned` chat message is written by commanders.
 - Coordinate grid: UTM in map.js (`toUtm`/`fromUtm`, `setGrid`), labels kept clear of native panels via `setInsets({ top, bottom })`.
+- Map zoom is continuous (`zoomSnap: 0`); never compare `getZoom()` for equality.
+- Own point markers are `movable` (not arrows, not side-order copies): long press picks one up (`markerDragStart` → haptic), release posts `markerMoved`; rules let only the author change `lat`/`lng`.
+- Side orders are deleted copy by copy (`deleteSideOrder`), never in one batch: each delete runs `rank()` lookups and a multi-squad batch exceeds Firestore's per-request document read limit.
+- `Sheet` is a right-side panel in landscape and always has a close button. Inverted `FlatList`s flip their empty component, so render empty states outside the list.

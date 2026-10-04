@@ -422,3 +422,23 @@ describe('status, assigned roles and pinned messages', () => {
     await assertFails(pin('alice', 'x'.repeat(501)));
   });
 });
+
+describe('moving markers', () => {
+  beforeEach(async () => {
+    await createTeam(as('alice'), 'alice');
+    await join(as('bob'), 'bob');
+    await setDoc(doc(as('bob'), 'teams', TEAM, 'markers', 'm1'), marker('bob'));
+  });
+  const move = (by: string, data: Record<string, unknown>) => updateDoc(doc(as(by), 'teams', TEAM, 'markers', 'm1'), data);
+
+  test('the author moves their marker', async () => {
+    await assertSucceeds(move('bob', { lat: 55.1, lng: 37.2 }));
+  });
+  test('nobody else moves it, not even the squad creator', async () => {
+    await assertFails(move('alice', { lat: 55.1, lng: 37.2 }));
+  });
+  test('moving changes the position only', async () => {
+    await assertFails(move('bob', { lat: 55.1, label: 'другое' }));
+    await assertFails(move('bob', { lat: 'север' }));
+  });
+});

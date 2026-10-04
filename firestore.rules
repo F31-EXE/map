@@ -193,10 +193,16 @@ service cloud.firestore {
               && request.resource.data.get('audience', null) == 'commanders')
           );
         // Voting: a squad member adds themselves to staleVotes or doneVotes, nothing else.
-        allow update: if isMember(teamId)
+        allow update: if (isMember(teamId)
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['staleVotes', 'doneVotes'])
           && votedOnlyAsSelf('staleVotes')
-          && votedOnlyAsSelf('doneVotes');
+          && votedOnlyAsSelf('doneVotes'))
+          // The author drags their own marker to a new spot.
+          || (isMember(teamId)
+            && resource.data.createdBy == request.auth.uid
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['lat', 'lng'])
+            && request.resource.data.lat is number
+            && request.resource.data.lng is number);
         // Chain of command: your own markers, or those of anyone strictly below you.
         allow delete: if (isMember(teamId) || isSideCommanderOf(teamId))
           && (resource.data.createdBy == request.auth.uid

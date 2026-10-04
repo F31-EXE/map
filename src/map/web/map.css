@@ -282,6 +282,15 @@ body,
   pointer-events: none;
 }
 
+/* Picked up by a long press: lifted and highlighted while it follows the finger. */
+.tac-icon.dragging .tac-pin {
+  transform: scale(1.25) translateY(-10px);
+  box-shadow: 0 0 0 3px #fff, 0 14px 22px rgba(0, 0, 0, 0.6) !important;
+}
+.tac-icon.order.dragging .tac-pin {
+  transform: rotate(45deg) scale(1.25);
+}
+
 /* Polygon infrastructure (respawn, parking…): square pins. */
 .tac-icon.admin .tac-pin {
   border-radius: 7px;

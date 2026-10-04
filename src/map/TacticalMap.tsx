@@ -57,6 +57,10 @@ type Props = {
   onFocusHandled?: () => void;
   onLongPress?: (p: LatLng) => void;
   onMarkerPress?: (id: string) => void;
+  /** Markers the user may pick up with a long press and drag. */
+  isMovable?: (m: TacMarker) => boolean;
+  onMarkerDragStart?: (id: string) => void;
+  onMarkerMoved?: (id: string, p: LatLng) => void;
   onMemberPress?: (id: string) => void;
   onViewChanged?: (p: LatLng & { zoom: number }) => void;
   onFollowChanged?: (follow: boolean) => void;
@@ -152,6 +156,7 @@ export function TacticalMap(props: Props) {
     send({ type: 'setMembers', payload: list });
   }, [ready, generation, props.members, props.selfId, props.teamColor, props.ownerId, now, send]);
 
+  const { isMovable } = props;
   useEffect(() => {
     if (!ready) return;
     const list = props.markers.map((m) => {
@@ -166,12 +171,13 @@ export function TacticalMap(props: Props) {
         points: m.points,
         order: isOrder(m.kind),
         admin: isAdminKind(m.kind),
+        movable: Boolean(isMovable?.(m)),
         personal: Boolean(m.personal),
         time: formatClock(m.createdAt),
       };
     });
     send({ type: 'setMarkers', payload: list });
-  }, [ready, generation, props.markers, send]);
+  }, [ready, generation, props.markers, isMovable, send]);
 
   const analysis = props.analysis;
   useEffect(() => {
@@ -245,6 +251,12 @@ export function TacticalMap(props: Props) {
           break;
         case 'markerTap':
           props.onMarkerPress?.(p.id);
+          break;
+        case 'markerDragStart':
+          props.onMarkerDragStart?.(p.id);
+          break;
+        case 'markerMoved':
+          props.onMarkerMoved?.(p.id, { lat: p.lat, lng: p.lng });
           break;
         case 'memberTap':
           props.onMemberPress?.(p.id);

@@ -86,18 +86,21 @@ export default function ChatScreen() {
         </View>
       )}
 
+      {/* Outside the list: an inverted FlatList flips its empty component too (on
+          Android in both axes, so the text came out mirrored). */}
+      {messages.length === 0 && (
+        <View style={styles.emptyOverlay} pointerEvents="none">
+          <Icon name="chat-outline" size={40} color={C.faint} />
+          <Text style={styles.emptyText}>Сообщений пока нет</Text>
+        </View>
+      )}
+
       <FlatList
         ref={list}
         data={[...messages].reverse()}
         inverted
         keyExtractor={(m) => m.id}
         contentContainerStyle={styles.listContent}
-        ListEmptyComponent={
-          <View style={[styles.empty, { transform: [{ scaleY: -1 }] }]}>
-            <Icon name="chat-outline" size={40} color={C.faint} />
-            <Text style={styles.emptyText}>Сообщений пока нет</Text>
-          </View>
-        }
         renderItem={({ item, index }) => {
           const mine = item.uid === uid;
           const older = [...messages].reverse()[index + 1];
@@ -181,6 +184,16 @@ const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: C.bg },
   listContent: { padding: 12, gap: 6, flexGrow: 1 },
   empty: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 10, padding: 32 },
+  emptyOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 120,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+  },
   emptyText: { color: C.faint, fontSize: 15, fontFamily: F.regular },
   bubbleRow: { flexDirection: 'row' },
   bubble: { maxWidth: '80%', borderRadius: 16, paddingHorizontal: 12, paddingVertical: 8, gap: 2 },

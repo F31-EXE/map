@@ -292,11 +292,28 @@ export async function voteMarker(teamId: string, markerId: string, uid: string, 
   });
 }
 
+/** The author moves their own marker (enforced by rules). */
+export async function moveTeamMarker(teamId: string, markerId: string, lat: number, lng: number): Promise<void> {
+  await updateDoc(doc(firestore(), 'teams', teamId, 'markers', markerId), { lat, lng });
+}
+
 export async function deleteTeamMarker(teamId: string, markerId: string): Promise<void> {
   await deleteDoc(doc(firestore(), 'teams', teamId, 'markers', markerId));
 }
 
-/** Deletes several markers; each delete is checked by the rules on its own. */
-export async function deleteTeamMarkers(teamId: string, markerIds: string[]): Promise<void> {
-  await Promise.all(markerIds.map((id) => deleteTeamMarker(teamId, id)));
+/**
+ * Deletes several markers; each delete is checked by the rules on its own, so one
+ * refusal doesn't stop the rest. Returns how many could not be deleted.
+ */
+export async function deleteTeamMarkers(teamId: string, markerIds: string[]): Promise<number> {
+  const results = await Promise.allSettled(markerIds.map((id) => deleteTeamMarker(teamId, id)));
+  return results.filter((r) => r.status === 'rejected').length;
+}
+
+/** Message for a refused marker change. */
+export function markerErrorText(e: unknown): string {
+  if (isPermissionDenied(e)) {
+    return 'Сервер не разрешил. Метку поставил вышестоящий командир, либо в Firebase опубликованы старые правила доступа (firestore.rules).';
+  }
+  return (e as Error).message;
 }

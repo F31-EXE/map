@@ -278,10 +278,13 @@ export function SideProvider({ children }: { children: ReactNode }) {
   const deleteMarker = useCallback(
     async (m: TacMarker) => {
       if (m.groupId && isSideCommander) {
-        const all = [...markers, ...Object.values(sideMarkers).flat()];
-        const copies = all
-          .filter((x) => x.groupId === m.groupId && x.teamId)
-          .map((x) => ({ teamId: x.teamId!, id: x.id.split('/').pop()! }));
+        // Every copy of the order: my own squad's (no teamId there) and the other squads'.
+        const copies = [
+          ...(teamId ? markers.filter((x) => x.groupId === m.groupId && !x.personal).map((x) => ({ teamId, id: x.id })) : []),
+          ...Object.entries(sideMarkers).flatMap(([sq, list]) =>
+            sq === teamId ? [] : list.filter((x) => x.groupId === m.groupId).map((x) => ({ teamId: sq, id: x.id }))
+          ),
+        ];
         return sides.deleteSideOrder(copies);
       }
       if (m.teamId && m.teamId !== teamId) {
@@ -313,8 +316,13 @@ export function SideProvider({ children }: { children: ReactNode }) {
   );
 
   const canDelete = useCallback(
-    (m: TacMarker) => canDeleteMarker(uid, m, rankContext(m.teamId)),
-    [uid, rankContext]
+    (m: TacMarker) => {
+      // Side orders always come from the side commander, even if the side itself
+      // hasn't loaded here yet; only they may cancel them.
+      if (m.groupId && m.audience === 'commanders' && m.createdBy !== uid && !isSideCommander) return false;
+      return canDeleteMarker(uid, m, rankContext(m.teamId));
+    },
+    [uid, rankContext, isSideCommander]
   );
 
   const myRank = rankOf(uid, rankContext(teamId ?? undefined));

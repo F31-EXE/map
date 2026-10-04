@@ -50,6 +50,11 @@
     attributionControl: true,
     maxZoom: 21,
     tapHold: false,
+    // Smooth zoom: pinch stops at any level instead of snapping to whole steps;
+    // buttons and double tap still go half a level at a time.
+    zoomSnap: 0,
+    zoomDelta: 0.5,
+    wheelPxPerZoomLevel: 120,
   }).setView([55.751, 37.618], 10);
   map.attributionControl.setPrefix(false);
   // Exposed for automated layout tests.
@@ -284,6 +289,9 @@
 
   var markersLayer = L.layerGroup().addTo(map);
   var tacMarkers = {};
+  // Marker being moved by long press + drag (see the long-press section).
+  var dragged = null;
+  var suppressTapUntil = 0;
 
   function tacIcon(m) {
     var c = escapeHtml(m.color);
@@ -291,7 +299,7 @@
     var time = m.time ? '<span class="chip-role">' + (m.label ? ' · ' : '') + escapeHtml(m.time) + '</span>' : '';
     var label = m.label || m.time ? '<div class="chip tac-chip">' + escapeHtml(m.label || '') + time + '</div>' : '';
     return L.divIcon({
-      className: 'tac-icon' + (m.order ? ' order' : '') + (m.admin ? ' admin' : '') + (m.personal ? ' personal' : ''),
+      className: 'tac-icon' + (m.order ? ' order' : '') + (m.admin ? ' admin' : '') + (m.personal ? ' personal' : '') + (m.movable ? ' movable' : ''),
       html:
         '<div class="tac-pin" style="--c:' + c + ';border-color:' + c + ';box-shadow:0 0 0 4px ' + c + '33, 0 4px 14px rgba(0,0,0,.6)">' +
         '<svg viewBox="0 0 24 24"><path d="' + escapeHtml(m.path) + '" fill="' + c + '"/></svg></div>' +
@@ -328,8 +336,12 @@
       lineCap: 'round',
       lineJoin: 'round',
       dashArray: dashed ? '10 8' : null,
-      interactive: !(opts && opts.draft),
+      interactive: false,
     }).addTo(g);
+    // A thin line is hard to hit with a finger: a wide invisible stroke takes the taps.
+    if (!(opts && opts.draft)) {
+      L.polyline(pts, { color: m.color, weight: 28, opacity: 0.001, lineCap: 'round', lineJoin: 'round' }).addTo(g);
+    }
     if (pts.length >= 2) {
       L.marker(pts[pts.length - 1], {
         interactive: false,
@@ -444,15 +456,20 @@
       function (m) {
         var mk = L.marker([m.lat, m.lng], { icon: tacIcon(m) });
         mk._tacId = m.id;
-        mk._tacKey = JSON.stringify([m.path, m.color, m.label, m.order, m.personal, m.time]);
+        mk._tacKey = JSON.stringify([m.path, m.color, m.label, m.order, m.personal, m.time, m.movable]);
         mk.on('click', function () {
+          // The release after dragging a marker is not a tap.
+          if (Date.now() < suppressTapUntil) return;
           post('markerTap', { id: mk._tacId });
+        });
+        mk.on('add', function () {
+          mk.getElement()._tacMarker = mk;
         });
         return mk;
       },
       function (mk, m) {
-        mk.setLatLng([m.lat, m.lng]);
-        var key = JSON.stringify([m.path, m.color, m.label, m.order, m.personal, m.time]);
+        if (mk !== dragged) mk.setLatLng([m.lat, m.lng]);
+        var key = JSON.stringify([m.path, m.color, m.label, m.order, m.personal, m.time, m.movable]);
         if (key !== mk._tacKey) {
           mk._tacKey = key;
           mk.setIcon(tacIcon(m));
@@ -799,6 +816,37 @@
     pressStart = null;
   }
 
+  // Long press on one of your own markers picks it up instead: it follows the finger
+  // until release, then RN saves the new position.
+  function movableAt(target) {
+    var el = target && target.closest ? target.closest('.tac-icon.movable') : null;
+    return el && el._tacMarker ? el._tacMarker : null;
+  }
+
+  function startDrag(mk) {
+    dragged = mk;
+    map.dragging.disable();
+    var el = mk.getElement();
+    if (el) el.classList.add('dragging');
+    post('markerDragStart', { id: mk._tacId });
+  }
+
+  function moveDrag(x, y) {
+    if (dragged) dragged.setLatLng(map.mouseEventToLatLng({ clientX: x, clientY: y }));
+  }
+
+  function endDrag() {
+    if (!dragged) return;
+    var mk = dragged;
+    dragged = null;
+    map.dragging.enable();
+    var el = mk.getElement();
+    if (el) el.classList.remove('dragging');
+    suppressTapUntil = Date.now() + 500;
+    var ll = mk.getLatLng();
+    post('markerMoved', { id: mk._tacId, lat: ll.lat, lng: ll.lng });
+  }
+
   container.addEventListener(
     'touchstart',
     function (e) {
@@ -806,11 +854,18 @@
       cancelPress();
       if (e.touches.length !== 1) return;
       var t = e.touches[0];
+      var mk = drawing ? null : movableAt(e.target);
       pressStart = { x: t.clientX, y: t.clientY };
       pressTimer = setTimeout(function () {
-        var ll = map.mouseEventToLatLng({ clientX: pressStart.x, clientY: pressStart.y });
+        var at = pressStart;
         cancelPress();
         if (drawing) return;
+        if (mk) {
+          startDrag(mk);
+          moveDrag(at.x, at.y);
+          return;
+        }
+        var ll = map.mouseEventToLatLng({ clientX: at.x, clientY: at.y });
         post('longPress', { lat: ll.lat, lng: ll.lng });
       }, LONG_PRESS_MS);
     },
@@ -819,14 +874,56 @@
   container.addEventListener(
     'touchmove',
     function (e) {
-      if (!pressStart) return;
       var t = e.touches[0];
+      if (dragged) {
+        moveDrag(t.clientX, t.clientY);
+        return;
+      }
+      if (!pressStart) return;
       if (Math.abs(t.clientX - pressStart.x) > 10 || Math.abs(t.clientY - pressStart.y) > 10) cancelPress();
     },
     { passive: true }
   );
-  container.addEventListener('touchend', cancelPress, { passive: true });
-  container.addEventListener('touchcancel', cancelPress, { passive: true });
+  container.addEventListener(
+    'touchend',
+    function () {
+      cancelPress();
+      endDrag();
+    },
+    { passive: true }
+  );
+  container.addEventListener(
+    'touchcancel',
+    function () {
+      cancelPress();
+      endDrag();
+    },
+    { passive: true }
+  );
+
+  // Same with a mouse (web version): hold the button on your marker, then drag.
+  container.addEventListener('mousedown', function (e) {
+    if (e.button !== 0 || Date.now() - lastTouch < 1500) return;
+    var mk = drawing ? null : movableAt(e.target);
+    if (!mk) return;
+    cancelPress();
+    pressStart = { x: e.clientX, y: e.clientY };
+    pressTimer = setTimeout(function () {
+      var at = pressStart;
+      cancelPress();
+      startDrag(mk);
+      moveDrag(at.x, at.y);
+    }, LONG_PRESS_MS);
+  });
+  document.addEventListener('mousemove', function (e) {
+    if (dragged) return moveDrag(e.clientX, e.clientY);
+    if (pressStart && (Math.abs(e.clientX - pressStart.x) > 6 || Math.abs(e.clientY - pressStart.y) > 6)) cancelPress();
+  });
+  document.addEventListener('mouseup', function () {
+    if (Date.now() - lastTouch < 1500) return;
+    cancelPress();
+    endDrag();
+  });
   map.on('contextmenu', function (e) {
     // Desktop / web preview only; touch devices are handled above.
     if (Date.now() - lastTouch < 1500) return;

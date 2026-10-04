@@ -1,5 +1,6 @@
 import {
   collection,
+  deleteDoc,
   doc,
   getDoc,
   onSnapshot,
@@ -123,9 +124,15 @@ export async function placeSideOrder(
   await batch.commit();
 }
 
+/**
+ * Deletes every copy of a side order. One by one rather than in a batch: each delete
+ * runs the rules' rank lookups, and a batch over several squads exceeds Firestore's
+ * limit on document reads per request. A squad that has since left the side just
+ * keeps its copy; the call fails only if nothing could be deleted.
+ */
 export async function deleteSideOrder(copies: { teamId: string; id: string }[]): Promise<void> {
   const db = firestore();
-  const batch = writeBatch(db);
-  copies.forEach((c) => batch.delete(doc(db, 'teams', c.teamId, 'markers', c.id)));
-  await batch.commit();
+  const results = await Promise.allSettled(copies.map((c) => deleteDoc(doc(db, 'teams', c.teamId, 'markers', c.id))));
+  const failed = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected');
+  if (failed.length && failed.length === results.length) throw failed[0].reason;
 }

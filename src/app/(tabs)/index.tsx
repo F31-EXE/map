@@ -18,11 +18,11 @@ import {
   type BaseLayerId,
   type TacticalMapHandle,
 } from '../../map/TacticalMap';
+import { markerErrorText } from '../../services/teams';
 import { useOverlays } from '../../state/overlays';
 import { useSession, type MarkerScope } from '../../state/session';
 import { useSide, type OrderTarget } from '../../state/side';
 import { AddMarkerModal } from '../../ui/AddMarkerModal';
-import { CompassTape } from '../../ui/CompassTape';
 import { Avatar, Button, Glass, GlassButton, Icon, RoleIcon, Sheet, tap, type IconName } from '../../ui/components';
 import { InfoSheet, type Stat } from '../../ui/InfoSheet';
 import { C, eyebrow, F, R } from '../../ui/theme';
@@ -127,7 +127,7 @@ export default function MapScreen() {
   const session = useSession();
   const side = useSide();
   const { overlays, focusRequest, requestFocus } = useOverlays();
-  const { position, status, heading } = useSelfPosition();
+  const { position, status } = useSelfPosition();
   const mapRef = useRef<TacticalMapHandle>(null);
 
   const [baseLayer, setBaseLayer] = useState<BaseLayerId>('yandex-sat');
@@ -180,6 +180,30 @@ export default function MapScreen() {
   }, []);
 
   const onMarkerPress = useCallback((id: string) => setSelection({ type: 'marker', id }), []);
+
+  // Own point markers can be picked up with a long press and dragged. Side orders
+  // are copies in several squads, and arrows are paths, so those stay put.
+  const { uid, teamId, moveMarker } = session;
+  const isMovable = useCallback(
+    (m: TacMarker) =>
+      !m.groupId &&
+      m.kind !== 'arrow' &&
+      (m.personal || (m.createdBy === uid && (!m.teamId || m.teamId === teamId))),
+    [uid, teamId]
+  );
+  const onMarkerDragStart = useCallback(() => {
+    if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy).catch(() => {});
+  }, []);
+  const markersRef = useRef(side.mapMarkers);
+  markersRef.current = side.mapMarkers;
+  const onMarkerMoved = useCallback(
+    (id: string, p: LatLng) => {
+      const m = markersRef.current.find((x) => x.id === id);
+      if (!m) return;
+      moveMarker(m, p).catch((e: Error) => Alert.alert('Не удалось переместить', markerErrorText(e)));
+    },
+    [moveMarker]
+  );
   const onMemberPress = useCallback((id: string) => setSelection({ type: 'member', id }), []);
 
   const saveMarker = async (kind: MarkerKind, label: string, scope: MarkerScope, target: OrderTarget) => {
@@ -201,9 +225,7 @@ export default function MapScreen() {
 
   const inTeam = Boolean(session.teamId && session.uid);
   const now = Date.now();
-  // Portrait: compass tape on top, the team pill under it.
-  const compassH = landscape ? 0 : 48;
-  const pillTop = insets.top + 10 + compassH;
+  const pillTop = insets.top + 10;
   const visibleMembers = side.mapMembers
     .filter((m) => m.id !== session.uid && m.lat != null && m.lng != null)
     .map((m) => ({ lat: m.lat!, lng: m.lng! }));
@@ -214,11 +236,8 @@ export default function MapScreen() {
   const toolbarButtons = 4 + (visibleMembers.length > 0 ? 1 : 0);
   const toolbarWidth = toolbarButtons * 50 + 8;
 
-  // Landscape top row: [team pill][compass][toolbar], all sharing one line.
-  const topRow = width - insets.left - insets.right - 24 - toolbarWidth - 20;
-  const compassW = landscape ? Math.min(260, Math.max(0, topRow - 200)) : 0;
-  const showLandscapeCompass = landscape && compassW >= 150;
-  const pillW = topRow - (showLandscapeCompass ? compassW + 10 : 0);
+  // Landscape top row: [team pill][toolbar].
+  const pillW = Math.min(420, width - insets.left - insets.right - 24 - toolbarWidth - 10);
   // Landscape bottom row: [HUD][FAB][locate][status] — buttons are 64 + 52 + 52 plus gaps.
   const actionsW = 64 + 52 + (inTeam ? 52 + 14 : 0) + 14;
 
@@ -277,6 +296,9 @@ export default function MapScreen() {
         onFocusHandled={onFocusHandled}
         onLongPress={openAdd}
         onMarkerPress={onMarkerPress}
+        isMovable={isMovable}
+        onMarkerDragStart={onMarkerDragStart}
+        onMarkerMoved={onMarkerMoved}
         onMemberPress={onMemberPress}
         onViewChanged={setCenter}
         onFollowChanged={setFollow}
@@ -288,16 +310,6 @@ export default function MapScreen() {
 
       <Reticle />
 
-      {!landscape && (
-        <View style={[styles.compass, { top: insets.top + 10, left: 12 + insets.left, right: 12 + insets.right }]}>
-          <CompassTape heading={heading} />
-        </View>
-      )}
-      {showLandscapeCompass && (
-        <View style={[styles.compass, { top: insets.top + 10, left: 12 + insets.left + pillW + 10, width: compassW }]}>
-          <CompassTape heading={heading} compact />
-        </View>
-      )}
 
       {/* Top: team status + tools */}
       <View
@@ -573,7 +585,7 @@ export default function MapScreen() {
               side
                 .deleteMarker(selectedMarker)
                 .then(() => setSelection(null))
-                .catch((e: Error) => Alert.alert('Ошибка', e.message));
+                .catch((e: Error) => Alert.alert('Не удалось удалить', markerErrorText(e)));
             }}
           />
         )}
@@ -798,7 +810,6 @@ const styles = StyleSheet.create({
   teamTitleCompact: { fontSize: 14, flexShrink: 1 },
 
   tools: { position: 'absolute', right: 12 },
-  compass: { position: 'absolute' },
   toolbar: { paddingVertical: 4, width: 50, alignItems: 'center' },
   toolbarButton: { width: 50, height: 46, alignItems: 'center', justifyContent: 'center' },
   toolbarSep: { width: 26, height: StyleSheet.hairlineWidth, backgroundColor: C.lineStrong },

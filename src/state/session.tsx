@@ -15,7 +15,7 @@ import { distanceMeters } from '../lib/geo';
 import { isOrder, isVotedOut } from '../lib/markerKinds';
 import { DEFAULT_ROLE, DEFAULT_TEAM_COLOR, roleOf, type RoleId } from '../lib/roles';
 import { KEYS, loadJson, newId, saveJson } from '../lib/storage';
-import type { Member, MemberStatus, SelfPosition, TacMarker, Team } from '../lib/types';
+import type { LatLng, Member, MemberStatus, SelfPosition, TacMarker, Team } from '../lib/types';
 import { signalNewOrder } from '../services/orderAlert';
 import * as recordings from '../services/recordings';
 import * as teams from '../services/teams';
@@ -83,12 +83,14 @@ type Session = {
   markers: TacMarker[];
   addMarker: (m: Pick<TacMarker, 'kind' | 'label' | 'lat' | 'lng' | 'points' | 'color'>, scope: MarkerScope) => Promise<void>;
   deleteMarker: (m: TacMarker) => Promise<void>;
+  /** Own markers only (personal, or placed by me in the squad). */
+  moveMarker: (m: TacMarker, p: LatLng) => Promise<void>;
   voteMarker: (m: TacMarker, vote: 'stale' | 'done') => Promise<void>;
   /**
    * Deletes every team marker `allowed` accepts, hidden ones (voted out, commanders-only)
    * included. Returns how many were deleted.
    */
-  clearTeamMarkers: (allowed: (m: TacMarker) => boolean) => Promise<number>;
+  clearTeamMarkers: (allowed: (m: TacMarker) => boolean) => Promise<{ deleted: number; failed: number }>;
 };
 
 const Ctx = createContext<Session | null>(null);
@@ -478,6 +480,17 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     [teamId, personalMarkers, savePersonal]
   );
 
+  const moveMarker = useCallback(
+    async (m: TacMarker, p: LatLng) => {
+      if (m.personal) {
+        await savePersonal(personalMarkers.map((x) => (x.id === m.id ? { ...x, lat: p.lat, lng: p.lng } : x)));
+      } else if (teamId) {
+        await teams.moveTeamMarker(teamId, m.id, p.lat, p.lng);
+      }
+    },
+    [teamId, personalMarkers, savePersonal]
+  );
+
   const voteMarker = useCallback(
     async (m: TacMarker, vote: 'stale' | 'done') => {
       if (!teamId || !uid || m.personal) return;
@@ -488,10 +501,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
   const clearTeamMarkers = useCallback(
     async (allowed: (m: TacMarker) => boolean) => {
-      if (!teamId) return 0;
+      if (!teamId) return { deleted: 0, failed: 0 };
       const ids = teamMarkers.filter(allowed).map((m) => m.id);
-      await teams.deleteTeamMarkers(teamId, ids);
-      return ids.length;
+      const failed = await teams.deleteTeamMarkers(teamId, ids);
+      return { deleted: ids.length - failed, failed };
     },
     [teamId, teamMarkers]
   );
@@ -550,6 +563,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       markers,
       addMarker,
       deleteMarker,
+      moveMarker,
       voteMarker,
       clearTeamMarkers,
     }),
@@ -591,6 +605,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       markers,
       addMarker,
       deleteMarker,
+      moveMarker,
       voteMarker,
       clearTeamMarkers,
     ]

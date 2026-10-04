@@ -241,7 +241,11 @@ export function Badge({ text, color = C.dim }: { text: string; color?: string })
   );
 }
 
-/** Bottom sheet over a dimmed backdrop. */
+/**
+ * Bottom sheet over a dimmed backdrop; in landscape a panel on the right, so the map
+ * stays visible and the backdrop to its left is a big target to close it. Always has
+ * a close button.
+ */
 export function Sheet({
   visible,
   onClose,
@@ -253,9 +257,63 @@ export function Sheet({
 }) {
   const insets = useSafeAreaInsets();
   const { width, height } = useWindowDimensions();
-  const wide = width > 640;
+  const landscape = width > height;
+  const wide = !landscape && width > 640;
   const scrollRef = useRef<ScrollView>(null);
   const onOffset = useKeepFocusedInputVisible(scrollRef);
+  const closeButton = (
+    <Pressable
+      accessibilityLabel="Закрыть"
+      hitSlop={10}
+      onPress={() => {
+        tap();
+        onClose();
+      }}
+      style={({ pressed }) => [styles.close, pressed && { opacity: 0.6 }]}
+    >
+      <Icon name="close" size={20} color={C.dim} />
+    </Pressable>
+  );
+  const body = (
+    <ScrollView
+      ref={scrollRef}
+      onScroll={(e) => onOffset(e.nativeEvent.contentOffset.y)}
+      scrollEventThrottle={32}
+      contentContainerStyle={{ gap: 16, paddingBottom: insets.bottom + 20 }}
+      keyboardShouldPersistTaps="handled"
+      showsVerticalScrollIndicator={false}
+      bounces={false}
+    >
+      {children}
+    </ScrollView>
+  );
+
+  if (landscape) {
+    return (
+      <Modal
+        visible={visible}
+        supportedOrientations={['portrait', 'landscape']}
+        transparent
+        animationType="fade"
+        onRequestClose={onClose}
+        statusBarTranslucent
+      >
+        <KeyboardAvoidingView behavior="padding" style={styles.sideRow}>
+          <Pressable style={styles.sideBackdrop} onPress={onClose} accessibilityLabel="Закрыть" />
+          <View
+            style={[
+              styles.sidePanel,
+              { width: Math.min(440, width * 0.55), paddingTop: insets.top + 12, paddingRight: 16 + insets.right },
+            ]}
+          >
+            <View style={styles.sideHead}>{closeButton}</View>
+            {body}
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+    );
+  }
+
   return (
     <Modal visible={visible} supportedOrientations={['portrait', 'landscape']} transparent animationType="slide" onRequestClose={onClose} statusBarTranslucent>
       <Pressable style={styles.backdrop} onPress={onClose} />
@@ -271,19 +329,11 @@ export function Sheet({
             wide && styles.sheetWide,
           ]}
         >
-          <View style={styles.grabber} />
-          {/* Scrolls when the content doesn't fit, e.g. in landscape. */}
-          <ScrollView
-            ref={scrollRef}
-            onScroll={(e) => onOffset(e.nativeEvent.contentOffset.y)}
-            scrollEventThrottle={32}
-            contentContainerStyle={{ gap: 16, paddingBottom: insets.bottom + 20 }}
-            keyboardShouldPersistTaps="handled"
-            showsVerticalScrollIndicator={false}
-            bounces={false}
-          >
-            {children}
-          </ScrollView>
+          <View style={styles.sheetHead}>
+            <View style={styles.grabber} />
+            <View style={styles.sheetClose}>{closeButton}</View>
+          </View>
+          {body}
         </View>
       </KeyboardAvoidingView>
     </Modal>
@@ -335,8 +385,30 @@ const styles = StyleSheet.create({
     height: 4,
     borderRadius: 2,
     backgroundColor: C.lineStrong,
-    marginBottom: 4,
   },
+  sheetHead: { height: 30, justifyContent: 'center' },
+  sheetClose: { position: 'absolute', right: -6, top: -2 },
+  close: {
+    width: 36,
+    height: 36,
+    borderRadius: R.md,
+    borderWidth: 1,
+    borderColor: C.line,
+    backgroundColor: C.elevated,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  sideRow: { flex: 1, flexDirection: 'row' },
+  sideBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.35)' },
+  sidePanel: {
+    height: '100%',
+    backgroundColor: C.surface,
+    paddingLeft: 16,
+    gap: 8,
+    borderLeftWidth: 1,
+    borderColor: C.lineStrong,
+  },
+  sideHead: { flexDirection: 'row', justifyContent: 'flex-end' },
 });
 
 /**

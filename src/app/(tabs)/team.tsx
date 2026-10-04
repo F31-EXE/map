@@ -372,7 +372,16 @@ export default function TeamScreen() {
                     'Удалить все метки отряда?',
                     'Они исчезнут у всех бойцов. Отменить нельзя.',
                     'Удалить',
-                    () => run('clear', async () => void (await s.clearTeamMarkers(side.canDelete)))
+                    () =>
+                      run('clear', async () => {
+                        const { deleted, failed } = await s.clearTeamMarkers(side.canDelete);
+                        if (failed) {
+                          Alert.alert(
+                            `Удалено ${deleted}, не удалось ${failed}`,
+                            'Сервер не разрешил удалить часть меток. Скорее всего, в Firebase опубликованы старые правила доступа: обновите firestore.rules.'
+                          );
+                        }
+                      })
                   )
                 }
               />
