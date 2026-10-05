@@ -13,10 +13,13 @@ import {
 import { firebaseAuth, isFirebaseConfigured } from '../lib/firebase';
 import { distanceMeters } from '../lib/geo';
 import { isOrder, isVotedOut } from '../lib/markerKinds';
-import { mergeMeshMembers } from '../lib/mesh';
+import { mergeMeshMarkers, mergeMeshMembers } from '../lib/mesh';
 import { DEFAULT_ROLE, DEFAULT_TEAM_COLOR, roleOf, type RoleId } from '../lib/roles';
 import { KEYS, loadJson, newId, saveJson } from '../lib/storage';
 import type { LatLng, Member, MemberStatus, SelfPosition, TacMarker, Team } from '../lib/types';
+import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
+import { Alert } from 'react-native';
+
 import { signalNewOrder } from '../services/orderAlert';
 import * as recordings from '../services/recordings';
 import * as teams from '../services/teams';
@@ -71,6 +74,9 @@ type Session = {
   setOrderSound: (v: boolean) => Promise<void>;
   /** Phone-to-phone link without internet (Android). */
   mesh: Mesh;
+  /** Screen stays on: position and Bluetooth keep working during the game. */
+  keepAwake: boolean;
+  setKeepAwake: (v: boolean) => Promise<void>;
   /** Coordinate grid on the map. */
   showGrid: boolean;
   setShowGrid: (v: boolean) => Promise<void>;
@@ -121,6 +127,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const [shareLocation, setShareLocationState] = useState(true);
   const [orderSound, setOrderSoundState] = useState(true);
   const [showGrid, setShowGridState] = useState(false);
+  const [keepAwake, setKeepAwakeState] = useState(false);
   const [status, setStatusState] = useState<MemberStatus>('alive');
   const [teamMarkers, setTeamMarkers] = useState<TacMarker[]>([]);
   const [personalMarkers, setPersonalMarkers] = useState<TacMarker[]>([]);
@@ -128,7 +135,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   // Load persisted local state.
   useEffect(() => {
     (async () => {
-      const [cs, r, av, tid, share, sound, personal, grid, st] = await Promise.all([
+      const [cs, r, av, tid, share, sound, personal, grid, st, awake] = await Promise.all([
         loadJson<string>(KEYS.callsign, ''),
         loadJson<string>(KEYS.role, DEFAULT_ROLE),
         loadJson<string | null>(KEYS.avatar, null),
@@ -138,7 +145,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         loadJson<TacMarker[]>(KEYS.personalMarkers, []),
         loadJson<boolean>(KEYS.grid, false),
         loadJson<MemberStatus>(KEYS.status, 'alive'),
+        loadJson<boolean>(KEYS.keepAwake, false),
       ]);
+      setKeepAwakeState(awake);
       setShowGridState(grid);
       setStatusState(st === 'dead' || st === 'afk' ? st : 'alive');
       setCallsignState(cs);
@@ -175,6 +184,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const orderSoundRef = useRef(orderSound);
   orderSoundRef.current = orderSound;
   const canCommandRef = useRef(false);
+  /** Orders that already buzzed (over the server or the mesh). */
+  const buzzed = useRef(new Set<string>());
 
   // Live team subscriptions.
   useEffect(() => {
@@ -229,7 +240,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
                 // Side orders reach squad commanders only.
                 (m.audience !== 'commanders' || canCommandRef.current)
             );
-            if (fresh.length) signalNewOrder(orderSoundRef.current);
+            // Orders that already buzzed when they arrived over Bluetooth stay quiet.
+            const unheard = fresh.filter((m) => !buzzed.current.has(m.id));
+            unheard.forEach((m) => buzzed.current.add(m.id));
+            if (unheard.length) signalNewOrder(orderSoundRef.current);
           }
           seenOrders = new Set(orders.map((m) => m.id));
         },
@@ -249,12 +263,49 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const canCommand = inTeam && (isOwner || Boolean(me?.canCommand));
   canCommandRef.current = canCommand;
 
-  const mesh = useMesh({ teamId, uid, callsign, role, status, canCommand });
+  const mesh = useMesh({
+    teamId,
+    uid,
+    callsign,
+    role,
+    status,
+    canCommand,
+    onNewMark: (m) => {
+      if (!isOrder(m.kind as TacMarker['kind']) || buzzed.current.has(m.id)) return;
+      if (m.audience === 'commanders' && !canCommandRef.current) return;
+      buzzed.current.add(m.id);
+      signalNewOrder(orderSoundRef.current);
+    },
+  });
   // Positions and statuses heard over Bluetooth fill in while the server is out of reach.
   const shownMembers = useMemo(
     () => (mesh.positions.length ? mergeMeshMembers(members, mesh.positions) : members),
     [members, mesh.positions]
   );
+  // Markers created, moved, deleted or voted on over Bluetooth, on top of the server's.
+  const shownTeamMarkers = useMemo(
+    () =>
+      teamId && (mesh.marks.length || mesh.votes.length)
+        ? mergeMeshMarkers(teamMarkers, mesh.marks, mesh.votes, teamId)
+        : teamMarkers,
+    [teamMarkers, mesh.marks, mesh.votes, teamId]
+  );
+
+  // Gateway: once this phone reaches the server, upload markers others placed while
+  // offline that only we heard about. Waits a bit so their own upload usually wins.
+  const relayedMarks = useRef(new Set<string>());
+  useEffect(() => {
+    if (!teamId || !uid) return;
+    const todo = shownTeamMarkers.filter((m) => m.viaMesh && m.createdBy !== uid && !relayedMarks.current.has(m.id));
+    if (!todo.length) return;
+    const t = setTimeout(() => {
+      for (const m of todo) {
+        relayedMarks.current.add(m.id);
+        teams.relayTeamMarker(teamId, uid, m).catch(() => {});
+      }
+    }, 20_000);
+    return () => clearTimeout(t);
+  }, [shownTeamMarkers, teamId, uid]);
 
   // A commander may change my role or status; the member doc wins over local state.
   const myRole = me?.role;
@@ -269,6 +320,12 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     setStatusState(myStatus);
     saveJson(KEYS.status, myStatus).catch(() => {});
   }, [myStatus]);
+
+  // Squad writes don't wait for the server: offline, Firestore keeps them queued and the
+  // mesh carries them to nearby phones meanwhile. A refusal shows up when it comes.
+  const background = useCallback((p: Promise<unknown>, what: string) => {
+    p.catch((e: unknown) => Alert.alert(what, teams.markerErrorText(e)));
+  }, []);
 
   const requireUid = useCallback(() => {
     if (!uid) throw new Error(authError ?? 'Нет подключения к серверу');
@@ -286,7 +343,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       const v = c.trim().slice(0, 24);
       setCallsignState(v);
       await saveJson(KEYS.callsign, v);
-      if (teamId && uid && v) await teams.updateProfile(teamId, uid, { callsign: v });
+      if (teamId && uid && v) background(teams.updateProfile(teamId, uid, { callsign: v }), 'Позывной не сохранился');
     },
     [teamId, uid]
   );
@@ -295,7 +352,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     async (r: RoleId) => {
       setRoleState(r);
       await saveJson(KEYS.role, r);
-      if (teamId && uid) await teams.updateProfile(teamId, uid, { role: r });
+      if (teamId && uid) background(teams.updateProfile(teamId, uid, { role: r }), 'Роль не сохранилась');
     },
     [teamId, uid]
   );
@@ -361,7 +418,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     async (st: MemberStatus) => {
       setStatusState(st);
       await saveJson(KEYS.status, st);
-      if (teamId && uid) await teams.updateProfile(teamId, uid, { status: st });
+      if (teamId && uid) background(teams.updateProfile(teamId, uid, { status: st }), 'Статус не сохранился');
     },
     [teamId, uid]
   );
@@ -369,7 +426,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const setMemberRole = useCallback(
     async (memberId: string, r: RoleId) => {
       if (memberId === uid) return setRole(r);
-      if (teamId) await teams.updateMemberByCommander(teamId, memberId, { role: r });
+      if (teamId) background(teams.updateMemberByCommander(teamId, memberId, { role: r }), 'Роль не сохранилась');
     },
     [teamId, uid, setRole]
   );
@@ -377,7 +434,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const setMemberStatus = useCallback(
     async (memberId: string, st: MemberStatus) => {
       if (memberId === uid) return setStatus(st);
-      if (teamId) await teams.updateMemberByCommander(teamId, memberId, { status: st });
+      if (teamId) background(teams.updateMemberByCommander(teamId, memberId, { status: st }), 'Статус не сохранился');
     },
     [teamId, uid, setStatus]
   );
@@ -392,6 +449,19 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     },
     [teamId]
   );
+
+  const setKeepAwake = useCallback(async (v: boolean) => {
+    setKeepAwakeState(v);
+    await saveJson(KEYS.keepAwake, v);
+  }, []);
+
+  useEffect(() => {
+    if (!keepAwake) return;
+    activateKeepAwakeAsync('grimmap').catch(() => {});
+    return () => {
+      deactivateKeepAwake('grimmap').catch(() => {});
+    };
+  }, [keepAwake]);
 
   const setShowGrid = useCallback(async (v: boolean) => {
     setShowGridState(v);
@@ -471,11 +541,15 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     await saveJson(KEYS.personalMarkers, next);
   }, []);
 
+  const { sendMark, sendVote } = mesh;
+
   const addMarker = useCallback(
     async (m: Pick<TacMarker, 'kind' | 'label' | 'lat' | 'lng' | 'points' | 'color'>, scope: MarkerScope) => {
       const base = { ...m, label: m.label.trim().slice(0, 40), createdByName: callsign || 'Я' };
       if (scope === 'team' && teamId && uid) {
-        await teams.addTeamMarker(teamId, { ...base, createdBy: uid });
+        const id = teams.newMarkerId(teamId);
+        sendMark({ ...base, id, createdBy: uid, createdAt: Date.now(), teamId });
+        background(teams.addTeamMarker(teamId, { ...base, createdBy: uid }, id), 'Метка не сохранилась на сервере');
       } else {
         await savePersonal([
           ...personalMarkers,
@@ -483,15 +557,18 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         ]);
       }
     },
-    [teamId, uid, callsign, personalMarkers, savePersonal]
+    [teamId, uid, callsign, personalMarkers, savePersonal, sendMark, background]
   );
 
   const deleteMarker = useCallback(
     async (m: TacMarker) => {
       if (m.personal) await savePersonal(personalMarkers.filter((x) => x.id !== m.id));
-      else if (teamId) await teams.deleteTeamMarker(teamId, m.id);
+      else if (teamId) {
+        sendMark(m, true);
+        background(teams.deleteTeamMarker(teamId, m.id), 'Метка не удалилась на сервере');
+      }
     },
-    [teamId, personalMarkers, savePersonal]
+    [teamId, personalMarkers, savePersonal, sendMark, background]
   );
 
   const moveMarker = useCallback(
@@ -499,41 +576,58 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       if (m.personal) {
         await savePersonal(personalMarkers.map((x) => (x.id === m.id ? { ...x, lat: p.lat, lng: p.lng } : x)));
       } else if (teamId) {
-        await teams.moveTeamMarker(teamId, m.id, p.lat, p.lng);
+        sendMark({ ...m, lat: p.lat, lng: p.lng });
+        background(teams.moveTeamMarker(teamId, m.id, p.lat, p.lng), 'Метка не переместилась на сервере');
       }
     },
-    [teamId, personalMarkers, savePersonal]
+    [teamId, personalMarkers, savePersonal, sendMark, background]
   );
 
   const voteMarker = useCallback(
     async (m: TacMarker, vote: 'stale' | 'done') => {
       if (!teamId || !uid || m.personal) return;
-      await teams.voteMarker(teamId, m.id, uid, vote);
+      sendVote({ markId: m.id, uid, vote });
+      background(teams.voteMarker(teamId, m.id, uid, vote), 'Голос не дошёл до сервера');
     },
-    [teamId, uid]
+    [teamId, uid, sendVote, background]
   );
 
   const clearTeamMarkers = useCallback(
     async (allowed: (m: TacMarker) => boolean) => {
       if (!teamId) return { deleted: 0, failed: 0 };
-      const ids = teamMarkers.filter(allowed).map((m) => m.id);
-      const failed = await teams.deleteTeamMarkers(teamId, ids);
-      return { deleted: ids.length - failed, failed };
+      const list = shownTeamMarkers.filter(allowed);
+      list.forEach((m) => sendMark(m, true));
+      // Don't hold the screen until the server answers (it may be out of reach);
+      // report refusals when they come.
+      teams
+        .deleteTeamMarkers(
+          teamId,
+          list.map((m) => m.id)
+        )
+        .then((failed) => {
+          if (failed) {
+            Alert.alert(
+              `Не удалось удалить ${failed}`,
+              'Сервер не разрешил удалить часть меток. Скорее всего, в Firebase опубликованы старые правила доступа: обновите firestore.rules.'
+            );
+          }
+        });
+      return { deleted: list.length, failed: 0 };
     },
-    [teamId, teamMarkers]
+    [teamId, shownTeamMarkers, sendMark]
   );
 
   const markers = useMemo(
     () =>
       inTeam
         ? [
-            ...teamMarkers.filter(
+            ...shownTeamMarkers.filter(
               (m) => (m.audience !== 'commanders' || canCommand) && !isVotedOut(m, members.length)
             ),
             ...personalMarkers,
           ]
         : personalMarkers,
-    [inTeam, teamMarkers, personalMarkers, canCommand, members.length]
+    [inTeam, shownTeamMarkers, personalMarkers, canCommand, members.length]
   );
 
   const value = useMemo<Session>(
@@ -570,6 +664,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       setOrderSound,
       showGrid,
       setShowGrid,
+      keepAwake,
+      setKeepAwake,
       status,
       setStatus,
       setMemberRole,
@@ -613,6 +709,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       setOrderSound,
       showGrid,
       setShowGrid,
+      keepAwake,
+      setKeepAwake,
       status,
       setStatus,
       setMemberRole,

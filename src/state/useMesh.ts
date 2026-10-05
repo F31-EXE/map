@@ -7,19 +7,24 @@ import {
   chatEnvelope,
   endpointName,
   forwarded,
+  markEnvelope,
   MESH_SERVICE_ID,
   MeshStore,
   pack,
   posEnvelope,
   shouldDial,
   squadTag,
+  toMeshMark,
   unpack,
+  voteEnvelope,
   type Envelope,
   type MeshChat,
+  type MeshMark,
+  type MeshVote,
 } from '../lib/mesh';
 import type { RoleId } from '../lib/roles';
 import { KEYS, loadJson, saveJson } from '../lib/storage';
-import type { MemberStatus, SelfPosition } from '../lib/types';
+import type { MemberStatus, SelfPosition, TacMarker } from '../lib/types';
 
 /** Own position goes out at most this often, or when moved this far. */
 const POS_MIN_MS = 4_000;
@@ -41,6 +46,12 @@ export type Mesh = {
   /** Chat heard over the mesh. */
   chats: (MeshChat & { t: number })[];
   sendChat: (c: MeshChat) => void;
+  /** Markers created, moved or deleted (tombstones), as heard over the mesh. */
+  marks: (Envelope & { kind: 'mark' })[];
+  votes: (Envelope & { kind: 'vote' })[];
+  /** Tells nearby phones about a new, moved or deleted squad marker. */
+  sendMark: (m: TacMarker, deleted?: boolean) => void;
+  sendVote: (v: MeshVote) => void;
   reportSelf: (p: SelfPosition) => void;
 };
 
@@ -66,6 +77,8 @@ export function useMesh(me: {
   role: RoleId;
   status: MemberStatus;
   canCommand: boolean;
+  /** A marker someone else created reached us over the mesh for the first time. */
+  onNewMark?: (m: MeshMark) => void;
 }): Mesh {
   const available = GrimMesh != null;
   const [enabled, setEnabledState] = useState(false);
@@ -128,8 +141,14 @@ export function useMesh(me: {
       }),
       mesh.addListener('onMessage', (e) => {
         const now = Date.now();
+        const knownMarks = new Set(store.marks.keys());
         const fresh = unpack(e.data).filter((env) => store.accept(env, now));
         if (!fresh.length) return;
+        for (const env of fresh) {
+          if (env.kind === 'mark' && !env.body.deleted && !knownMarks.has(env.body.id) && env.body.createdBy !== uid) {
+            meRef.current.onNewMark?.(env.body);
+          }
+        }
         setVersion((v) => v + 1);
         // Pass the news on to everyone else.
         const others = [...connected].filter((id) => id !== e.from);
@@ -220,6 +239,43 @@ export function useMesh(me: {
     [running, teamId, store, broadcast]
   );
 
+  const sendMark = useCallback(
+    (m: TacMarker, deleted = false) => {
+      if (!running || !teamId || m.personal) return;
+      const now = Date.now();
+      const env = markEnvelope(teamId, toMeshMark(m, deleted), now);
+      if (store.accept(env, now)) {
+        setVersion((v) => v + 1);
+        broadcast([env]);
+      }
+    },
+    [running, teamId, store, broadcast]
+  );
+
+  const sendVote = useCallback(
+    (v: MeshVote) => {
+      if (!running || !teamId) return;
+      const now = Date.now();
+      const env = voteEnvelope(teamId, v, now);
+      if (store.accept(env, now)) {
+        setVersion((x) => x + 1);
+        broadcast([env]);
+      }
+    },
+    [running, teamId, store, broadcast]
+  );
+
+  const marks = useMemo(
+    () => (running ? [...store.marks.values()] : []),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [running, store, version]
+  );
+  const votes = useMemo(
+    () => (running ? [...store.votes.values()] : []),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [running, store, version]
+  );
+
   const positions = useMemo(
     () => (running ? [...store.positions.values()] : []),
     // `version` bumps whenever the store takes news.
@@ -232,5 +288,19 @@ export function useMesh(me: {
     [running, store, version]
   );
 
-  return { available, enabled, setEnabled, peers, error, positions, chats, sendChat, reportSelf };
+  return {
+    available,
+    enabled,
+    setEnabled,
+    peers,
+    error,
+    positions,
+    chats,
+    sendChat,
+    marks,
+    votes,
+    sendMark,
+    sendVote,
+    reportSelf,
+  };
 }

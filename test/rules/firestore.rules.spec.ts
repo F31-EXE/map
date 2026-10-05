@@ -464,3 +464,30 @@ describe('chat relayed over Bluetooth', () => {
     await assertFails(setDoc(doc(as('bob'), 'teams', TEAM, 'messages', 'm1'), { uid: 'bob', callsign: 'Тень', text: 'Контакт!', createdAt: new Date() }));
   });
 });
+
+describe('markers relayed over Bluetooth', () => {
+  beforeEach(async () => {
+    await createTeam(as('alice'), 'alice');
+    await join(as('bob'), 'bob');
+    await join(as('carol'), 'carol');
+  });
+  const relay = (by: string, data: Record<string, unknown>, id = 'r1') =>
+    setDoc(doc(as(by), 'teams', TEAM, 'markers', id), { ...data, relayedBy: by });
+
+  test("a member uploads a squadmate's marker", async () => {
+    await assertSucceeds(relay('carol', marker('bob')));
+  });
+  test('relayed orders only from someone who may give them', async () => {
+    await assertFails(relay('carol', marker('bob', 'order-attack'), 'o1'));
+    await assertSucceeds(relay('carol', marker('alice', 'order-attack'), 'o2'));
+  });
+  test('no relaying for strangers, outsiders, side orders, or with a forged mark', async () => {
+    await assertFails(relay('carol', marker('mallory')));
+    await assertFails(setDoc(doc(as('dave'), 'teams', TEAM, 'markers', 'x'), { ...marker('bob'), relayedBy: 'dave' }));
+    await assertFails(relay('carol', { ...marker('alice', 'order-attack'), audience: 'commanders' }));
+    await assertFails(setDoc(doc(as('carol'), 'teams', TEAM, 'markers', 'y'), { ...marker('bob'), relayedBy: 'bob' }));
+  });
+  test('own markers cannot carry a relay mark', async () => {
+    await assertFails(setDoc(doc(as('bob'), 'teams', TEAM, 'markers', 'z'), { ...marker('bob'), relayedBy: 'carol' }));
+  });
+});

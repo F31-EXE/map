@@ -5,7 +5,7 @@ rules_version = '2';
 //   teams/{teamId}                   -> { name, code, ownerId, color, createdAt, recordingId?, pinned? }
 //   teams/{teamId}/members/{uid}     -> { callsign, role, status?, canCommand?, joinCode, lat, lng, heading, accuracy, updatedAt }
 //     pinned = { id, text, callsign, uid, at }: chat message pinned by a commander
-//   teams/{teamId}/markers/{id}      -> { kind, label, lat, lng, createdBy, createdByName, createdAt }
+//   teams/{teamId}/markers/{id}      -> { kind, label, lat, lng, createdBy, createdByName, createdAt, relayedBy? }
 //   teams/{teamId}/avatars/{uid}     -> { data, updatedAt }   small JPEG data URI
 //   teams/{teamId}/messages/{id}    -> { uid, callsign, text, createdAt, relayedBy? }   team chat
 //   teams/{teamId}/recordings/{id}  -> { name, startedAt, endedAt, startedBy }; tracks/{uid} -> { points }
@@ -174,8 +174,7 @@ service cloud.firestore {
 
       match /markers/{markerId} {
         allow read: if isMember(teamId) || isSideCommanderOf(teamId);
-        allow create: if request.resource.data.createdBy == request.auth.uid
-          && request.resource.data.kind is string
+        allow create: if request.resource.data.kind is string
           && request.resource.data.lat is number
           && request.resource.data.lng is number
           && request.resource.data.label is string
@@ -185,12 +184,24 @@ service cloud.firestore {
           && !('staleVotes' in request.resource.data)
           && !('doneVotes' in request.resource.data)
           && (
-            // Squad members; orders only from the squad's commanders.
-            (isMember(teamId) && (!isOrderKind(request.resource.data.kind) || canCommand(teamId)))
-            // The side commander sends orders to squad commanders.
-            || (isSideCommanderOf(teamId)
-              && isOrderKind(request.resource.data.kind)
-              && request.resource.data.get('audience', null) == 'commanders')
+            (request.resource.data.createdBy == request.auth.uid
+              && !('relayedBy' in request.resource.data)
+              && (
+                // Squad members; orders only from the squad's commanders.
+                (isMember(teamId) && (!isOrderKind(request.resource.data.kind) || canCommand(teamId)))
+                // The side commander sends orders to squad commanders.
+                || (isSideCommanderOf(teamId)
+                  && isOrderKind(request.resource.data.kind)
+                  && request.resource.data.get('audience', null) == 'commanders')
+              ))
+            // Gateway: a member uploads a squadmate's marker heard over Bluetooth. Orders
+            // only if their author may give them; side orders never travel this way.
+            || (isMember(teamId)
+              && request.resource.data.get('relayedBy', null) == request.auth.uid
+              && request.resource.data.createdBy is string
+              && exists(memberPath(teamId, request.resource.data.createdBy))
+              && !('audience' in request.resource.data)
+              && (!isOrderKind(request.resource.data.kind) || rank(teamId, request.resource.data.createdBy) >= 2))
           );
         // Voting: a squad member adds themselves to staleVotes or doneVotes, nothing else.
         allow update: if (isMember(teamId)

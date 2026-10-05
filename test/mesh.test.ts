@@ -92,3 +92,50 @@ test('mesh positions update the roster only when fresher, and add unknown fighte
 test('exactly one of two phones dials', () => {
   assert.notEqual(shouldDial('t|aaa|x', 't|bbb|y'), shouldDial('t|bbb|y', 't|aaa|x'));
 });
+
+import { markEnvelope, mergeMeshMarkers, toMeshMark, voteEnvelope } from '../src/lib/mesh.ts';
+import type { TacMarker } from '../src/lib/types.ts';
+
+const mark = (id: string, extra: Partial<TacMarker> = {}): TacMarker => ({
+  id,
+  kind: 'enemy',
+  label: 'Пулемёт',
+  lat: 55.75,
+  lng: 37.61,
+  createdBy: 'a',
+  createdByName: 'Гром',
+  createdAt: 1000,
+  staleVotes: [],
+  doneVotes: [],
+  ...extra,
+});
+
+test('markers: newest state wins, deletion always wins and sticks', () => {
+  const s = new MeshStore('t');
+  assert.equal(s.accept(markEnvelope('t', toMeshMark(mark('m1')), 1000), 1000), true);
+  assert.equal(s.accept(markEnvelope('t', toMeshMark(mark('m1', { lat: 1 })), 900), 1000), false, 'older move');
+  assert.equal(s.accept(markEnvelope('t', toMeshMark(mark('m1'), true), 500), 1000), true, 'deletion with a skewed clock');
+  assert.equal(s.accept(markEnvelope('t', toMeshMark(mark('m1', { lat: 2 })), 5000), 5000), false, 'no resurrection');
+});
+
+test('mesh markers merge into the server list: new, moved, deleted, voted', () => {
+  const s = new MeshStore('t');
+  s.accept(markEnvelope('t', toMeshMark(mark('new')), 1000), 1000);
+  s.accept(markEnvelope('t', toMeshMark(mark('moved', { lat: 9 })), 2000), 2000);
+  s.accept(markEnvelope('t', toMeshMark(mark('gone'), true), 2000), 2000);
+  s.accept(voteEnvelope('t', { markId: 'moved', uid: 'b', vote: 'stale' }, 2000), 2000);
+  s.accept(voteEnvelope('t', { markId: 'moved', uid: 'c', vote: 'stale' }, 2000), 2000);
+  const server = [mark('moved', { staleVotes: ['b'] }), mark('gone'), mark('kept')];
+  const out = new Map(mergeMeshMarkers(server, s.marks.values(), s.votes.values(), 't').map((m) => [m.id, m]));
+  assert.deepEqual([...out.keys()].sort(), ['kept', 'moved', 'new']);
+  assert.equal(out.get('new')!.viaMesh, true);
+  assert.equal(out.get('moved')!.lat, 9);
+  assert.deepEqual(out.get('moved')!.staleVotes, ['b', 'c'], 'votes are a union');
+});
+
+test('marker envelopes survive the round trip and bad ones are rejected', () => {
+  const ok = markEnvelope('t', toMeshMark(mark('a1', { kind: 'arrow', points: [{ lat: 1, lng: 2 }, { lat: 3, lng: 4 }] })), 1);
+  assert.equal(unpack(pack([ok])[0]).length, 1);
+  const bad = { ...ok, body: { ...ok.body, lat: 999 } };
+  assert.equal(unpack(JSON.stringify([bad])).length, 0);
+});

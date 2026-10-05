@@ -98,6 +98,8 @@ export type TacMarker = {
   points?: LatLng[];
   /** Arrow color (other kinds use their kind's color). */
   color?: string;
+  /** Heard over Bluetooth only, not (yet) on the server. */
+  viaMesh?: boolean;
 };
 
 export type OverlayFormat = 'kml' | 'kmz' | 'gpx' | 'geojson';

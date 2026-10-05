@@ -118,7 +118,25 @@ export default function SettingsScreen() {
           }
           value={s.mesh.enabled}
           disabled={!s.mesh.available}
-          onChange={(v) => run(() => s.mesh.setEnabled(v))}
+          onChange={(v) =>
+            run(async () => {
+              await s.mesh.setEnabled(v);
+              // Bluetooth stalls with the screen off; keep it on while the mesh runs.
+              if (v && !s.keepAwake) await s.setKeepAwake(true);
+            })
+          }
+        />
+        <View style={styles.divider} />
+        <SettingRow
+          icon={s.keepAwake ? 'cellphone-lock' : 'cellphone-off'}
+          title="Не гасить экран"
+          sub={
+            s.keepAwake
+              ? 'Позиция и связь работают всю игру. Расход батареи выше'
+              : 'С погасшим экраном позиция и Bluetooth могут остановиться'
+          }
+          value={s.keepAwake}
+          onChange={(v) => run(() => s.setKeepAwake(v))}
         />
         <View style={styles.divider} />
         <SettingRow

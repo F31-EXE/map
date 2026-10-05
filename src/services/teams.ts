@@ -1,5 +1,4 @@
 import {
-  addDoc,
   arrayUnion,
   collection,
   deleteDoc,
@@ -272,16 +271,42 @@ export function subscribeTeamMarkers(
   );
 }
 
+/** New marker id, made on the phone so the same id can travel over Bluetooth. */
+export function newMarkerId(teamId: string): string {
+  return doc(collection(firestore(), 'teams', teamId, 'markers')).id;
+}
+
 export async function addTeamMarker(
   teamId: string,
-  m: Pick<TacMarker, 'kind' | 'label' | 'lat' | 'lng' | 'createdBy' | 'createdByName' | 'points' | 'color'>
+  m: Pick<TacMarker, 'kind' | 'label' | 'lat' | 'lng' | 'createdBy' | 'createdByName' | 'points' | 'color'>,
+  id = newMarkerId(teamId)
 ): Promise<void> {
   const { points, color, ...rest } = m;
-  await addDoc(collection(firestore(), 'teams', teamId, 'markers'), {
+  await setDoc(doc(firestore(), 'teams', teamId, 'markers', id), {
     ...rest,
     ...(points ? { points } : {}),
     ...(color ? { color } : {}),
     createdAt: serverTimestamp(),
+  });
+}
+
+/**
+ * Gateway: a marker that reached this phone over Bluetooth goes to the server on its
+ * author's behalf (rules check `relayedBy` and the author's membership and rights).
+ * Refused if the author or another phone already uploaded it.
+ */
+export async function relayTeamMarker(teamId: string, relayedBy: string, m: TacMarker): Promise<void> {
+  await setDoc(doc(firestore(), 'teams', teamId, 'markers', m.id), {
+    kind: m.kind,
+    label: m.label,
+    lat: m.lat,
+    lng: m.lng,
+    createdBy: m.createdBy,
+    createdByName: m.createdByName,
+    ...(m.points ? { points: m.points } : {}),
+    ...(m.color ? { color: m.color } : {}),
+    createdAt: Timestamp.fromMillis(m.createdAt),
+    relayedBy,
   });
 }
 
