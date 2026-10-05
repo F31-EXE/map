@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { Alert, Pressable, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 
 import { pickAvatar } from '../../services/avatar';
+import { BACKGROUND_SUPPORTED } from '../../services/backgroundLocation';
 import { useSession } from '../../state/session';
 import { Avatar, Card, Eyebrow, Icon, KeyboardScroll, tap, type IconName } from '../../ui/components';
 import { RolePicker } from '../../ui/RolePicker';
@@ -125,6 +126,21 @@ export default function SettingsScreen() {
               if (v && !s.keepAwake) await s.setKeepAwake(true);
             })
           }
+        />
+        <View style={styles.divider} />
+        <SettingRow
+          icon={s.background ? 'run-fast' : 'sleep'}
+          title="Работа в фоне"
+          sub={
+            !BACKGROUND_SUPPORTED
+              ? 'Только в приложении на телефоне'
+              : s.background
+                ? 'Позиция и связь работают с погасшим экраном. В шторке висит уведомление «GrimMap на связи»'
+                : 'С погасшим экраном позиция перестаёт передаваться'
+          }
+          value={s.background}
+          disabled={!BACKGROUND_SUPPORTED}
+          onChange={(v) => run(() => s.setBackground(v))}
         />
         <View style={styles.divider} />
         <SettingRow

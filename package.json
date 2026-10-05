@@ -26,6 +26,7 @@
     "expo-location": "~57.0.20",
     "expo-router": "~57.0.24",
     "expo-status-bar": "~57.0.1",
+    "expo-task-manager": "~57.0.21",
     "firebase": "^12.19.0",
     "jszip": "^3.10.2",
     "leaflet": "^1.9.4",

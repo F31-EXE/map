@@ -1,6 +1,6 @@
 import * as Haptics from 'expo-haptics';
 import { router } from 'expo-router';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Platform, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -10,6 +10,7 @@ import { isOrder, MARKER_KINDS, voteThreshold } from '../../lib/markerKinds';
 import { ROLES } from '../../lib/roles';
 import { STATUSES } from '../../lib/status';
 import { KEYS, loadJson, saveJson } from '../../lib/storage';
+import type { Bounds } from '../../lib/tiles';
 import type { LatLng, MarkerKind, SelfPosition, TacMarker } from '../../lib/types';
 import {
   BASE_LAYERS,
@@ -18,11 +19,14 @@ import {
   type BaseLayerId,
   type TacticalMapHandle,
 } from '../../map/TacticalMap';
+import { OFFLINE_SUPPORTED, offlineRootUri } from '../../services/offlineMaps';
 import { markerErrorText } from '../../services/teams';
 import { useOverlays } from '../../state/overlays';
 import { useSession, type MarkerScope } from '../../state/session';
 import { useSide, type OrderTarget } from '../../state/side';
 import { AddMarkerModal } from '../../ui/AddMarkerModal';
+import { OfflineSheet } from '../../ui/OfflineSheet';
+import { WavePanel } from '../../ui/WavePanel';
 import { Avatar, Button, Glass, GlassButton, Icon, RoleIcon, Sheet, tap, type IconName } from '../../ui/components';
 import { InfoSheet, type Stat } from '../../ui/InfoSheet';
 import { C, eyebrow, F, R } from '../../ui/theme';
@@ -126,14 +130,36 @@ export default function MapScreen() {
   const insets = { top: safe.top, bottom: 0, left: landscape ? 0 : safe.left, right: safe.right };
   const session = useSession();
   const side = useSide();
-  const { overlays, focusRequest, requestFocus } = useOverlays();
+  const { overlays, focusRequest, requestFocus, areas, download } = useOverlays();
   const { position, status } = useSelfPosition();
   const mapRef = useRef<TacticalMapHandle>(null);
 
   const [baseLayer, setBaseLayer] = useState<BaseLayerId>('yandex-sat');
   const [layerPicker, setLayerPicker] = useState(false);
   const [follow, setFollow] = useState(false);
-  const [center, setCenter] = useState<LatLng | null>(null);
+  const [view, setView] = useState<(LatLng & { zoom: number; bounds?: Bounds }) | null>(null);
+  const center = view;
+  const [offlineSheet, setOfflineSheet] = useState(false);
+  // Downloaded areas, for the map page to read tiles from disk.
+  const offline = useMemo(
+    () =>
+      OFFLINE_SUPPORTED && areas.length
+        ? {
+            root: offlineRootUri(),
+            areas: areas.map((a) => ({
+              id: a.id,
+              layer: a.layer,
+              south: a.south,
+              west: a.west,
+              north: a.north,
+              east: a.east,
+              minZoom: a.minZoom,
+              maxZoom: a.maxZoom,
+            })),
+          }
+        : null,
+    [areas]
+  );
   const [addAt, setAddAt] = useState<LatLng | null>(null);
   const [selection, setSelection] = useState<Selection>(null);
   const [drawing, setDrawing] = useState<Drawing | null>(null);
@@ -233,7 +259,7 @@ export default function MapScreen() {
   // Votes apply to my own squad's shared markers.
   const canVote = (m: TacMarker) => inTeam && !m.personal && (!m.teamId || m.teamId === session.teamId);
 
-  const toolbarButtons = 4 + (visibleMembers.length > 0 ? 1 : 0);
+  const toolbarButtons = 5 + (visibleMembers.length > 0 ? 1 : 0);
   const toolbarWidth = toolbarButtons * 50 + 8;
 
   // Landscape top row: [team pill][toolbar].
@@ -300,7 +326,8 @@ export default function MapScreen() {
         onMarkerDragStart={onMarkerDragStart}
         onMarkerMoved={onMarkerMoved}
         onMemberPress={onMemberPress}
-        onViewChanged={setCenter}
+        onViewChanged={setView}
+        offline={offline}
         onFollowChanged={setFollow}
         onOverlayError={onOverlayError}
         bottomInset={hudTop == null ? undefined : height - hudTop + 6}
@@ -387,6 +414,13 @@ export default function MapScreen() {
       <View style={[styles.tools, { top: landscape ? insets.top + 10 : pillTop + 64, right: 12 + insets.right }]}>
         <Glass radius={R.lg} style={[styles.toolbar, landscape && styles.toolbarRow]}>
           <ToolbarButton icon="layers-triple-outline" label="Подложка" onPress={() => setLayerPicker(true)} />
+          <View style={[styles.toolbarSep, landscape && styles.toolbarSepRow]} />
+          <ToolbarButton
+            icon={download ? 'cloud-sync-outline' : 'cloud-download-outline'}
+            label="Карта без интернета"
+            active={download != null}
+            onPress={() => setOfflineSheet(true)}
+          />
           <View style={[styles.toolbarSep, landscape && styles.toolbarSepRow]} />
           <ToolbarButton icon="map-plus" label="Карты полигона" onPress={() => router.push('/maps')} />
           <View style={[styles.toolbarSep, landscape && styles.toolbarSepRow]} />
@@ -551,6 +585,8 @@ export default function MapScreen() {
         </View>
       </Glass>
 
+      <OfflineSheet visible={offlineSheet} onClose={() => setOfflineSheet(false)} layer={baseLayer} view={view} />
+
       <AddMarkerModal
         at={addAt}
         inTeam={inTeam}
@@ -569,6 +605,13 @@ export default function MapScreen() {
         subtitle={selectedMarker && markerSubtitle(selectedMarker)}
         stats={selectedMarker ? vectorStats(position, selectedMarker) : []}
       >
+        {selectedMarker && (selectedMarker.kind === 'respawn' || selectedMarker.kind === 'deadzone') && !selectedMarker.personal && (
+          <WavePanel
+            marker={selectedMarker}
+            canEdit={session.canCommand && (!selectedMarker.teamId || selectedMarker.teamId === session.teamId)}
+            onSet={(w) => session.setMarkerWave(selectedMarker, w)}
+          />
+        )}
         {selectedMarker && canVote(selectedMarker) && (
           <VoteRow
             marker={selectedMarker}

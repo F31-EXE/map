@@ -1,6 +1,8 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 
 import type { OverlayMeta } from '../lib/types';
+import type { Bounds } from '../lib/tiles';
+import * as offline from '../services/offlineMaps';
 import * as svc from '../services/overlays';
 
 type Overlays = {
@@ -11,6 +13,14 @@ type Overlays = {
   /** Set by the maps screen; the map screen fits to it once and clears it. */
   focusRequest: string | null;
   requestFocus: (id: string | null) => void;
+
+  /** Base-layer areas saved for use without internet. */
+  areas: offline.OfflineArea[];
+  /** Download in progress, if any. */
+  download: { areaId: string; done: number; total: number } | null;
+  downloadArea: (layer: string, name: string, b: Bounds, minZoom: number, maxZoom: number) => Promise<void>;
+  cancelDownload: () => void;
+  removeArea: (id: string) => Promise<void>;
 };
 
 const Ctx = createContext<Overlays | null>(null);
@@ -24,10 +34,60 @@ export function useOverlays(): Overlays {
 export function OverlaysProvider({ children }: { children: ReactNode }) {
   const [overlays, setOverlays] = useState<OverlayMeta[]>([]);
   const [focusRequest, requestFocus] = useState<string | null>(null);
+  const [areas, setAreas] = useState<offline.OfflineArea[]>([]);
+  const [download, setDownload] = useState<{ areaId: string; done: number; total: number } | null>(null);
+  const stopRef = useRef(false);
+  const areasRef = useRef(areas);
+  areasRef.current = areas;
 
   useEffect(() => {
     svc.listOverlays().then(setOverlays);
+    offline.listAreas().then(setAreas);
   }, []);
+
+  const commitAreas = useCallback(async (next: offline.OfflineArea[]) => {
+    setAreas(next);
+    await offline.saveAreas(next);
+  }, []);
+
+  const downloadArea = useCallback(
+    async (layer: string, name: string, b: Bounds, minZoom: number, maxZoom: number) => {
+      if (download) throw new Error('Уже идёт скачивание');
+      const area = offline.newArea(layer, name, b, minZoom, maxZoom);
+      stopRef.current = false;
+      // Saved up front: tiles already on disk are used even if the download is cut short.
+      await commitAreas([...areasRef.current, area]);
+      setDownload({ areaId: area.id, done: 0, total: 0 });
+      try {
+        const result = await offline.downloadArea(
+          area,
+          (done, total) => setDownload({ areaId: area.id, done, total }),
+          () => stopRef.current
+        );
+        await commitAreas(areasRef.current.map((a) => (a.id === area.id ? result : a)));
+      } catch (e) {
+        await commitAreas(areasRef.current.filter((a) => a.id !== area.id));
+        offline.deleteAreaFiles(area);
+        throw e;
+      } finally {
+        setDownload(null);
+      }
+    },
+    [download, commitAreas]
+  );
+
+  const cancelDownload = useCallback(() => {
+    stopRef.current = true;
+  }, []);
+
+  const removeArea = useCallback(
+    async (id: string) => {
+      const a = areasRef.current.find((x) => x.id === id);
+      if (a) offline.deleteAreaFiles(a);
+      await commitAreas(areasRef.current.filter((x) => x.id !== id));
+    },
+    [commitAreas]
+  );
 
   const commit = useCallback(async (next: OverlayMeta[]) => {
     setOverlays(next);
@@ -60,8 +120,20 @@ export function OverlaysProvider({ children }: { children: ReactNode }) {
   );
 
   const value = useMemo(
-    () => ({ overlays, importOverlay, removeOverlay, setVisible, focusRequest, requestFocus }),
-    [overlays, importOverlay, removeOverlay, setVisible, focusRequest]
+    () => ({
+      overlays,
+      importOverlay,
+      removeOverlay,
+      setVisible,
+      focusRequest,
+      requestFocus,
+      areas,
+      download,
+      downloadArea,
+      cancelDownload,
+      removeArea,
+    }),
+    [overlays, importOverlay, removeOverlay, setVisible, focusRequest, areas, download, downloadArea, cancelDownload, removeArea]
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

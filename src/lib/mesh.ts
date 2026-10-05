@@ -8,6 +8,7 @@
  */
 import { roleOf, type RoleId } from './roles';
 import type { LatLng, Member, MemberStatus, TacMarker } from './types';
+import { validWave, type Wave } from './waves';
 
 export const MESH_SERVICE_ID = 'com.f31.grimmap.mesh';
 /** Hops a message may travel; each phone adds one when passing it on. */
@@ -50,6 +51,7 @@ export type MeshMark = {
   audience?: 'commanders';
   points?: LatLng[];
   color?: string;
+  wave?: Wave | null;
   deleted?: boolean;
 };
 
@@ -98,7 +100,8 @@ export function validEnvelope(e: unknown): e is Envelope {
         (b.points == null ||
           (Array.isArray(b.points) &&
             b.points.length <= 40 &&
-            b.points.every((p) => p && typeof p === 'object' && isLatLng(p as Record<string, unknown>))))
+            b.points.every((p) => p && typeof p === 'object' && isLatLng(p as Record<string, unknown>)))) &&
+        (b.wave == null || validWave(b.wave))
       );
     case 'vote':
       return isStr(b.markId, 120) && isStr(b.uid, 128) && (b.vote === 'stale' || b.vote === 'done');
@@ -137,6 +140,7 @@ export function toMeshMark(m: TacMarker, deleted = false): MeshMark {
     ...(m.audience ? { audience: m.audience } : {}),
     ...(m.points ? { points: m.points } : {}),
     ...(m.color ? { color: m.color } : {}),
+    ...(m.wave !== undefined ? { wave: m.wave } : {}),
     ...(deleted ? { deleted: true } : {}),
   };
 }
@@ -241,8 +245,11 @@ export function mergeMeshMarkers(
     }
     const cur = byId.get(b.id);
     if (cur) {
-      // A move heard over the mesh; the server's copy may not have it yet.
-      if (cur.lat !== b.lat || cur.lng !== b.lng) byId.set(b.id, { ...cur, lat: b.lat, lng: b.lng });
+      // A move or a new respawn schedule heard over the mesh; the server may lag.
+      const wave = b.wave !== undefined ? b.wave : cur.wave;
+      if (cur.lat !== b.lat || cur.lng !== b.lng || JSON.stringify(wave) !== JSON.stringify(cur.wave)) {
+        byId.set(b.id, { ...cur, lat: b.lat, lng: b.lng, wave });
+      }
       continue;
     }
     byId.set(b.id, {
@@ -257,6 +264,7 @@ export function mergeMeshMarkers(
       audience: b.audience,
       points: b.points,
       color: b.color,
+      wave: b.wave ?? null,
       teamId,
       staleVotes: [],
       doneVotes: [],

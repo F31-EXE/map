@@ -291,6 +291,35 @@ body,
   transform: rotate(45deg) scale(1.25);
 }
 
+/* Respawn countdown: always visible above the pin (except as a far-out dot). */
+.wave-badge {
+  position: absolute;
+  left: 50%;
+  top: -22px;
+  transform: translateX(-50%);
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgba(5, 12, 8, 0.9);
+  border: 1px solid #2ee6c5;
+  color: #2ee6c5;
+  font: 700 12px/1.3 ui-monospace, 'JetBrains Mono', Menlo, monospace;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.wave-badge.soon {
+  border-color: #ffb547;
+  color: #ffb547;
+  animation: wave-blink 1s steps(2) infinite;
+}
+@keyframes wave-blink {
+  50% {
+    opacity: 0.55;
+  }
+}
+.lod-dot .wave-badge {
+  display: none;
+}
+
 /* Polygon infrastructure (respawn, parking…): square pins. */
 .tac-icon.admin .tac-pin {
   border-radius: 7px;

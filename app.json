@@ -2,7 +2,7 @@
   "expo": {
     "name": "GrimMap",
     "slug": "tacmap",
-    "version": "1.7.0",
+    "version": "1.8.0",
     "orientation": "default",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
@@ -11,8 +11,10 @@
       "bundleIdentifier": "com.f31exe.tacmap",
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "Нужно, чтобы показывать вашу позицию на карте и передавать её команде.",
-        "NSMotionUsageDescription": "Компас для направления взгляда на карте."
-      }
+        "NSMotionUsageDescription": "Компас для направления взгляда на карте.",
+        "ITSAppUsesNonExemptEncryption": false
+      },
+      "buildNumber": "1"
     },
     "android": {
       "adaptiveIcon": {
@@ -27,7 +29,7 @@
         "ACCESS_COARSE_LOCATION",
         "ACCESS_FINE_LOCATION"
       ],
-      "versionCode": 13
+      "versionCode": 14
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -38,7 +40,11 @@
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "Нужно, чтобы показывать вашу позицию на карте и передавать её команде."
+          "locationWhenInUsePermission": "Нужно, чтобы показывать вашу позицию на карте и передавать её команде.",
+          "locationAlwaysAndWhenInUsePermission": "В режиме «Работа в фоне» GrimMap передаёт позицию отряду и с погасшим экраном.",
+          "isIosBackgroundLocationEnabled": true,
+          "isAndroidBackgroundLocationEnabled": true,
+          "isAndroidForegroundServiceEnabled": true
         }
       ],
       "expo-document-picker",

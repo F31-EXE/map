@@ -6,7 +6,9 @@
   "build": {
     "preview": {
       "distribution": "internal",
-      "android": { "buildType": "apk" },
+      "android": {
+        "buildType": "apk"
+      },
       "env": {
         "EXPO_PUBLIC_FIREBASE_API_KEY": "AIzaSyDOQqQAbRsYvImiaw0Bx0Xwr0gx4e-SV70",
         "EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN": "airsoftcalendar.firebaseapp.com",
@@ -14,6 +16,12 @@
         "EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET": "airsoftcalendar.firebasestorage.app",
         "EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID": "54382632962",
         "EXPO_PUBLIC_FIREBASE_APP_ID": "1:54382632962:web:19462dc47ad704c997071b"
+      }
+    },
+    "preview-ios-simulator": {
+      "extends": "preview",
+      "ios": {
+        "simulator": true
       }
     }
   }

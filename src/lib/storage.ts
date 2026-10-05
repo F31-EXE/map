@@ -18,6 +18,8 @@ export const KEYS = {
   status: 'tacmap.status',
   mesh: 'tacmap.mesh',
   keepAwake: 'tacmap.keepAwake',
+  offlineAreas: 'tacmap.offlineAreas',
+  background: 'tacmap.background',
 } as const;
 
 export async function loadJson<T>(key: string, fallback: T): Promise<T> {

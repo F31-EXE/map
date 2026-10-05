@@ -1,4 +1,5 @@
 import type { RoleId } from './roles';
+import type { Wave } from './waves';
 
 export type LatLng = { lat: number; lng: number };
 
@@ -100,6 +101,8 @@ export type TacMarker = {
   color?: string;
   /** Heard over Bluetooth only, not (yet) on the server. */
   viaMesh?: boolean;
+  /** Respawn departures (respawn / dead-zone markers), set by commanders. */
+  wave?: Wave | null;
 };
 
 export type OverlayFormat = 'kml' | 'kmz' | 'gpx' | 'geojson';

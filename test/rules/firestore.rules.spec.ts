@@ -491,3 +491,24 @@ describe('markers relayed over Bluetooth', () => {
     await assertFails(setDoc(doc(as('bob'), 'teams', TEAM, 'markers', 'z'), { ...marker('bob'), relayedBy: 'carol' }));
   });
 });
+
+describe('respawn waves', () => {
+  beforeEach(async () => {
+    await createTeam(as('alice'), 'alice');
+    await join(as('bob'), 'bob');
+    await setDoc(doc(as('bob'), 'teams', TEAM, 'markers', 'resp'), marker('bob', 'respawn'));
+    await setDoc(doc(as('bob'), 'teams', TEAM, 'markers', 'foe'), marker('bob', 'enemy'));
+  });
+  const wave = (by: string, id: string, w: unknown) => updateDoc(doc(as(by), 'teams', TEAM, 'markers', id), { wave: w });
+
+  test('commanders set and clear the schedule on respawn markers', async () => {
+    await assertSucceeds(wave('alice', 'resp', { every: 900000, start: Date.now() }));
+    await assertSucceeds(wave('alice', 'resp', null));
+  });
+  test('not fighters, not other markers, not silly intervals', async () => {
+    await assertFails(wave('bob', 'resp', { every: 900000, start: 1 }));
+    await assertFails(wave('alice', 'foe', { every: 900000, start: 1 }));
+    await assertFails(wave('alice', 'resp', { every: 1000, start: 1 }));
+    await assertFails(wave('alice', 'resp', { every: 900000, start: 1, extra: true }));
+  });
+});

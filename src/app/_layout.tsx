@@ -5,6 +5,8 @@ import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { View } from 'react-native';
 
+// Registers the background location task at startup.
+import '../services/backgroundLocation';
 import { OverlaysProvider } from '../state/overlays';
 import { SessionProvider } from '../state/session';
 import { ChatProvider } from '../state/chat';

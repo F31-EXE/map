@@ -208,6 +208,16 @@ service cloud.firestore {
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['staleVotes', 'doneVotes'])
           && votedOnlyAsSelf('staleVotes')
           && votedOnlyAsSelf('doneVotes'))
+          // Commanders set the departure schedule on respawn / dead-zone markers.
+          || (canCommand(teamId)
+            && resource.data.kind in ['respawn', 'deadzone']
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['wave'])
+            && (request.resource.data.wave == null
+              || (request.resource.data.wave.keys().hasOnly(['every', 'start'])
+                && request.resource.data.wave.every is number
+                && request.resource.data.wave.every >= 60000
+                && request.resource.data.wave.every <= 10800000
+                && request.resource.data.wave.start is number)))
           // The author drags their own marker to a new spot.
           || (isMember(teamId)
             && resource.data.createdBy == request.auth.uid

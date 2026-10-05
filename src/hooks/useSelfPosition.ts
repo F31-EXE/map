@@ -5,6 +5,8 @@ import { Platform } from 'react-native';
 import { angleDiff, HeadingSmoother } from '../lib/heading';
 import type { SelfPosition } from '../lib/types';
 
+import { onBackgroundLocation } from '../services/backgroundLocation';
+
 import { watchWebCompass } from './webCompass';
 
 const HEADING_STEP = 4;
@@ -40,21 +42,25 @@ export function useSelfPosition(enabled = true) {
         }
         setStatus('granted');
 
+        const onFix = (loc: Location.LocationObject) => {
+          const course = loc.coords.heading != null && loc.coords.heading >= 0 ? loc.coords.heading : null;
+          setPosition({
+            lat: loc.coords.latitude,
+            lng: loc.coords.longitude,
+            accuracy: loc.coords.accuracy,
+            heading: heading.current ?? course,
+            timestamp: loc.timestamp,
+          });
+        };
         subs.push(
           await Location.watchPositionAsync(
             { accuracy: Location.Accuracy.BestForNavigation, timeInterval: 2000, distanceInterval: 1 },
-            (loc) => {
-              const course = loc.coords.heading != null && loc.coords.heading >= 0 ? loc.coords.heading : null;
-              setPosition({
-                lat: loc.coords.latitude,
-                lng: loc.coords.longitude,
-                accuracy: loc.coords.accuracy,
-                heading: heading.current ?? course,
-                timestamp: loc.timestamp,
-              });
-            }
+            onFix
           )
         );
+        // With "Работа в фоне" on, fixes keep arriving through the background task
+        // while the screen is off.
+        subs.push({ remove: onBackgroundLocation(onFix) });
 
         const onRawHeading = (raw: number) => {
           const v = smoother.push(raw);

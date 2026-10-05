@@ -3,7 +3,9 @@ import { useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, Pressable, StyleSheet, Switch, Text, View } from 'react-native';
 
 import type { OverlayFormat } from '../lib/types';
+import { TILE_LAYERS } from '../lib/tiles';
 import { useOverlays } from '../state/overlays';
+import { confirmDestructive } from '../ui/confirm';
 import { Badge, Eyebrow, Icon, tap, type IconName } from '../ui/components';
 import { C, F, R } from '../ui/theme';
 
@@ -15,7 +17,7 @@ const FORMAT_ICON: Record<OverlayFormat, IconName> = {
 };
 
 export default function MapsScreen() {
-  const { overlays, importOverlay, removeOverlay, setVisible, requestFocus } = useOverlays();
+  const { overlays, importOverlay, removeOverlay, setVisible, requestFocus, areas, download, removeArea } = useOverlays();
   const [busy, setBusy] = useState(false);
 
   const onImport = async () => {
@@ -56,6 +58,49 @@ export default function MapsScreen() {
           </Pressable>
           {overlays.length > 0 && <Eyebrow style={{ paddingHorizontal: 4 }}>Загруженные · {overlays.length}</Eyebrow>}
         </View>
+      }
+      ListFooterComponent={
+        areas.length > 0 ? (
+          <View style={{ gap: 10, marginTop: 18 }}>
+            <Eyebrow style={{ paddingHorizontal: 4 }}>Скачанные районы · без интернета</Eyebrow>
+            {areas.map((a) => (
+              <View key={a.id} style={styles.item}>
+                <View style={[styles.itemIcon, a.complete && { backgroundColor: C.accentSoft }]}>
+                  <Icon
+                    name={download?.areaId === a.id ? 'cloud-sync-outline' : 'cloud-check-outline'}
+                    size={22}
+                    color={a.complete ? C.accent : C.warn}
+                  />
+                </View>
+                <View style={{ flex: 1, gap: 4 }}>
+                  <Text style={styles.name} numberOfLines={1}>
+                    {a.name}
+                  </Text>
+                  <Text style={styles.meta}>
+                    {TILE_LAYERS[a.layer]?.title ?? a.layer} · {Math.max(1, Math.round(a.bytes / 1048576))} МБ ·{' '}
+                    {download?.areaId === a.id
+                      ? 'скачивается…'
+                      : a.complete
+                        ? `масштабы ${a.minZoom}–${a.maxZoom}`
+                        : `скачано не полностью${a.failed ? `, ошибок ${a.failed}` : ''}`}
+                  </Text>
+                </View>
+                {download?.areaId !== a.id && (
+                  <Pressable
+                    hitSlop={8}
+                    style={styles.delete}
+                    accessibilityLabel="Удалить район"
+                    onPress={() =>
+                      confirmDestructive('Удалить скачанный район?', a.name, 'Удалить', () => removeArea(a.id))
+                    }
+                  >
+                    <Icon name="trash-can-outline" size={20} color={C.dim} />
+                  </Pressable>
+                )}
+              </View>
+            ))}
+          </View>
+        ) : null
       }
       ListEmptyComponent={
         <View style={styles.empty}>

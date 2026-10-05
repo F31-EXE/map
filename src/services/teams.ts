@@ -17,6 +17,7 @@ import {
 import { firestore } from '../lib/firebase';
 import { normalizeCode } from '../lib/invite';
 import { DEFAULT_TEAM_COLOR, roleOf, type RoleId } from '../lib/roles';
+import { validWave, type Wave } from '../lib/waves';
 import type { Member, MemberStatus, PinnedMessage, SelfPosition, TacMarker, Team } from '../lib/types';
 
 // No 0/O/1/I/L to keep codes easy to dictate over the radio.
@@ -263,6 +264,7 @@ export function subscribeTeamMarkers(
             doneVotes: Array.isArray(v.doneVotes) ? v.doneVotes : [],
             points: Array.isArray(v.points) ? v.points : undefined,
             color: typeof v.color === 'string' ? v.color : undefined,
+            wave: validWave(v.wave) ? { every: v.wave.every, start: v.wave.start } : null,
           };
         })
       );
@@ -315,6 +317,11 @@ export async function voteMarker(teamId: string, markerId: string, uid: string, 
   await updateDoc(doc(firestore(), 'teams', teamId, 'markers', markerId), {
     [vote === 'stale' ? 'staleVotes' : 'doneVotes']: arrayUnion(uid),
   });
+}
+
+/** Commanders set (or clear) the respawn departure schedule on a respawn marker. */
+export async function setMarkerWave(teamId: string, markerId: string, wave: Wave | null): Promise<void> {
+  await updateDoc(doc(firestore(), 'teams', teamId, 'markers', markerId), { wave });
 }
 
 /** The author moves their own marker (enforced by rules). */

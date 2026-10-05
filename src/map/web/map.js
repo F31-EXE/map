@@ -64,10 +64,61 @@
   var baseGroup = L.layerGroup().addTo(map);
   var currentBase = null;
 
+  // Offline areas downloaded by the app (see src/services/offlineMaps.ts): tiles live
+  // as files next to this page. A tile inside an area loads from disk first and falls
+  // back to the network if the file isn't there.
+  var offline = { root: '', areas: [] };
+
+  function tileExt(url) {
+    return /\.png|l=skl|l=map/.test(url) ? 'png' : 'jpg';
+  }
+
+  var OfflineTileLayer = L.TileLayer.extend({
+    _offlineSrc: function (coords) {
+      if (!offline.root || !offline.areas.length) return null;
+      var size = this.getTileSize();
+      var center = this._map.unproject(coords.scaleBy(size).add(size.divideBy(2)), coords.z);
+      for (var i = 0; i < offline.areas.length; i++) {
+        var a = offline.areas[i];
+        if (a.layer !== this.options.baseId || coords.z < a.minZoom || coords.z > a.maxZoom) continue;
+        if (center.lat < a.south || center.lat > a.north || center.lng < a.west || center.lng > a.east) continue;
+        return (
+          offline.root + a.id + '/' + this.options.urlIndex + '/' + coords.z + '/' + coords.x + '/' + coords.y + '.' +
+          tileExt(this._url)
+        );
+      }
+      return null;
+    },
+    createTile: function (coords, done) {
+      var tile = document.createElement('img');
+      tile.alt = '';
+      tile.setAttribute('role', 'presentation');
+      var online = this.getTileUrl(coords);
+      var local = this._offlineSrc(coords);
+      tile.onload = function () {
+        done(null, tile);
+      };
+      tile.onerror = function (e) {
+        if (local && !tile._triedOnline) {
+          tile._triedOnline = true;
+          tile.src = online;
+          return;
+        }
+        done(e, tile);
+      };
+      tile.src = local || online;
+      return tile;
+    },
+  });
+
   function setBaseLayer(id) {
     var def = BASE_LAYERS[id] || BASE_LAYERS['yandex-sat'];
     if (currentBase === id) return;
     currentBase = id;
+    drawBase(def, id);
+  }
+
+  function drawBase(def, id) {
     baseGroup.clearLayers();
     if (map.options.crs !== def.crs) {
       var center = map.getCenter();
@@ -76,15 +127,23 @@
       // Forces every layer to re-project on 'viewreset'.
       map.setView(center, zoom, { reset: true });
     }
-    def.tiles.forEach(function (t) {
-      L.tileLayer(t[0], {
+    def.tiles.forEach(function (t, i) {
+      new OfflineTileLayer(t[0], {
         attribution: t[1],
         maxNativeZoom: def.maxZoom,
         maxZoom: 21,
         subdomains: 'abc',
         crossOrigin: false,
+        baseId: id,
+        urlIndex: i,
       }).addTo(baseGroup);
     });
+  }
+
+  function setOffline(p) {
+    offline = { root: (p && p.root) || '', areas: (p && p.areas) || [] };
+    // Redraw so visible tiles pick up (or drop) the local copies.
+    if (currentBase) drawBase(BASE_LAYERS[currentBase] || BASE_LAYERS['yandex-sat'], currentBase);
   }
 
   // ---------------------------------------------------------------------------
@@ -287,6 +346,27 @@
     );
   }
 
+  // Respawn countdown on respawn markers (see src/lib/waves.ts for the same math).
+  function waveText(every, start, now) {
+    var at = now <= start ? start : start + Math.ceil((now - start) / every) * every;
+    var s = Math.max(0, Math.ceil((at - now) / 1000));
+    var h = Math.floor(s / 3600);
+    var m = Math.floor((s % 3600) / 60);
+    var sec = String(s % 60).padStart(2, '0');
+    return (h ? h + ':' + String(m).padStart(2, '0') : m) + ':' + sec;
+  }
+  setInterval(function () {
+    var now = Date.now();
+    var els = document.querySelectorAll('.wave-badge');
+    for (var i = 0; i < els.length; i++) {
+      var every = Number(els[i].getAttribute('data-every'));
+      var start = Number(els[i].getAttribute('data-start'));
+      els[i].textContent = waveText(every, start, now);
+      var at = now <= start ? start : start + Math.ceil((now - start) / every) * every;
+      els[i].classList.toggle('soon', at - now <= 60000);
+    }
+  }, 1000);
+
   var markersLayer = L.layerGroup().addTo(map);
   var tacMarkers = {};
   // Marker being moved by long press + drag (see the long-press section).
@@ -304,6 +384,10 @@
         '<div class="tac-pin" style="--c:' + c + ';border-color:' + c + ';box-shadow:0 0 0 4px ' + c + '33, 0 4px 14px rgba(0,0,0,.6)">' +
         '<svg viewBox="0 0 24 24"><path d="' + escapeHtml(m.path) + '" fill="' + c + '"/></svg></div>' +
         (m.order ? '<div class="order-ring" style="border-color:' + c + '"></div>' : '') +
+        (m.wave
+          ? '<div class="wave-badge" data-every="' + Number(m.wave.every) + '" data-start="' + Number(m.wave.start) + '">' +
+            waveText(m.wave.every, m.wave.start, Date.now()) + '</div>'
+          : '') +
         label,
       iconSize: [36, 36],
       iconAnchor: [18, 18],
@@ -456,7 +540,7 @@
       function (m) {
         var mk = L.marker([m.lat, m.lng], { icon: tacIcon(m) });
         mk._tacId = m.id;
-        mk._tacKey = JSON.stringify([m.path, m.color, m.label, m.order, m.personal, m.time, m.movable]);
+        mk._tacKey = JSON.stringify([m.path, m.color, m.label, m.order, m.personal, m.time, m.movable, m.wave]);
         mk.on('click', function () {
           // The release after dragging a marker is not a tap.
           if (Date.now() < suppressTapUntil) return;
@@ -469,7 +553,7 @@
       },
       function (mk, m) {
         if (mk !== dragged) mk.setLatLng([m.lat, m.lng]);
-        var key = JSON.stringify([m.path, m.color, m.label, m.order, m.personal, m.time, m.movable]);
+        var key = JSON.stringify([m.path, m.color, m.label, m.order, m.personal, m.time, m.movable, m.wave]);
         if (key !== mk._tacKey) {
           mk._tacKey = key;
           mk.setIcon(tacIcon(m));
@@ -946,7 +1030,13 @@
 
   map.on('moveend', function () {
     var c = map.getCenter();
-    post('viewChanged', { lat: c.lat, lng: c.lng, zoom: map.getZoom() });
+    var b = map.getBounds();
+    post('viewChanged', {
+      lat: c.lat,
+      lng: c.lng,
+      zoom: map.getZoom(),
+      bounds: { south: b.getSouth(), west: b.getWest(), north: b.getNorth(), east: b.getEast() },
+    });
   });
 
   // ---------------------------------------------------------------------------
@@ -1142,6 +1232,7 @@
     },
     setAnalysis: setAnalysis,
     setGrid: setGrid,
+    setOffline: setOffline,
     setMembers: setMembers,
     setMarkers: setMarkers,
     addOverlay: addOverlay,

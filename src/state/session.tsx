@@ -15,12 +15,14 @@ import { distanceMeters } from '../lib/geo';
 import { isOrder, isVotedOut } from '../lib/markerKinds';
 import { mergeMeshMarkers, mergeMeshMembers } from '../lib/mesh';
 import { DEFAULT_ROLE, DEFAULT_TEAM_COLOR, roleOf, type RoleId } from '../lib/roles';
+import { nextWave, type Wave } from '../lib/waves';
 import { KEYS, loadJson, newId, saveJson } from '../lib/storage';
 import type { LatLng, Member, MemberStatus, SelfPosition, TacMarker, Team } from '../lib/types';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
-import { Alert } from 'react-native';
+import { Alert, Vibration } from 'react-native';
 
 import { signalNewOrder } from '../services/orderAlert';
+import { startBackgroundLocation, stopBackgroundLocation } from '../services/backgroundLocation';
 import * as recordings from '../services/recordings';
 import * as teams from '../services/teams';
 
@@ -74,6 +76,9 @@ type Session = {
   setOrderSound: (v: boolean) => Promise<void>;
   /** Phone-to-phone link without internet (Android). */
   mesh: Mesh;
+  /** Position (and on Android the Bluetooth link) keep working with the screen off. */
+  background: boolean;
+  setBackground: (v: boolean) => Promise<void>;
   /** Screen stays on: position and Bluetooth keep working during the game. */
   keepAwake: boolean;
   setKeepAwake: (v: boolean) => Promise<void>;
@@ -97,6 +102,8 @@ type Session = {
   /** Own markers only (personal, or placed by me in the squad). */
   moveMarker: (m: TacMarker, p: LatLng) => Promise<void>;
   voteMarker: (m: TacMarker, vote: 'stale' | 'done') => Promise<void>;
+  /** Commanders: departure schedule on a respawn / dead-zone marker (null clears). */
+  setMarkerWave: (m: TacMarker, wave: Wave | null) => Promise<void>;
   /**
    * Deletes every team marker `allowed` accepts, hidden ones (voted out, commanders-only)
    * included. Returns how many were deleted.
@@ -128,6 +135,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const [orderSound, setOrderSoundState] = useState(true);
   const [showGrid, setShowGridState] = useState(false);
   const [keepAwake, setKeepAwakeState] = useState(false);
+  const [background, setBackgroundState] = useState(false);
   const [status, setStatusState] = useState<MemberStatus>('alive');
   const [teamMarkers, setTeamMarkers] = useState<TacMarker[]>([]);
   const [personalMarkers, setPersonalMarkers] = useState<TacMarker[]>([]);
@@ -135,7 +143,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   // Load persisted local state.
   useEffect(() => {
     (async () => {
-      const [cs, r, av, tid, share, sound, personal, grid, st, awake] = await Promise.all([
+      const [cs, r, av, tid, share, sound, personal, grid, st, awake, bg] = await Promise.all([
         loadJson<string>(KEYS.callsign, ''),
         loadJson<string>(KEYS.role, DEFAULT_ROLE),
         loadJson<string | null>(KEYS.avatar, null),
@@ -146,7 +154,11 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         loadJson<boolean>(KEYS.grid, false),
         loadJson<MemberStatus>(KEYS.status, 'alive'),
         loadJson<boolean>(KEYS.keepAwake, false),
+        loadJson<boolean>(KEYS.background, false),
       ]);
+      setBackgroundState(bg);
+      // Permissions were granted when it was switched on; just resume.
+      if (bg) startBackgroundLocation().catch(() => {});
       setKeepAwakeState(awake);
       setShowGridState(grid);
       setStatusState(st === 'dead' || st === 'afk' ? st : 'alive');
@@ -323,7 +335,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
   // Squad writes don't wait for the server: offline, Firestore keeps them queued and the
   // mesh carries them to nearby phones meanwhile. A refusal shows up when it comes.
-  const background = useCallback((p: Promise<unknown>, what: string) => {
+  const fireAndReport = useCallback((p: Promise<unknown>, what: string) => {
     p.catch((e: unknown) => Alert.alert(what, teams.markerErrorText(e)));
   }, []);
 
@@ -343,7 +355,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       const v = c.trim().slice(0, 24);
       setCallsignState(v);
       await saveJson(KEYS.callsign, v);
-      if (teamId && uid && v) background(teams.updateProfile(teamId, uid, { callsign: v }), 'Позывной не сохранился');
+      if (teamId && uid && v) fireAndReport(teams.updateProfile(teamId, uid, { callsign: v }), 'Позывной не сохранился');
     },
     [teamId, uid]
   );
@@ -352,7 +364,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     async (r: RoleId) => {
       setRoleState(r);
       await saveJson(KEYS.role, r);
-      if (teamId && uid) background(teams.updateProfile(teamId, uid, { role: r }), 'Роль не сохранилась');
+      if (teamId && uid) fireAndReport(teams.updateProfile(teamId, uid, { role: r }), 'Роль не сохранилась');
     },
     [teamId, uid]
   );
@@ -418,7 +430,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     async (st: MemberStatus) => {
       setStatusState(st);
       await saveJson(KEYS.status, st);
-      if (teamId && uid) background(teams.updateProfile(teamId, uid, { status: st }), 'Статус не сохранился');
+      if (teamId && uid) fireAndReport(teams.updateProfile(teamId, uid, { status: st }), 'Статус не сохранился');
     },
     [teamId, uid]
   );
@@ -426,7 +438,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const setMemberRole = useCallback(
     async (memberId: string, r: RoleId) => {
       if (memberId === uid) return setRole(r);
-      if (teamId) background(teams.updateMemberByCommander(teamId, memberId, { role: r }), 'Роль не сохранилась');
+      if (teamId) fireAndReport(teams.updateMemberByCommander(teamId, memberId, { role: r }), 'Роль не сохранилась');
     },
     [teamId, uid, setRole]
   );
@@ -434,7 +446,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const setMemberStatus = useCallback(
     async (memberId: string, st: MemberStatus) => {
       if (memberId === uid) return setStatus(st);
-      if (teamId) background(teams.updateMemberByCommander(teamId, memberId, { status: st }), 'Статус не сохранился');
+      if (teamId) fireAndReport(teams.updateMemberByCommander(teamId, memberId, { status: st }), 'Статус не сохранился');
     },
     [teamId, uid, setStatus]
   );
@@ -449,6 +461,21 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     },
     [teamId]
   );
+
+  const setBackground = useCallback(async (v: boolean) => {
+    if (v) {
+      const ok = await startBackgroundLocation();
+      if (!ok) {
+        throw new Error(
+          'Нужно разрешение на геолокацию «Разрешить всегда». Откройте настройки приложения → Разрешения → Местоположение.'
+        );
+      }
+    } else {
+      await stopBackgroundLocation();
+    }
+    setBackgroundState(v);
+    await saveJson(KEYS.background, v);
+  }, []);
 
   const setKeepAwake = useCallback(async (v: boolean) => {
     setKeepAwakeState(v);
@@ -549,7 +576,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       if (scope === 'team' && teamId && uid) {
         const id = teams.newMarkerId(teamId);
         sendMark({ ...base, id, createdBy: uid, createdAt: Date.now(), teamId });
-        background(teams.addTeamMarker(teamId, { ...base, createdBy: uid }, id), 'Метка не сохранилась на сервере');
+        fireAndReport(teams.addTeamMarker(teamId, { ...base, createdBy: uid }, id), 'Метка не сохранилась на сервере');
       } else {
         await savePersonal([
           ...personalMarkers,
@@ -557,7 +584,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         ]);
       }
     },
-    [teamId, uid, callsign, personalMarkers, savePersonal, sendMark, background]
+    [teamId, uid, callsign, personalMarkers, savePersonal, sendMark, fireAndReport]
   );
 
   const deleteMarker = useCallback(
@@ -565,10 +592,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       if (m.personal) await savePersonal(personalMarkers.filter((x) => x.id !== m.id));
       else if (teamId) {
         sendMark(m, true);
-        background(teams.deleteTeamMarker(teamId, m.id), 'Метка не удалилась на сервере');
+        fireAndReport(teams.deleteTeamMarker(teamId, m.id), 'Метка не удалилась на сервере');
       }
     },
-    [teamId, personalMarkers, savePersonal, sendMark, background]
+    [teamId, personalMarkers, savePersonal, sendMark, fireAndReport]
   );
 
   const moveMarker = useCallback(
@@ -577,19 +604,28 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         await savePersonal(personalMarkers.map((x) => (x.id === m.id ? { ...x, lat: p.lat, lng: p.lng } : x)));
       } else if (teamId) {
         sendMark({ ...m, lat: p.lat, lng: p.lng });
-        background(teams.moveTeamMarker(teamId, m.id, p.lat, p.lng), 'Метка не переместилась на сервере');
+        fireAndReport(teams.moveTeamMarker(teamId, m.id, p.lat, p.lng), 'Метка не переместилась на сервере');
       }
     },
-    [teamId, personalMarkers, savePersonal, sendMark, background]
+    [teamId, personalMarkers, savePersonal, sendMark, fireAndReport]
   );
 
   const voteMarker = useCallback(
     async (m: TacMarker, vote: 'stale' | 'done') => {
       if (!teamId || !uid || m.personal) return;
       sendVote({ markId: m.id, uid, vote });
-      background(teams.voteMarker(teamId, m.id, uid, vote), 'Голос не дошёл до сервера');
+      fireAndReport(teams.voteMarker(teamId, m.id, uid, vote), 'Голос не дошёл до сервера');
     },
-    [teamId, uid, sendVote, background]
+    [teamId, uid, sendVote, fireAndReport]
+  );
+
+  const setMarkerWave = useCallback(
+    async (m: TacMarker, wave: Wave | null) => {
+      if (!teamId || m.personal) return;
+      sendMark({ ...m, wave });
+      fireAndReport(teams.setMarkerWave(teamId, m.id, wave), 'Расписание респа не сохранилось');
+    },
+    [teamId, sendMark, fireAndReport]
   );
 
   const clearTeamMarkers = useCallback(
@@ -630,6 +666,34 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     [inTeam, shownTeamMarkers, personalMarkers, canCommand, members.length]
   );
 
+  // Waiting at the respawn: buzz a minute before the next departure and again when it
+  // leaves, so a "dead" fighter doesn't have to stare at the countdown.
+  const waveMarkers = useMemo(() => markers.filter((m) => m.wave), [markers]);
+  useEffect(() => {
+    if (status !== 'dead' || !waveMarkers.length) return;
+    const fired = new Set<string>();
+    const t = setInterval(() => {
+      const now = Date.now();
+      for (const m of waveMarkers) {
+        const at = nextWave(m.wave!, now);
+        const left = at - now;
+        const warnKey = `${m.id}:${at}:warn`;
+        if (left <= 60_000 && left > 55_000 && !fired.has(warnKey)) {
+          fired.add(warnKey);
+          Vibration.vibrate([0, 250, 150, 250]);
+        }
+        // nextWave() has already rolled over to the following departure right after one.
+        const prev = at - m.wave!.every;
+        const goKey = `${m.id}:${prev}:go`;
+        if (now - prev >= 0 && now - prev < 5_000 && !fired.has(goKey)) {
+          fired.add(goKey);
+          signalNewOrder(orderSoundRef.current);
+        }
+      }
+    }, 1000);
+    return () => clearInterval(t);
+  }, [status, waveMarkers]);
+
   const value = useMemo<Session>(
     () => ({
       ready,
@@ -666,6 +730,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       setShowGrid,
       keepAwake,
       setKeepAwake,
+      background,
+      setBackground,
       status,
       setStatus,
       setMemberRole,
@@ -676,6 +742,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       deleteMarker,
       moveMarker,
       voteMarker,
+      setMarkerWave,
       clearTeamMarkers,
     }),
     [
@@ -711,6 +778,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       setShowGrid,
       keepAwake,
       setKeepAwake,
+      background,
+      setBackground,
       status,
       setStatus,
       setMemberRole,
@@ -721,6 +790,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       deleteMarker,
       moveMarker,
       voteMarker,
+      setMarkerWave,
       clearTeamMarkers,
     ]
   );

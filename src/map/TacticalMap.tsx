@@ -3,6 +3,7 @@ import { useCallback, useEffect, useImperativeHandle, useRef, useState, type Ref
 import { formatClock } from '../lib/geo';
 import { isAdminKind, isOrder, MARKER_KINDS } from '../lib/markerKinds';
 import { ROLES, type RoleId } from '../lib/roles';
+import type { Bounds } from '../lib/tiles';
 import type { LatLng, Member, OverlayMeta, SelfPosition, TacMarker } from '../lib/types';
 import { loadOverlayPayload } from '../services/overlays';
 import { MapFrame, type MapFrameHandle } from './MapFrame';
@@ -43,6 +44,8 @@ type Props = {
   follow: boolean;
   /** Coordinate grid overlay. */
   grid?: boolean;
+  /** Downloaded base-layer areas (native only): tiles load from disk first. */
+  offline?: { root: string; areas: unknown[] } | null;
   members: Member[];
   /** Own uid — excluded from the members layer (drawn as `self`). */
   selfId: string | null;
@@ -62,7 +65,7 @@ type Props = {
   onMarkerDragStart?: (id: string) => void;
   onMarkerMoved?: (id: string, p: LatLng) => void;
   onMemberPress?: (id: string) => void;
-  onViewChanged?: (p: LatLng & { zoom: number }) => void;
+  onViewChanged?: (p: LatLng & { zoom: number; bounds?: Bounds }) => void;
   onFollowChanged?: (follow: boolean) => void;
   onOverlayError?: (id: string, message: string) => void;
   /** Game analysis overlay: tracks as [lat, lng] segments, heat as [lat, lng] samples. */
@@ -132,6 +135,11 @@ export function TacticalMap(props: Props) {
     if (ready) send({ type: 'setGrid', payload: { on: Boolean(props.grid) } });
   }, [ready, generation, props.grid, send]);
 
+  const { offline } = props;
+  useEffect(() => {
+    if (ready) send({ type: 'setOffline', payload: offline ?? null });
+  }, [ready, generation, offline, send]);
+
   useEffect(() => {
     if (ready) send({ type: 'setFollow', payload: { follow: props.follow } });
   }, [ready, generation, props.follow, send]);
@@ -172,6 +180,7 @@ export function TacticalMap(props: Props) {
         order: isOrder(m.kind),
         admin: isAdminKind(m.kind),
         movable: Boolean(isMovable?.(m)),
+        wave: m.wave ?? null,
         personal: Boolean(m.personal),
         time: formatClock(m.createdAt),
       };
