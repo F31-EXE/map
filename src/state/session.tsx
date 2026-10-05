@@ -23,6 +23,7 @@ import { Alert, Vibration } from 'react-native';
 
 import { signalNewOrder } from '../services/orderAlert';
 import { startBackgroundLocation, stopBackgroundLocation } from '../services/backgroundLocation';
+import { checkSafeMode } from '../services/crashGuard';
 import * as recordings from '../services/recordings';
 import * as teams from '../services/teams';
 
@@ -156,9 +157,22 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         loadJson<boolean>(KEYS.keepAwake, false),
         loadJson<boolean>(KEYS.background, false),
       ]);
-      setBackgroundState(bg);
-      // Permissions were granted when it was switched on; just resume.
-      if (bg) startBackgroundLocation().catch(() => {});
+      // Two crashes in a row at startup: come up with the native extras switched off.
+      const safe = await checkSafeMode();
+      if (safe && bg) {
+        await saveJson(KEYS.background, false);
+        stopBackgroundLocation().catch(() => {});
+      }
+      setBackgroundState(bg && !safe);
+      if (safe) {
+        Alert.alert(
+          'Приложение аварийно закрывалось',
+          'Связь без интернета и работа в фоне выключены. Включите их снова в настройках; если сбой повторится, отправьте разработчику текст ошибки из настроек.'
+        );
+      } else if (bg) {
+        // Permissions were granted when it was switched on; resume once the app is up.
+        setTimeout(() => startBackgroundLocation().catch(() => {}), 4000);
+      }
       setKeepAwakeState(awake);
       setShowGridState(grid);
       setStatusState(st === 'dead' || st === 'afk' ? st : 'alive');

@@ -1,17 +1,22 @@
 import Constants from 'expo-constants';
 import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { Alert, Pressable, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
+import { Alert, Pressable, Share, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 
 import { pickAvatar } from '../../services/avatar';
 import { BACKGROUND_SUPPORTED } from '../../services/backgroundLocation';
+import { clearLastError, lastError } from '../../services/crashGuard';
 import { useSession } from '../../state/session';
-import { Avatar, Card, Eyebrow, Icon, KeyboardScroll, tap, type IconName } from '../../ui/components';
+import { Avatar, Button, Card, Eyebrow, Icon, KeyboardScroll, tap, type IconName } from '../../ui/components';
 import { RolePicker } from '../../ui/RolePicker';
 import { C, F, R } from '../../ui/theme';
 
 export default function SettingsScreen() {
   const s = useSession();
+  const [crash, setCrash] = useState<string | null>(null);
+  useEffect(() => {
+    lastError().then(setCrash);
+  }, []);
   const [callsign, setCallsign] = useState(s.callsign);
   const [busy, setBusy] = useState(false);
   useEffect(() => setCallsign(s.callsign), [s.callsign]);
@@ -170,6 +175,30 @@ export default function SettingsScreen() {
         <LinkRow icon="history" title="Записи игр" sub="Маршруты и тепловая карта" onPress={() => router.push('/replay')} />
       </Card>
 
+      {crash && (
+        <Card style={{ gap: 10, borderColor: C.danger + '66' }}>
+          <Eyebrow>Последняя ошибка</Eyebrow>
+          <Text style={styles.crash} selectable numberOfLines={8}>
+            {crash}
+          </Text>
+          <View style={{ flexDirection: 'row', gap: 10 }}>
+            <Button
+              title="Отправить"
+              icon="share-variant"
+              kind="secondary"
+              style={{ flex: 1, minHeight: 44 }}
+              onPress={() => Share.share({ message: `GrimMap v${Constants.expoConfig?.version}\n${crash}` })}
+            />
+            <Button
+              title="Очистить"
+              kind="ghost"
+              style={{ minHeight: 44 }}
+              onPress={() => clearLastError().then(() => setCrash(null))}
+            />
+          </View>
+        </Card>
+      )}
+
       <Text style={styles.version}>
         GRIMMAP v{Constants.expoConfig?.version ?? '—'}
       </Text>
@@ -271,5 +300,6 @@ const styles = StyleSheet.create({
   rowTitle: { color: C.text, fontSize: 16, fontFamily: F.semibold },
   sub: { color: C.dim, fontSize: 13, fontFamily: F.regular, marginTop: 1 },
   divider: { height: StyleSheet.hairlineWidth, backgroundColor: C.line },
+  crash: { color: C.dim, fontFamily: F.mono, fontSize: 11 },
   version: { color: C.faint, fontFamily: F.mono, fontSize: 11, letterSpacing: 1.5, textAlign: 'center' },
 });

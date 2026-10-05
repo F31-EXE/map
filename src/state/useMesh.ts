@@ -24,6 +24,7 @@ import {
 } from '../lib/mesh';
 import type { RoleId } from '../lib/roles';
 import { KEYS, loadJson, saveJson } from '../lib/storage';
+import { checkSafeMode } from '../services/crashGuard';
 import type { MemberStatus, SelfPosition, TacMarker } from '../lib/types';
 
 /** Own position goes out at most this often, or when moved this far. */
@@ -93,7 +94,15 @@ export function useMesh(me: {
   const lastSelf = useRef<{ at: number; p: SelfPosition } | null>(null);
 
   useEffect(() => {
-    loadJson<boolean>(KEYS.mesh, false).then(setEnabledState);
+    (async () => {
+      const on = await loadJson<boolean>(KEYS.mesh, false);
+      // After repeated startup crashes the mesh stays off until switched on by hand.
+      if (on && (await checkSafeMode())) {
+        await saveJson(KEYS.mesh, false);
+        return;
+      }
+      setEnabledState(on);
+    })();
   }, []);
 
   const setEnabled = useCallback(async (v: boolean) => {
@@ -170,10 +179,18 @@ export function useMesh(me: {
     }, REDIAL_MS);
 
     setError(null);
-    mesh.start(MESH_SERVICE_ID, myName, tag).catch((err: Error) => setError(err.message));
+    // Not during app startup: let the UI come up first.
+    const starter = setTimeout(() => {
+      try {
+        mesh.start(MESH_SERVICE_ID, myName, tag).catch((err: Error) => setError(err.message));
+      } catch (err) {
+        setError((err as Error).message);
+      }
+    }, 3000);
 
     return () => {
       alive = false;
+      clearTimeout(starter);
       clearInterval(timer);
       subs.forEach((s) => s.remove());
       mesh.stop().catch(() => {});
