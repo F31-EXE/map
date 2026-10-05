@@ -2,7 +2,9 @@ import { Exo2_500Medium, Exo2_600SemiBold, Exo2_700Bold } from '@expo-google-fon
 import { JetBrainsMono_500Medium } from '@expo-google-fonts/jetbrains-mono';
 import { useFonts } from 'expo-font';
 import { Stack } from 'expo-router';
+import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
+import { useEffect } from 'react';
 import { View } from 'react-native';
 
 // Registers the background location task at startup.
@@ -13,6 +15,10 @@ import { ChatProvider } from '../state/chat';
 import { SideProvider } from '../state/side';
 import { C, F } from '../ui/theme';
 
+// Keep the logo up until the fonts are in, so the app doesn't flash blank.
+SplashScreen.preventAutoHideAsync().catch(() => {});
+SplashScreen.setOptions({ fade: true, duration: 300 });
+
 export default function RootLayout() {
   const [fontsLoaded, fontError] = useFonts({
     Exo2_500Medium,
@@ -21,8 +27,13 @@ export default function RootLayout() {
     JetBrainsMono_500Medium,
   });
 
+  const fontsDone = fontsLoaded || Boolean(fontError);
+  useEffect(() => {
+    if (fontsDone) SplashScreen.hideAsync().catch(() => {});
+  }, [fontsDone]);
+
   // Fall back to system fonts rather than hang if loading fails.
-  if (!fontsLoaded && !fontError) return <View style={{ flex: 1, backgroundColor: C.bg }} />;
+  if (!fontsDone) return <View style={{ flex: 1, backgroundColor: C.bg }} />;
 
   return (
     <SessionProvider>
