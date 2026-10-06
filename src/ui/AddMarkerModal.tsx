@@ -3,6 +3,7 @@ import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { formatCoords } from '../lib/geo';
 import { ADMIN_KINDS, isOrder, MARKER_KINDS, MARKER_KIND_ORDER, ORDER_KINDS } from '../lib/markerKinds';
+import { WAVE_PRESETS_MIN } from '../lib/waves';
 import type { LatLng, MarkerKind } from '../lib/types';
 import type { MarkerScope } from '../state/session';
 import type { OrderTarget } from '../state/side';
@@ -24,16 +25,21 @@ export function AddMarkerModal({
   /** Who an order can go to; more than one shows a picker (side commander). */
   orderTargets: { id: OrderTarget; label: string; color?: string }[];
   onCancel: () => void;
-  onSave: (kind: MarkerKind, label: string, scope: MarkerScope, target: OrderTarget) => Promise<void>;
+  onSave: (kind: MarkerKind, label: string, scope: MarkerScope, target: OrderTarget, waveMin: number | null) => Promise<void>;
 }) {
   const [kind, setKind] = useState<MarkerKind>('enemy');
   const [label, setLabel] = useState('');
   const [scope, setScope] = useState<MarkerScope>('team');
   const [target, setTarget] = useState<OrderTarget>(orderTargets[0]?.id ?? 'own');
   const [busy, setBusy] = useState(false);
+  // Respawn departures (commanders, respawn / dead-zone markers in the squad).
+  const [waveMin, setWaveMin] = useState<number | null>(null);
 
   useEffect(() => {
-    if (at) setLabel('');
+    if (at) {
+      setLabel('');
+      setWaveMin(null);
+    }
   }, [at]);
 
   // Keep the target valid when squads join or leave the side.
@@ -45,10 +51,12 @@ export function AddMarkerModal({
   // Orders always go out; plain markers without a team are personal.
   const effectiveScope: MarkerScope = order ? 'team' : !inTeam ? 'personal' : scope;
 
+  const canWave = canCommand && inTeam && effectiveScope === 'team' && (kind === 'respawn' || kind === 'deadzone');
+
   const save = async () => {
     setBusy(true);
     try {
-      await onSave(kind, label, effectiveScope, target);
+      await onSave(kind, label, effectiveScope, target, canWave ? waveMin : null);
     } finally {
       setBusy(false);
     }
@@ -182,6 +190,29 @@ export function AddMarkerModal({
         </View>
       </View>
 
+      {canWave && (
+        <View style={{ gap: 8 }}>
+          <Eyebrow>Выходы с респа · отсчёт с момента установки</Eyebrow>
+          <View style={styles.waveRow}>
+            {[null, ...WAVE_PRESETS_MIN].map((m) => {
+              const selected = m === waveMin;
+              return (
+                <Pressable
+                  key={String(m)}
+                  onPress={() => {
+                    tap();
+                    setWaveMin(m);
+                  }}
+                  style={[styles.waveChip, selected && styles.waveChipOn]}
+                >
+                  <Text style={[styles.waveText, selected && { color: C.accentInk }]}>{m ? `${m} мин` : 'Нет'}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
+      )}
+
       {inTeam && !order && (
         <View style={styles.segment}>
           {(['team', 'personal'] as const).map((sc) => {
@@ -297,6 +328,18 @@ const styles = StyleSheet.create({
   },
   kindIconSquare: { borderRadius: 8 },
   kindText: { color: C.dim, fontSize: 12, fontFamily: F.semibold },
+  waveRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  waveChip: {
+    paddingHorizontal: 12,
+    height: 34,
+    borderRadius: R.sm,
+    borderWidth: 1,
+    borderColor: C.lineStrong,
+    justifyContent: 'center',
+    backgroundColor: C.elevated,
+  },
+  waveChipOn: { backgroundColor: C.accent, borderColor: C.accent },
+  waveText: { color: C.text, fontFamily: F.mono, fontSize: 13 },
   segment: { flexDirection: 'row', backgroundColor: C.elevated, borderRadius: R.md, padding: 4 },
   segmentItem: {
     flex: 1,

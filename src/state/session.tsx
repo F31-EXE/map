@@ -98,7 +98,7 @@ type Session = {
 
   /** Team markers (when in a team) plus this device's personal ones. */
   markers: TacMarker[];
-  addMarker: (m: Pick<TacMarker, 'kind' | 'label' | 'lat' | 'lng' | 'points' | 'color'>, scope: MarkerScope) => Promise<void>;
+  addMarker: (m: Pick<TacMarker, 'kind' | 'label' | 'lat' | 'lng' | 'points' | 'color' | 'wave'>, scope: MarkerScope) => Promise<void>;
   deleteMarker: (m: TacMarker) => Promise<void>;
   /** Own markers only (personal, or placed by me in the squad). */
   moveMarker: (m: TacMarker, p: LatLng) => Promise<void>;
@@ -585,7 +585,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const { sendMark, sendVote } = mesh;
 
   const addMarker = useCallback(
-    async (m: Pick<TacMarker, 'kind' | 'label' | 'lat' | 'lng' | 'points' | 'color'>, scope: MarkerScope) => {
+    async (m: Pick<TacMarker, 'kind' | 'label' | 'lat' | 'lng' | 'points' | 'color' | 'wave'>, scope: MarkerScope) => {
       const base = { ...m, label: m.label.trim().slice(0, 40), createdByName: callsign || 'Я' };
       if (scope === 'team' && teamId && uid) {
         const id = teams.newMarkerId(teamId);

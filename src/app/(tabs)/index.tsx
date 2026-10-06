@@ -232,12 +232,22 @@ export default function MapScreen() {
   );
   const onMemberPress = useCallback((id: string) => setSelection({ type: 'member', id }), []);
 
-  const saveMarker = async (kind: MarkerKind, label: string, scope: MarkerScope, target: OrderTarget) => {
+  const saveMarker = async (
+    kind: MarkerKind,
+    label: string,
+    scope: MarkerScope,
+    target: OrderTarget,
+    waveMin: number | null
+  ) => {
     if (!addAt) return;
     try {
       const at = { label, lat: addAt.lat, lng: addAt.lng };
       if (isOrder(kind)) await side.placeOrder({ kind, ...at }, target);
-      else await session.addMarker({ kind, ...at }, scope);
+      else {
+        // The first group leaves when the respawn is set up.
+        const wave = waveMin ? { every: waveMin * 60_000, start: Date.now() } : undefined;
+        await session.addMarker({ kind, ...at, ...(wave ? { wave } : {}) }, scope);
+      }
       setAddAt(null);
       if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
     } catch (e) {

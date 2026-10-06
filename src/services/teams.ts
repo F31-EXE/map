@@ -280,14 +280,15 @@ export function newMarkerId(teamId: string): string {
 
 export async function addTeamMarker(
   teamId: string,
-  m: Pick<TacMarker, 'kind' | 'label' | 'lat' | 'lng' | 'createdBy' | 'createdByName' | 'points' | 'color'>,
+  m: Pick<TacMarker, 'kind' | 'label' | 'lat' | 'lng' | 'createdBy' | 'createdByName' | 'points' | 'color' | 'wave'>,
   id = newMarkerId(teamId)
 ): Promise<void> {
-  const { points, color, ...rest } = m;
+  const { points, color, wave, ...rest } = m;
   await setDoc(doc(firestore(), 'teams', teamId, 'markers', id), {
     ...rest,
     ...(points ? { points } : {}),
     ...(color ? { color } : {}),
+    ...(wave ? { wave } : {}),
     createdAt: serverTimestamp(),
   });
 }

@@ -183,6 +183,16 @@ service cloud.firestore {
             || (request.resource.data.points is list && request.resource.data.points.size() <= 40))
           && !('staleVotes' in request.resource.data)
           && !('doneVotes' in request.resource.data)
+          // A respawn can come with its departure schedule, from a commander only.
+          && (!('wave' in request.resource.data)
+            || (canCommand(teamId)
+              && request.resource.data.kind in ['respawn', 'deadzone']
+              && !('relayedBy' in request.resource.data)
+              && request.resource.data.wave.keys().hasOnly(['every', 'start'])
+              && request.resource.data.wave.every is number
+              && request.resource.data.wave.every >= 60000
+              && request.resource.data.wave.every <= 10800000
+              && request.resource.data.wave.start is number))
           && (
             (request.resource.data.createdBy == request.auth.uid
               && !('relayedBy' in request.resource.data)

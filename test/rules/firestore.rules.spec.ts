@@ -505,6 +505,12 @@ describe('respawn waves', () => {
     await assertSucceeds(wave('alice', 'resp', { every: 900000, start: Date.now() }));
     await assertSucceeds(wave('alice', 'resp', null));
   });
+  test('a commander may create a respawn with its schedule; a fighter may not', async () => {
+    const w = { every: 600000, start: Date.now() };
+    await assertSucceeds(setDoc(doc(as('alice'), 'teams', TEAM, 'markers', 'r2'), { ...marker('alice', 'respawn'), wave: w }));
+    await assertFails(setDoc(doc(as('bob'), 'teams', TEAM, 'markers', 'r3'), { ...marker('bob', 'respawn'), wave: w }));
+    await assertFails(setDoc(doc(as('alice'), 'teams', TEAM, 'markers', 'r4'), { ...marker('alice', 'enemy'), wave: w }));
+  });
   test('not fighters, not other markers, not silly intervals', async () => {
     await assertFails(wave('bob', 'resp', { every: 900000, start: 1 }));
     await assertFails(wave('alice', 'foe', { every: 900000, start: 1 }));
