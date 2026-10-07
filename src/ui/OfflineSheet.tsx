@@ -3,7 +3,7 @@ import { Alert, Pressable, StyleSheet, Text, TextInput, View } from 'react-nativ
 
 import { formatClock } from '../lib/geo';
 import { TILE_LAYERS, type Bounds } from '../lib/tiles';
-import { estimate, MAX_TILES, OFFLINE_SUPPORTED } from '../services/offlineMaps';
+import { OFFLINE_SUPPORTED, planDownload } from '../services/offlineMaps';
 import { useOverlays } from '../state/overlays';
 
 import { Button, Eyebrow, Icon, Sheet, tap } from './components';
@@ -38,9 +38,10 @@ export function OfflineSheet({
   const b = view?.bounds;
   const minZoom = view ? Math.max(8, Math.min(13, Math.floor(view.zoom) - 2)) : 12;
   const maxZoom = DETAIL[detail].maxZoom;
-  const est = b ? estimate(layer, b, minZoom, maxZoom) : { tiles: 0, mb: 0 };
-  const tooBig = est.tiles > MAX_TILES;
+  const plan = b ? planDownload(layer, b, minZoom, maxZoom) : null;
+  const tooBig = plan != null && !plan.fits;
   const pct = download && download.total ? Math.round((download.done / download.total) * 100) : 0;
+  const size = (mb: number) => (mb >= 1024 ? `${(mb / 1024).toFixed(1)} ГБ` : `${mb} МБ`);
 
   const start = () => {
     if (!b) return;
@@ -62,7 +63,9 @@ export function OfflineSheet({
 
       {download ? (
         <View style={{ gap: 10 }}>
-          <Eyebrow>Скачивание · {pct}%</Eyebrow>
+          <Eyebrow>
+            Скачивание{download.parts > 1 ? ` · часть ${download.part} из ${download.parts}` : ''} · {pct}%
+          </Eyebrow>
           <View style={styles.bar}>
             <View style={[styles.barFill, { width: `${pct}%` }]} />
           </View>
@@ -105,12 +108,14 @@ export function OfflineSheet({
             <View style={styles.estimate}>
               <Icon name={tooBig ? 'alert' : 'database-arrow-down-outline'} size={20} color={tooBig ? C.warn : C.dim} />
               <Text style={[styles.sub, { flex: 1 }]}>
-                {tooBig
-                  ? `Слишком большой район: ${est.tiles} тайлов. Приблизьте карту или выберите меньшую детализацию.`
-                  : `≈ ${est.mb} МБ, ${est.tiles} тайлов, масштабы ${minZoom}–${Math.min(maxZoom, def.maxZoom)}. Лучше качать по Wi-Fi.`}
+                {!plan
+                  ? '…'
+                  : tooBig
+                    ? `Не поместится: ≈ ${size(plan.mb)}${plan.freeMb != null ? `, свободно ${size(plan.freeMb)}` : ''}. Приблизьте карту или выберите меньшую детализацию.`
+                    : `≈ ${size(plan.mb)}${plan.parts.length > 1 ? `, скачается частями: ${plan.parts.length}` : ''}, масштабы ${minZoom}–${Math.min(maxZoom, def.maxZoom)}${plan.freeMb != null ? `. Свободно ${size(plan.freeMb)}` : ''}. Лучше качать по Wi-Fi.`}
               </Text>
             </View>
-            <Button title="Скачать" icon="cloud-download-outline" disabled={!b || tooBig || !est.tiles} onPress={start} />
+            <Button title="Скачать" icon="cloud-download-outline" disabled={!plan || tooBig || !plan.tiles} onPress={start} />
           </>
         )
       )}

@@ -84,3 +84,31 @@ export function tileUrl(template: string, t: { z: number; x: number; y: number }
 export function tileExt(template: string): 'png' | 'jpg' {
   return /\.png|l=skl|l=map/.test(template) ? 'png' : 'jpg';
 }
+
+/**
+ * Splits an area into parts of at most `maxTiles` tiles each (halving along the longer
+ * side), so a big region downloads piece by piece. Parts share their edges.
+ */
+export function splitToFit(
+  b: Bounds,
+  minZoom: number,
+  maxZoom: number,
+  crs: '3395' | '3857',
+  maxTiles: number,
+  layers = 1
+): Bounds[] {
+  if (countTiles(b, minZoom, maxZoom, crs) * layers <= maxTiles) return [b];
+  const tall = b.north - b.south > (b.east - b.west) * Math.cos((((b.north + b.south) / 2) * Math.PI) / 180);
+  // A single tile column/row can't be split further.
+  if (Math.max(b.north - b.south, b.east - b.west) < 1e-6) return [b];
+  const halves: Bounds[] = tall
+    ? [
+        { ...b, south: (b.south + b.north) / 2 },
+        { ...b, north: (b.south + b.north) / 2 },
+      ]
+    : [
+        { ...b, east: (b.west + b.east) / 2 },
+        { ...b, west: (b.west + b.east) / 2 },
+      ];
+  return halves.flatMap((h) => splitToFit(h, minZoom, maxZoom, crs, maxTiles, layers));
+}

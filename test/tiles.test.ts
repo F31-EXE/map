@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { countTiles, tileExt, tileUrl, tileXY, tilesOf, TILE_LAYERS } from '../src/lib/tiles.ts';
+import { countTiles, splitToFit, tileExt, tileUrl, tileXY, tilesOf, TILE_LAYERS } from '../src/lib/tiles.ts';
 
 test('3857 tiles match the standard slippy-map numbering', () => {
   // Moscow, Red Square, zoom 15 — the usual OSM tile.
@@ -31,4 +31,17 @@ test('urls and extensions', () => {
   assert.match(tileUrl(TILE_LAYERS.topo.urls[0], { z: 1, x: 0, y: 1 }), /^https:\/\/[abc]\.tile\.opentopomap\.org\/1\/0\/1\.png$/);
   assert.equal(tileExt(TILE_LAYERS['yandex-sat'].urls[0]), 'jpg');
   assert.equal(tileExt(TILE_LAYERS['yandex-hybrid'].urls[1]), 'png');
+});
+
+test('a big area splits into parts that each fit and together cover it', () => {
+  const b = { south: 56.7, west: 60.5, north: 56.9, east: 60.9 };
+  const total = countTiles(b, 12, 18, '3395');
+  assert.ok(total > 20_000);
+  const parts = splitToFit(b, 12, 18, '3395', 20_000);
+  assert.ok(parts.length > 1);
+  for (const p of parts) assert.ok(countTiles(p, 12, 18, '3395') <= 20_000);
+  // Coverage: the parts' tiles at the top zoom add up to at least the whole area's.
+  const sum = parts.reduce((n, p) => n + countTiles(p, 18, 18, '3395'), 0);
+  assert.ok(sum >= countTiles(b, 18, 18, '3395'));
+  assert.deepEqual(splitToFit(b, 12, 13, '3395', 20_000), [b], 'small enough stays whole');
 });

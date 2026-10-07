@@ -17,7 +17,7 @@ type Overlays = {
   /** Base-layer areas saved for use without internet. */
   areas: offline.OfflineArea[];
   /** Download in progress, if any. */
-  download: { areaId: string; done: number; total: number } | null;
+  download: { areaId: string; done: number; total: number; part: number; parts: number } | null;
   downloadArea: (layer: string, name: string, b: Bounds, minZoom: number, maxZoom: number) => Promise<void>;
   cancelDownload: () => void;
   removeArea: (id: string) => Promise<void>;
@@ -35,7 +35,9 @@ export function OverlaysProvider({ children }: { children: ReactNode }) {
   const [overlays, setOverlays] = useState<OverlayMeta[]>([]);
   const [focusRequest, requestFocus] = useState<string | null>(null);
   const [areas, setAreas] = useState<offline.OfflineArea[]>([]);
-  const [download, setDownload] = useState<{ areaId: string; done: number; total: number } | null>(null);
+  const [download, setDownload] = useState<{ areaId: string; done: number; total: number; part: number; parts: number } | null>(
+    null
+  );
   const stopRef = useRef(false);
   const areasRef = useRef(areas);
   areasRef.current = areas;
@@ -53,22 +55,30 @@ export function OverlaysProvider({ children }: { children: ReactNode }) {
   const downloadArea = useCallback(
     async (layer: string, name: string, b: Bounds, minZoom: number, maxZoom: number) => {
       if (download) throw new Error('Уже идёт скачивание');
-      const area = offline.newArea(layer, name, b, minZoom, maxZoom);
+      const plan = offline.planDownload(layer, b, minZoom, maxZoom);
+      if (!plan.fits || !plan.parts.length) throw new Error('Район слишком большой для этого телефона. Приблизьте карту.');
       stopRef.current = false;
-      // Saved up front: tiles already on disk are used even if the download is cut short.
-      await commitAreas([...areasRef.current, area]);
-      setDownload({ areaId: area.id, done: 0, total: 0 });
+      const n = plan.parts.length;
       try {
-        const result = await offline.downloadArea(
-          area,
-          (done, total) => setDownload({ areaId: area.id, done, total }),
-          () => stopRef.current
-        );
-        await commitAreas(areasRef.current.map((a) => (a.id === area.id ? result : a)));
-      } catch (e) {
-        await commitAreas(areasRef.current.filter((a) => a.id !== area.id));
-        offline.deleteAreaFiles(area);
-        throw e;
+        // Big regions go part by part; each part is its own area, usable as soon as
+        // it's down even if a later one is cut short.
+        for (let i = 0; i < n && !stopRef.current; i++) {
+          const area = offline.newArea(layer, n > 1 ? `${name} · ${i + 1}/${n}` : name, plan.parts[i], minZoom, maxZoom);
+          await commitAreas([...areasRef.current, area]);
+          setDownload({ areaId: area.id, done: 0, total: 0, part: i + 1, parts: n });
+          try {
+            const result = await offline.downloadArea(
+              area,
+              (done, total) => setDownload({ areaId: area.id, done, total, part: i + 1, parts: n }),
+              () => stopRef.current
+            );
+            await commitAreas(areasRef.current.map((a) => (a.id === area.id ? result : a)));
+          } catch (e) {
+            await commitAreas(areasRef.current.filter((a) => a.id !== area.id));
+            offline.deleteAreaFiles(area);
+            throw e;
+          }
+        }
       } finally {
         setDownload(null);
       }

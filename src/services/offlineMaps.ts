@@ -2,7 +2,7 @@ import { Directory, File, Paths } from 'expo-file-system';
 import { Platform } from 'react-native';
 
 import { KEYS, loadJson, newId, saveJson } from '../lib/storage';
-import { countTiles, tileExt, tilesOf, tileUrl, TILE_LAYERS, type Bounds } from '../lib/tiles';
+import { countTiles, splitToFit, tileExt, tilesOf, tileUrl, TILE_LAYERS, type Bounds } from '../lib/tiles';
 
 /** A downloaded piece of a base layer, stored as tile files under offline/<id>/. */
 export type OfflineArea = Bounds & {
@@ -22,8 +22,10 @@ export type OfflineArea = Bounds & {
 };
 
 export const OFFLINE_SUPPORTED = Platform.OS !== 'web';
-/** Keep a single download sane: about 300–500 MB of satellite tiles. */
+/** One downloaded part: bigger regions are split into several (see planDownload). */
 export const MAX_TILES = 20_000;
+/** Whole region ceiling, about 3–5 GB of satellite tiles. */
+export const MAX_TOTAL_TILES = 200_000;
 const CONCURRENCY = 6;
 
 function rootDir(): Directory {
@@ -46,11 +48,26 @@ export async function saveAreas(list: OfflineArea[]): Promise<void> {
   await saveJson(KEYS.offlineAreas, list);
 }
 
-export function estimate(layer: string, b: Bounds, minZoom: number, maxZoom: number) {
+/**
+ * How a region will be downloaded: split into parts of at most MAX_TILES tiles,
+ * with the size estimate and whether it fits on the phone.
+ */
+export function planDownload(layer: string, b: Bounds, minZoom: number, maxZoom: number) {
   const def = TILE_LAYERS[layer];
-  if (!def) return { tiles: 0, mb: 0 };
-  const tiles = countTiles(b, minZoom, Math.min(maxZoom, def.maxZoom), def.crs) * def.urls.length;
-  return { tiles, mb: Math.ceil((tiles * def.avgKb) / 1024) };
+  if (!def) return { parts: [] as Bounds[], tiles: 0, mb: 0, freeMb: null as number | null, fits: false };
+  const top = Math.min(maxZoom, def.maxZoom);
+  const tiles = countTiles(b, minZoom, top, def.crs) * def.urls.length;
+  const parts = tiles > MAX_TOTAL_TILES ? [] : splitToFit(b, minZoom, top, def.crs, MAX_TILES, def.urls.length);
+  const mb = Math.ceil((tiles * def.avgKb) / 1024);
+  let freeMb: number | null = null;
+  try {
+    freeMb = Math.floor(Paths.availableDiskSpace / 1048576);
+  } catch {
+    // Not available (web).
+  }
+  // Leave room for the phone itself.
+  const fits = tiles <= MAX_TOTAL_TILES && (freeMb == null || mb < freeMb - 1024);
+  return { parts, tiles, mb, freeMb, fits };
 }
 
 export function newArea(layer: string, name: string, b: Bounds, minZoom: number, maxZoom: number): OfflineArea {
