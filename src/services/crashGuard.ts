@@ -1,5 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+import { GrimMesh } from '../../modules/grim-mesh';
+
 /**
  * Keeps a crash at startup from locking the user out of the app.
  *
@@ -28,6 +30,13 @@ export function checkSafeMode(): Promise<boolean> {
       if (raw) boot = JSON.parse(raw) as Boot;
     } catch {
       // Corrupt entry: start clean.
+    }
+    // A native crash (Android) left its stack trace behind: keep it for Settings.
+    try {
+      const native = GrimMesh?.takeNativeCrash?.();
+      if (native) await AsyncStorage.setItem(LAST_ERROR, `NATIVE ${native}`.slice(0, 8000));
+    } catch {
+      // Older build without the recorder.
     }
     const streak = boot.starting ? boot.streak + 1 : 0;
     safeMode = streak >= 2;

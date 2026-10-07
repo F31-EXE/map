@@ -20,6 +20,8 @@ declare class GrimMeshModule extends NativeModule<Events> {
   connect(endpointId: string): Promise<void>;
   send(to: string[], data: string): Promise<void>;
   connectedPeers(): string[];
+  /** Last native crash stack trace (recorded by the module), once; null if none. */
+  takeNativeCrash(): string | null;
 }
 
 /** Android only; null on iOS, web and in Expo Go. */

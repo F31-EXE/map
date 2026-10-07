@@ -1,6 +1,8 @@
 package expo.modules.grimmesh
 
 import android.content.Context
+import android.util.Log
+import java.io.File
 import com.google.android.gms.nearby.Nearby
 import com.google.android.gms.nearby.connection.AdvertisingOptions
 import com.google.android.gms.nearby.connection.ConnectionInfo
@@ -146,5 +148,43 @@ class GrimMeshModule : Module() {
     OnDestroy {
       stopAll()
     }
+
+    // Native crashes (ours or any library's) are written to a file before the app dies,
+    // so the next launch can show what happened. JS: takeNativeCrash().
+    OnCreate {
+      val ctx = appContext.reactContext?.applicationContext ?: return@OnCreate
+      val current = Thread.getDefaultUncaughtExceptionHandler()
+      if (current !is CrashRecorder) {
+        Thread.setDefaultUncaughtExceptionHandler(CrashRecorder(File(ctx.filesDir, CRASH_FILE), current))
+      }
+    }
+
+    /** The last recorded native crash, once (the file is removed). */
+    Function("takeNativeCrash") {
+      val ctx = appContext.reactContext?.applicationContext ?: return@Function null
+      val file = File(ctx.filesDir, CRASH_FILE)
+      if (!file.exists()) return@Function null
+      val text = file.readText()
+      file.delete()
+      text
+    }
+  }
+
+  companion object {
+    private const val CRASH_FILE = "grimmap-native-crash.txt"
+  }
+}
+
+private class CrashRecorder(
+  private val file: File,
+  private val previous: Thread.UncaughtExceptionHandler?
+) : Thread.UncaughtExceptionHandler {
+  override fun uncaughtException(thread: Thread, error: Throwable) {
+    try {
+      file.writeText("${java.util.Date()} [${thread.name}]\n" + Log.getStackTraceString(error).take(8000))
+    } catch (_: Throwable) {
+      // Nothing more we can do while crashing.
+    }
+    previous?.uncaughtException(thread, error)
   }
 }

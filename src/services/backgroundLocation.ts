@@ -1,6 +1,6 @@
 import * as Location from 'expo-location';
 import * as TaskManager from 'expo-task-manager';
-import { Platform } from 'react-native';
+import { AppState, PermissionsAndroid, Platform } from 'react-native';
 
 /**
  * "Работа в фоне": location keeps coming with the screen off. On Android this runs a
@@ -39,6 +39,14 @@ export async function startBackgroundLocation(): Promise<boolean> {
   if (fg.status !== 'granted') return false;
   const bg = await Location.requestBackgroundPermissionsAsync();
   if (bg.status !== 'granted') return false;
+  if (Platform.OS === 'android' && typeof Platform.Version === 'number' && Platform.Version >= 33) {
+    // So the "GrimMap на связи" notification can show (Android 13+).
+    await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS).catch(() => {});
+  }
+  // Android 12+ refuses (and crashes the app) if a foreground service starts while the
+  // app is in the background — and asking for "Allow all the time" just sent the user
+  // to the system settings. Wait until GrimMap is on screen again.
+  await untilForeground();
   if (await Location.hasStartedLocationUpdatesAsync(BACKGROUND_TASK)) return true;
   await Location.startLocationUpdatesAsync(BACKGROUND_TASK, {
     accuracy: Location.Accuracy.BestForNavigation,
@@ -55,6 +63,18 @@ export async function startBackgroundLocation(): Promise<boolean> {
     },
   });
   return true;
+}
+
+function untilForeground(): Promise<void> {
+  const settle = () => new Promise<void>((r) => setTimeout(r, 800));
+  if (AppState.currentState === 'active') return settle();
+  return new Promise<void>((resolve) => {
+    const sub = AppState.addEventListener('change', (st) => {
+      if (st !== 'active') return;
+      sub.remove();
+      settle().then(resolve);
+    });
+  });
 }
 
 export async function stopBackgroundLocation(): Promise<void> {
