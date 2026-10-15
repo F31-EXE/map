@@ -320,6 +320,40 @@ body,
   display: none;
 }
 
+/* Hot zone: label riding the moving circle. */
+.hz-label span {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: rgba(5, 12, 8, 0.88);
+  border: 1px solid #ff5a1f;
+  color: #ff8a5c;
+  font: 700 12px/1.3 ui-monospace, 'JetBrains Mono', Menlo, monospace;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+}
+.hz-label.hz-warn span,
+.hz-label.hz-move span {
+  border-color: #ffb547;
+  color: #ffb547;
+  animation: wave-blink 1s steps(2) infinite;
+}
+.lod-dot .hz-label span {
+  font-size: 10px;
+  padding: 1px 4px;
+}
+.hz-hot {
+  animation: hz-pulse 2.4s ease-in-out infinite;
+}
+@keyframes hz-pulse {
+  50% {
+    fill-opacity: 0.18;
+  }
+}
+
 /* Polygon infrastructure (respawn, parking…): square pins. */
 .tac-icon.admin .tac-pin {
   border-radius: 7px;

@@ -17,6 +17,7 @@ import {
 import { firestore } from '../lib/firebase';
 import { normalizeCode } from '../lib/invite';
 import { DEFAULT_TEAM_COLOR, roleOf, type RoleId } from '../lib/roles';
+import { validZone, type HotZone } from '../lib/hotzone';
 import { validWave, type Wave } from '../lib/waves';
 import type { Member, MemberStatus, PinnedMessage, SelfPosition, TacMarker, Team } from '../lib/types';
 
@@ -265,12 +266,17 @@ export function subscribeTeamMarkers(
             points: Array.isArray(v.points) ? v.points : undefined,
             color: typeof v.color === 'string' ? v.color : undefined,
             wave: validWave(v.wave) ? { every: v.wave.every, start: v.wave.start } : null,
+            zone: validZone(v.zone) ? pickZone(v.zone) : null,
           };
         })
       );
     },
     onError
   );
+}
+
+function pickZone(z: HotZone): HotZone {
+  return { r: z.r, hot: z.hot, every: z.every, start: z.start, seed: z.seed };
 }
 
 /** New marker id, made on the phone so the same id can travel over Bluetooth. */
@@ -280,15 +286,16 @@ export function newMarkerId(teamId: string): string {
 
 export async function addTeamMarker(
   teamId: string,
-  m: Pick<TacMarker, 'kind' | 'label' | 'lat' | 'lng' | 'createdBy' | 'createdByName' | 'points' | 'color' | 'wave'>,
+  m: Pick<TacMarker, 'kind' | 'label' | 'lat' | 'lng' | 'createdBy' | 'createdByName' | 'points' | 'color' | 'wave' | 'zone'>,
   id = newMarkerId(teamId)
 ): Promise<void> {
-  const { points, color, wave, ...rest } = m;
+  const { points, color, wave, zone, ...rest } = m;
   await setDoc(doc(firestore(), 'teams', teamId, 'markers', id), {
     ...rest,
     ...(points ? { points } : {}),
     ...(color ? { color } : {}),
     ...(wave ? { wave } : {}),
+    ...(zone ? { zone } : {}),
     createdAt: serverTimestamp(),
   });
 }
@@ -323,6 +330,11 @@ export async function voteMarker(teamId: string, markerId: string, uid: string, 
 /** Commanders set (or clear) the respawn departure schedule on a respawn marker. */
 export async function setMarkerWave(teamId: string, markerId: string, wave: Wave | null): Promise<void> {
   await updateDoc(doc(firestore(), 'teams', teamId, 'markers', markerId), { wave });
+}
+
+/** Commanders change the control zone / hot zone settings. */
+export async function setMarkerZone(teamId: string, markerId: string, zone: HotZone): Promise<void> {
+  await updateDoc(doc(firestore(), 'teams', teamId, 'markers', markerId), { zone });
 }
 
 /** The author moves their own marker (enforced by rules). */

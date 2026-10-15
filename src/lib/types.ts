@@ -1,4 +1,5 @@
 import type { RoleId } from './roles';
+import type { HotZone } from './hotzone';
 import type { Wave } from './waves';
 
 export type LatLng = { lat: number; lng: number };
@@ -72,6 +73,7 @@ export type MarkerKind =
   | 'medic'
   | 'note'
   | 'arrow'
+  | 'hotzone'
   | AdminKind
   | OrderKind;
 
@@ -103,6 +105,8 @@ export type TacMarker = {
   viaMesh?: boolean;
   /** Respawn departures (respawn / dead-zone markers), set by commanders. */
   wave?: Wave | null;
+  /** Control zone with a moving hot zone (`hotzone` markers), set by commanders. */
+  zone?: HotZone | null;
 };
 
 export type OverlayFormat = 'kml' | 'kmz' | 'gpx' | 'geojson';

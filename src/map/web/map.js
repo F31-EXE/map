@@ -367,6 +367,154 @@
     }
   }, 1000);
 
+  // ---------------------------------------------------------------------------
+  // Control zone + moving hot zone (src/lib/hotzone.ts has the same math; the
+  // hz:begin..hz:end block is checked against it by test/hotzone.test.ts).
+  // ---------------------------------------------------------------------------
+  // hz:begin
+  function hzRand(seed, k, i) {
+    var h = (seed ^ Math.imul(k + 1, 0x9e3779b1) ^ Math.imul(i + 1, 0x85ebca77)) >>> 0;
+    h = Math.imul(h ^ (h >>> 16), 0x7feb352d) >>> 0;
+    h = Math.imul(h ^ (h >>> 15), 0x846ca68b) >>> 0;
+    h = (h ^ (h >>> 16)) >>> 0;
+    return h / 4294967296;
+  }
+  function hzPoint(lat, lng, z, k) {
+    var room = Math.max(0, z.r - z.hot);
+    var d = Math.sqrt(hzRand(z.seed, k, 0)) * room;
+    var a = hzRand(z.seed, k, 1) * 2 * Math.PI;
+    return {
+      lat: lat + (d * Math.cos(a)) / 111320,
+      lng: lng + (d * Math.sin(a)) / (111320 * Math.cos((lat * Math.PI) / 180)),
+    };
+  }
+  function hzState(lat, lng, z, now) {
+    var t = Math.max(0, now - z.start);
+    var k = Math.floor(t / z.every);
+    var base = z.start + k * z.every;
+    var ph = t - k * z.every;
+    var move = Math.min(90000, Math.max(30000, z.every * 0.2));
+    var warn = Math.min(180000, Math.max(60000, z.every * 0.3));
+    var moveAt = z.every - move;
+    var warnAt = moveAt - warn;
+    var a = hzPoint(lat, lng, z, k);
+    if (ph < warnAt) return { lat: a.lat, lng: a.lng, next: null, phase: 'hold', at: base + warnAt, k: k };
+    var b = hzPoint(lat, lng, z, k + 1);
+    if (ph < moveAt) return { lat: a.lat, lng: a.lng, next: b, phase: 'warn', at: base + moveAt, k: k };
+    var f = (ph - moveAt) / move;
+    return { lat: a.lat + (b.lat - a.lat) * f, lng: a.lng + (b.lng - a.lng) * f, next: b, phase: 'move', at: base + z.every, k: k };
+  }
+  // hz:end
+
+  var zonesLayer = L.layerGroup().addTo(map);
+  var zoneShapes = {};
+
+  function clockText(ms) {
+    var s = Math.max(0, Math.ceil(ms / 1000));
+    return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+  }
+
+  function zoneBadge(st, now) {
+    var t = clockText(st.at - (now || Date.now()));
+    return st.phase === 'move' ? 'ХОТЗОНА · едет ' + t : st.phase === 'warn' ? 'ХОТЗОНА · сдвиг ' + t : 'ХОТЗОНА';
+  }
+
+  function drawZone(g, now) {
+    var m = g._zoneMarker;
+    var st = hzState(m.lat, m.lng, m.zone, now);
+    g._hot.setLatLng([st.lat, st.lng]);
+    g._label.setLatLng([st.lat, st.lng]);
+    var key = st.phase + ':' + st.k;
+    if (key !== g._phaseKey) {
+      g._phaseKey = key;
+      g._hot.setStyle({ dashArray: st.phase === 'move' ? '10 8' : null });
+      if (st.next) {
+        g._next.setLatLng([st.next.lat, st.next.lng]);
+        g._path.setLatLngs([[st.lat, st.lng], [st.next.lat, st.next.lng]]);
+        g._next.addTo(g);
+        g._path.addTo(g);
+      } else {
+        g.removeLayer(g._next);
+        g.removeLayer(g._path);
+      }
+    }
+    if (st.next && st.phase === 'move') g._path.setLatLngs([[st.lat, st.lng], [st.next.lat, st.next.lng]]);
+    var el = g._label.getElement();
+    if (el) {
+      el.classList.toggle('hz-warn', st.phase === 'warn');
+      el.classList.toggle('hz-move', st.phase === 'move');
+      el.querySelector('span').textContent = zoneBadge(st, now);
+    }
+  }
+
+  function buildZone(m) {
+    var g = L.layerGroup();
+    g._zoneMarker = m;
+    g._area = L.circle([m.lat, m.lng], {
+      radius: m.zone.r,
+      color: '#FFC83D',
+      weight: 2,
+      opacity: 0.9,
+      dashArray: '12 8',
+      fillColor: '#FFC83D',
+      fillOpacity: 0.05,
+      interactive: false,
+    }).addTo(g);
+    g._hot = L.circle([m.lat, m.lng], {
+      radius: m.zone.hot,
+      color: '#FF5A1F',
+      weight: 3,
+      fillColor: '#FF5A1F',
+      fillOpacity: 0.35,
+      interactive: false,
+      className: 'hz-hot',
+    }).addTo(g);
+    g._next = L.circle([m.lat, m.lng], {
+      radius: m.zone.hot,
+      color: '#FFFFFF',
+      weight: 2,
+      opacity: 0.85,
+      dashArray: '4 6',
+      fill: false,
+      interactive: false,
+    });
+    g._path = L.polyline([], { color: '#FFFFFF', weight: 2, opacity: 0.7, dashArray: '2 8', interactive: false });
+    g._label = L.marker([m.lat, m.lng], {
+      keyboard: false,
+      icon: L.divIcon({ className: 'hz-label', html: '<span>ХОТЗОНА</span>', iconSize: [0, 0] }),
+    }).addTo(g);
+    g._label.on('click', function () {
+      post('markerTap', { id: g._zoneMarker.id });
+    });
+    g._key = JSON.stringify(m.zone);
+    g._phaseKey = null;
+    drawZone(g, Date.now());
+    return g;
+  }
+
+  function setZones(list) {
+    syncKeyed(zoneShapes, zonesLayer, list, buildZone, function (g, m) {
+      var key = JSON.stringify(m.zone);
+      g._zoneMarker = m;
+      g._area.setLatLng([m.lat, m.lng]);
+      if (key !== g._key) {
+        g._key = key;
+        g._area.setRadius(m.zone.r);
+        g._hot.setRadius(m.zone.hot);
+        g._next.setRadius(m.zone.hot);
+        g._phaseKey = null;
+      }
+      drawZone(g, Date.now());
+    });
+  }
+
+  setInterval(function () {
+    var now = Date.now();
+    Object.keys(zoneShapes).forEach(function (id) {
+      drawZone(zoneShapes[id], now);
+    });
+  }, 1000);
+
   var markersLayer = L.layerGroup().addTo(map);
   var tacMarkers = {};
   // Marker being moved by long press + drag (see the long-press section).
@@ -532,6 +680,7 @@
 
   function setMarkers(all) {
     setArrows(all.filter(function (m) { return m.points; }));
+    setZones(all.filter(function (m) { return m.zone; }));
     var list = all.filter(function (m) { return !m.points; });
     syncKeyed(
       tacMarkers,

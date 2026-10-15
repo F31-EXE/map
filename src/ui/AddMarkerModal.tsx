@@ -3,11 +3,13 @@ import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { formatCoords } from '../lib/geo';
 import { ADMIN_KINDS, isOrder, MARKER_KINDS, MARKER_KIND_ORDER, ORDER_KINDS } from '../lib/markerKinds';
+import { newZone, type HotZone } from '../lib/hotzone';
 import { WAVE_PRESETS_MIN } from '../lib/waves';
 import type { LatLng, MarkerKind } from '../lib/types';
 import type { MarkerScope } from '../state/session';
 import type { OrderTarget } from '../state/side';
 import { Button, Eyebrow, Icon, Sheet, tap } from './components';
+import { HOT, ZoneSettings } from './ZonePanel';
 import { C, F, R } from './theme';
 
 export function AddMarkerModal({
@@ -25,7 +27,14 @@ export function AddMarkerModal({
   /** Who an order can go to; more than one shows a picker (side commander). */
   orderTargets: { id: OrderTarget; label: string; color?: string }[];
   onCancel: () => void;
-  onSave: (kind: MarkerKind, label: string, scope: MarkerScope, target: OrderTarget, waveMin: number | null) => Promise<void>;
+  onSave: (
+    kind: MarkerKind,
+    label: string,
+    scope: MarkerScope,
+    target: OrderTarget,
+    waveMin: number | null,
+    zone: HotZone | null
+  ) => Promise<void>;
 }) {
   const [kind, setKind] = useState<MarkerKind>('enemy');
   const [label, setLabel] = useState('');
@@ -34,11 +43,14 @@ export function AddMarkerModal({
   const [busy, setBusy] = useState(false);
   // Respawn departures (commanders, respawn / dead-zone markers in the squad).
   const [waveMin, setWaveMin] = useState<number | null>(null);
+  // Control zone settings (commanders, `hotzone` marker).
+  const [zone, setZone] = useState<HotZone>(() => newZone());
 
   useEffect(() => {
     if (at) {
       setLabel('');
       setWaveMin(null);
+      setZone((z) => newZone(z.r, z.hot, Math.round(z.every / 60_000)));
     }
   }, [at]);
 
@@ -49,14 +61,18 @@ export function AddMarkerModal({
 
   const order = isOrder(kind);
   // Orders always go out; plain markers without a team are personal.
-  const effectiveScope: MarkerScope = order ? 'team' : !inTeam ? 'personal' : scope;
+  const isZone = kind === 'hotzone';
+  const canZone = canCommand && inTeam;
+  const effectiveScope: MarkerScope = order || isZone ? 'team' : !inTeam ? 'personal' : scope;
 
   const canWave = canCommand && inTeam && effectiveScope === 'team' && (kind === 'respawn' || kind === 'deadzone');
 
   const save = async () => {
     setBusy(true);
     try {
-      await onSave(kind, label, effectiveScope, target, canWave ? waveMin : null);
+      // The schedule starts when the zone is placed.
+      const z = isZone ? { ...zone, start: Date.now() } : null;
+      await onSave(kind, label, effectiveScope, target, canWave ? waveMin : null, z);
     } finally {
       setBusy(false);
     }
@@ -190,6 +206,25 @@ export function AddMarkerModal({
         </View>
       </View>
 
+      {canZone && (
+        <View style={{ gap: 8 }}>
+          <Eyebrow>Режим игры</Eyebrow>
+          <Pressable
+            onPress={() => pick('hotzone')}
+            style={[styles.zoneTile, isZone && { borderColor: HOT, backgroundColor: HOT + '1F' }]}
+          >
+            <View style={[styles.kindIcon, { borderColor: HOT, backgroundColor: isZone ? HOT : 'transparent' }]}>
+              <Icon name="fire" size={20} color={isZone ? C.accentInk : HOT} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.zoneTitle, isZone && { color: C.text }]}>Зона контроля с хотзоной</Text>
+              <Text style={styles.zoneSub}>Большой круг здесь, внутри него переезжает горячий круг</Text>
+            </View>
+          </Pressable>
+          {isZone && <ZoneSettings zone={zone} onChange={setZone} />}
+        </View>
+      )}
+
       {canWave && (
         <View style={{ gap: 8 }}>
           <Eyebrow>Выходы с респа · отсчёт с момента установки</Eyebrow>
@@ -213,7 +248,7 @@ export function AddMarkerModal({
         </View>
       )}
 
-      {inTeam && !order && (
+      {inTeam && !order && !isZone && (
         <View style={styles.segment}>
           {(['team', 'personal'] as const).map((sc) => {
             const selected = effectiveScope === sc;
@@ -254,7 +289,7 @@ export function AddMarkerModal({
       <View style={styles.row}>
         <Button title="Отмена" kind="secondary" onPress={onCancel} style={{ flex: 1 }} />
         <Button
-          title={order ? 'Отдать приказ' : 'Поставить'}
+          title={order ? 'Отдать приказ' : isZone ? 'Начать' : 'Поставить'}
           icon={active.icon}
           onPress={save}
           busy={busy}
@@ -328,6 +363,18 @@ const styles = StyleSheet.create({
   },
   kindIconSquare: { borderRadius: 8 },
   kindText: { color: C.dim, fontSize: 12, fontFamily: F.semibold },
+  zoneTile: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    padding: 12,
+    borderRadius: R.md,
+    borderWidth: 1.5,
+    borderColor: C.line,
+    backgroundColor: C.elevated,
+  },
+  zoneTitle: { color: C.dim, fontSize: 14, fontFamily: F.semibold },
+  zoneSub: { color: C.faint, fontSize: 12, fontFamily: F.regular, marginTop: 2 },
   waveRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   waveChip: {
     paddingHorizontal: 12,

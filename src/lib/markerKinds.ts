@@ -3,6 +3,7 @@ import {
   mdiAlert,
   mdiAutorenew,
   mdiArrowTopRightThick,
+  mdiFire,
   mdiFlagVariant,
   mdiMapMarkerRadius,
   mdiMedicalBag,
@@ -36,7 +37,8 @@ type KindDef = {
     | 'autorenew'
     | 'skull-crossbones'
     | 'parking'
-    | 'account-tie';
+    | 'account-tie'
+    | 'fire';
   /** Same icon as an SVG path, for markers drawn inside the map WebView. */
   path: string;
   color: string;
@@ -54,6 +56,7 @@ export const MARKER_KINDS: Record<MarkerKind, KindDef> = {
   respawn: { title: 'Респ', icon: 'autorenew', path: mdiAutorenew, color: '#2EE6C5' },
   deadzone: { title: 'Мертвяк', icon: 'skull-crossbones', path: mdiSkullCrossbones, color: '#C3CCC6' },
   parking: { title: 'Парковка', icon: 'parking', path: mdiParking, color: '#7FA7FF' },
+  hotzone: { title: 'Зона контроля', icon: 'fire', path: mdiFire, color: '#FF5A1F' },
   admin: { title: 'Администрация', icon: 'account-tie', path: mdiAccountTie, color: '#F2F2F2' },
   'order-move': { title: 'Двигаться сюда', icon: 'run-fast', path: mdiRunFast, color: '#B4E34A' },
   'order-attack': { title: 'Атаковать', icon: 'sword-cross', path: mdiSwordCross, color: '#FF4D4D' },

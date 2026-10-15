@@ -56,6 +56,16 @@ service cloud.firestore {
         : exists(m) && get(m).data.get('canCommand', false) == true ? 2
         : 1;
     }
+    // Control zone (`hotzone` marker), as in src/lib/hotzone.ts validZone().
+    function validZone(z) {
+      return z is map
+        && z.keys().hasOnly(['r', 'hot', 'every', 'start', 'seed'])
+        && z.r is number && z.r >= 50 && z.r <= 5000
+        && z.hot is number && z.hot >= 10 && z.hot <= z.r
+        && z.every is number && z.every >= 60000 && z.every <= 3600000
+        && z.start is number
+        && z.seed is number;
+    }
     function isOrderKind(kind) {
       return kind in ['order-move', 'order-attack', 'order-defend'];
     }
@@ -193,6 +203,12 @@ service cloud.firestore {
               && request.resource.data.wave.every >= 60000
               && request.resource.data.wave.every <= 10800000
               && request.resource.data.wave.start is number))
+          // Control zone with a moving hot zone: commanders only, never relayed.
+          && (request.resource.data.kind != 'hotzone'
+            || (canCommand(teamId)
+              && !('relayedBy' in request.resource.data)
+              && validZone(request.resource.data.zone)))
+          && (!('zone' in request.resource.data) || request.resource.data.kind == 'hotzone')
           && (
             (request.resource.data.createdBy == request.auth.uid
               && !('relayedBy' in request.resource.data)
@@ -228,6 +244,11 @@ service cloud.firestore {
                 && request.resource.data.wave.every >= 60000
                 && request.resource.data.wave.every <= 10800000
                 && request.resource.data.wave.start is number)))
+          // Commanders change the control zone / hot zone settings.
+          || (canCommand(teamId)
+            && resource.data.kind == 'hotzone'
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['zone'])
+            && validZone(request.resource.data.zone))
           // The author drags their own marker to a new spot.
           || (isMember(teamId)
             && resource.data.createdBy == request.auth.uid

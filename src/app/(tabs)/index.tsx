@@ -6,6 +6,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useSelfPosition } from '../../hooks/useSelfPosition';
 import { bearingDegrees, distanceMeters, formatClock, formatCoords, formatDistance, timeAgo } from '../../lib/geo';
+import { hotState, type HotZone } from '../../lib/hotzone';
 import { isOrder, MARKER_KINDS, voteThreshold } from '../../lib/markerKinds';
 import { ROLES } from '../../lib/roles';
 import { STATUSES } from '../../lib/status';
@@ -27,6 +28,7 @@ import { useSide, type OrderTarget } from '../../state/side';
 import { AddMarkerModal } from '../../ui/AddMarkerModal';
 import { OfflineSheet } from '../../ui/OfflineSheet';
 import { WavePanel } from '../../ui/WavePanel';
+import { HOT, phaseText, selfInZone, useNow, ZonePanel } from '../../ui/ZonePanel';
 import { Avatar, Button, Glass, GlassButton, Icon, RoleIcon, Sheet, tap, type IconName } from '../../ui/components';
 import { InfoSheet, type Stat } from '../../ui/InfoSheet';
 import { C, eyebrow, F, R } from '../../ui/theme';
@@ -108,6 +110,49 @@ function KindBadge({ kind }: { kind: MarkerKind }) {
         <Icon name={def.icon} size={26} color={def.color} />
       </View>
     </View>
+  );
+}
+
+/** Top-left status of the hot zone: am I in it, how far, when it moves. */
+function ZoneChip({
+  marker,
+  self,
+  style,
+  onPress,
+}: {
+  marker: TacMarker;
+  self: SelfPosition | null;
+  style: object;
+  onPress: () => void;
+}) {
+  const now = useNow();
+  const st = hotState(marker, marker.zone!, now);
+  const me = selfInZone(self, marker, st);
+  const alert = st.phase !== 'hold';
+  return (
+    <Pressable
+      onPress={() => {
+        tap();
+        onPress();
+      }}
+      style={[styles.zoneChipWrap, style]}
+    >
+      <Glass radius={R.md} style={[styles.zoneChip, me?.inHot && { borderColor: HOT }]}>
+        <Icon name="fire" size={18} color={HOT} />
+        <View>
+          <Text style={[styles.zoneChipTitle, me?.inHot && { color: HOT }]} numberOfLines={1}>
+            {!me
+              ? 'Хотзона'
+              : me.inHot
+                ? 'В хотзоне'
+                : `${formatDistance(me.toHotEdge)} · ${Math.round(me.bearing)}°`}
+          </Text>
+          <Text style={[styles.zoneChipSub, alert && { color: C.warn }]} numberOfLines={1}>
+            {phaseText(st, now)}
+          </Text>
+        </View>
+      </Glass>
+    </Pressable>
   );
 }
 
@@ -237,7 +282,8 @@ export default function MapScreen() {
     label: string,
     scope: MarkerScope,
     target: OrderTarget,
-    waveMin: number | null
+    waveMin: number | null,
+    zone: HotZone | null
   ) => {
     if (!addAt) return;
     try {
@@ -246,7 +292,7 @@ export default function MapScreen() {
       else {
         // The first group leaves when the respawn is set up.
         const wave = waveMin ? { every: waveMin * 60_000, start: Date.now() } : undefined;
-        await session.addMarker({ kind, ...at, ...(wave ? { wave } : {}) }, scope);
+        await session.addMarker({ kind, ...at, ...(wave ? { wave } : {}), ...(zone ? { zone } : {}) }, scope);
       }
       setAddAt(null);
       if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
@@ -297,6 +343,11 @@ export default function MapScreen() {
     selection?.type === 'marker' ? side.mapMarkers.find((m) => m.id === selection.id) : undefined;
   const selectedMember =
     selection?.type === 'member' ? side.mapMembers.find((m) => m.id === selection.id) : undefined;
+
+  // The control zone in play: the newest one, if several.
+  const zoneMarker = side.mapMarkers
+    .filter((m) => m.zone)
+    .reduce<TacMarker | undefined>((a, m) => (!a || m.createdAt > a.createdAt ? m : a), undefined);
 
   const banner =
     status === 'denied'
@@ -476,6 +527,19 @@ export default function MapScreen() {
         </Glass>
       )}
 
+      {zoneMarker && !drawing && (
+        <ZoneChip
+          marker={zoneMarker}
+          self={position}
+          style={
+            landscape
+              ? { top: insets.top + 60, left: 12 + insets.left }
+              : { top: pillTop + 64 + (banner ? 56 : 0), left: 12 + insets.left }
+          }
+          onPress={() => setSelection({ type: 'marker', id: zoneMarker.id })}
+        />
+      )}
+
       {drawing && (
         <DrawBar
           drawing={drawing}
@@ -620,6 +684,14 @@ export default function MapScreen() {
             marker={selectedMarker}
             canEdit={session.canCommand && (!selectedMarker.teamId || selectedMarker.teamId === session.teamId)}
             onSet={(w) => session.setMarkerWave(selectedMarker, w)}
+          />
+        )}
+        {selectedMarker?.zone && (
+          <ZonePanel
+            marker={selectedMarker}
+            self={position}
+            canEdit={session.canCommand && (!selectedMarker.teamId || selectedMarker.teamId === session.teamId)}
+            onSet={(z) => session.setMarkerZone(selectedMarker, z)}
           />
         )}
         {selectedMarker && canVote(selectedMarker) && (
@@ -887,6 +959,18 @@ const styles = StyleSheet.create({
     borderLeftColor: C.danger,
   },
   bannerText: { color: C.text, fontSize: 13, fontFamily: F.regular, flex: 1 },
+  zoneChipWrap: { position: 'absolute' },
+  zoneChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 7,
+    paddingHorizontal: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 90, 31, 0.45)',
+  },
+  zoneChipTitle: { color: C.text, fontSize: 14, fontFamily: F.semibold },
+  zoneChipSub: { color: C.dim, fontSize: 11, fontFamily: F.mono },
 
   actions: { position: 'absolute', right: 12, alignItems: 'center', gap: 14 },
   fab: {

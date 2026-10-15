@@ -15,6 +15,7 @@ import { distanceMeters } from '../lib/geo';
 import { isOrder, isVotedOut } from '../lib/markerKinds';
 import { mergeMeshMarkers, mergeMeshMembers } from '../lib/mesh';
 import { DEFAULT_ROLE, DEFAULT_TEAM_COLOR, roleOf, type RoleId } from '../lib/roles';
+import { hotState, type HotZone } from '../lib/hotzone';
 import { nextWave, type Wave } from '../lib/waves';
 import { KEYS, loadJson, newId, saveJson } from '../lib/storage';
 import type { LatLng, Member, MemberStatus, SelfPosition, TacMarker, Team } from '../lib/types';
@@ -98,13 +99,14 @@ type Session = {
 
   /** Team markers (when in a team) plus this device's personal ones. */
   markers: TacMarker[];
-  addMarker: (m: Pick<TacMarker, 'kind' | 'label' | 'lat' | 'lng' | 'points' | 'color' | 'wave'>, scope: MarkerScope) => Promise<void>;
+  addMarker: (m: Pick<TacMarker, 'kind' | 'label' | 'lat' | 'lng' | 'points' | 'color' | 'wave' | 'zone'>, scope: MarkerScope) => Promise<void>;
   deleteMarker: (m: TacMarker) => Promise<void>;
   /** Own markers only (personal, or placed by me in the squad). */
   moveMarker: (m: TacMarker, p: LatLng) => Promise<void>;
   voteMarker: (m: TacMarker, vote: 'stale' | 'done') => Promise<void>;
   /** Commanders: departure schedule on a respawn / dead-zone marker (null clears). */
   setMarkerWave: (m: TacMarker, wave: Wave | null) => Promise<void>;
+  setMarkerZone: (m: TacMarker, zone: HotZone) => Promise<void>;
   /**
    * Deletes every team marker `allowed` accepts, hidden ones (voted out, commanders-only)
    * included. Returns how many were deleted.
@@ -322,7 +324,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const relayedMarks = useRef(new Set<string>());
   useEffect(() => {
     if (!teamId || !uid) return;
-    const todo = shownTeamMarkers.filter((m) => m.viaMesh && m.createdBy !== uid && !relayedMarks.current.has(m.id));
+    const todo = shownTeamMarkers.filter((m) => m.viaMesh && m.createdBy !== uid && m.kind !== 'hotzone' && !relayedMarks.current.has(m.id));
     if (!todo.length) return;
     const t = setTimeout(() => {
       for (const m of todo) {
@@ -585,7 +587,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const { sendMark, sendVote } = mesh;
 
   const addMarker = useCallback(
-    async (m: Pick<TacMarker, 'kind' | 'label' | 'lat' | 'lng' | 'points' | 'color' | 'wave'>, scope: MarkerScope) => {
+    async (m: Pick<TacMarker, 'kind' | 'label' | 'lat' | 'lng' | 'points' | 'color' | 'wave' | 'zone'>, scope: MarkerScope) => {
       const base = { ...m, label: m.label.trim().slice(0, 40), createdByName: callsign || 'Я' };
       if (scope === 'team' && teamId && uid) {
         const id = teams.newMarkerId(teamId);
@@ -638,6 +640,15 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       if (!teamId || m.personal) return;
       sendMark({ ...m, wave });
       fireAndReport(teams.setMarkerWave(teamId, m.id, wave), 'Расписание респа не сохранилось');
+    },
+    [teamId, sendMark, fireAndReport]
+  );
+
+  const setMarkerZone = useCallback(
+    async (m: TacMarker, zone: HotZone) => {
+      if (!teamId || m.personal) return;
+      sendMark({ ...m, zone });
+      fireAndReport(teams.setMarkerZone(teamId, m.id, zone), 'Настройки зоны не сохранились');
     },
     [teamId, sendMark, fireAndReport]
   );
@@ -708,6 +719,27 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     return () => clearInterval(t);
   }, [status, waveMarkers]);
 
+  // Hot zone: buzz when its next spot appears on the map and when it starts sliding.
+  const zoneMarkers = useMemo(() => markers.filter((m) => m.zone), [markers]);
+  useEffect(() => {
+    if (!zoneMarkers.length) return;
+    const seen = new Map<string, string>();
+    const t = setInterval(() => {
+      const now = Date.now();
+      for (const m of zoneMarkers) {
+        const st = hotState(m, m.zone!, now);
+        const key = `${st.k}:${st.phase}`;
+        const prev = seen.get(m.id);
+        seen.set(m.id, key);
+        // Only on a change seen live, not when the app opens mid-phase.
+        if (prev == null || prev === key) continue;
+        if (st.phase === 'warn') Vibration.vibrate([0, 400, 200, 400]);
+        else if (st.phase === 'move') Vibration.vibrate([0, 200, 120, 200, 120, 200]);
+      }
+    }, 1000);
+    return () => clearInterval(t);
+  }, [zoneMarkers]);
+
   const value = useMemo<Session>(
     () => ({
       ready,
@@ -757,6 +789,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       moveMarker,
       voteMarker,
       setMarkerWave,
+      setMarkerZone,
       clearTeamMarkers,
     }),
     [
@@ -805,6 +838,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       moveMarker,
       voteMarker,
       setMarkerWave,
+      setMarkerZone,
       clearTeamMarkers,
     ]
   );

@@ -518,3 +518,33 @@ describe('respawn waves', () => {
     await assertFails(wave('alice', 'resp', { every: 900000, start: 1, extra: true }));
   });
 });
+
+describe('control zone / hot zone', () => {
+  const zone = { r: 400, hot: 75, every: 600000, start: 1_700_000_000_000, seed: 42 };
+  beforeEach(async () => {
+    await createTeam(as('alice'), 'alice');
+    await join(as('bob'), 'bob');
+    await setDoc(doc(as('alice'), 'teams', TEAM, 'markers', 'hz'), { ...marker('alice', 'hotzone'), zone });
+    await setDoc(doc(as('bob'), 'teams', TEAM, 'markers', 'foe'), marker('bob', 'enemy'));
+  });
+  const setZone = (by: string, id: string, z: unknown) => updateDoc(doc(as(by), 'teams', TEAM, 'markers', id), { zone: z });
+
+  test('only commanders place a zone, and only with valid settings', async () => {
+    await assertFails(setDoc(doc(as('bob'), 'teams', TEAM, 'markers', 'z1'), { ...marker('bob', 'hotzone'), zone }));
+    await assertFails(setDoc(doc(as('alice'), 'teams', TEAM, 'markers', 'z2'), marker('alice', 'hotzone')));
+    await assertFails(setDoc(doc(as('alice'), 'teams', TEAM, 'markers', 'z3'), { ...marker('alice', 'hotzone'), zone: { ...zone, hot: 900 } }));
+    await assertFails(setDoc(doc(as('alice'), 'teams', TEAM, 'markers', 'z4'), { ...marker('alice', 'enemy'), zone }));
+  });
+  test('commanders change the settings; fighters and other markers cannot', async () => {
+    await assertSucceeds(setZone('alice', 'hz', { ...zone, r: 600, seed: 7 }));
+    await assertFails(setZone('bob', 'hz', { ...zone, r: 600 }));
+    await assertFails(setZone('alice', 'foe', zone));
+    await assertFails(setZone('alice', 'hz', { ...zone, every: 1000 }));
+    await assertFails(setZone('alice', 'hz', null));
+  });
+  test('a zone is never relayed over Bluetooth', async () => {
+    await assertFails(
+      setDoc(doc(as('bob'), 'teams', TEAM, 'markers', 'z5'), { ...marker('alice', 'hotzone'), zone, relayedBy: 'bob' })
+    );
+  });
+});

@@ -8,6 +8,7 @@
  */
 import { roleOf, type RoleId } from './roles';
 import type { LatLng, Member, MemberStatus, TacMarker } from './types';
+import { validZone, type HotZone } from './hotzone';
 import { validWave, type Wave } from './waves';
 
 export const MESH_SERVICE_ID = 'com.f31.grimmap.mesh';
@@ -52,6 +53,7 @@ export type MeshMark = {
   points?: LatLng[];
   color?: string;
   wave?: Wave | null;
+  zone?: HotZone | null;
   deleted?: boolean;
 };
 
@@ -101,7 +103,8 @@ export function validEnvelope(e: unknown): e is Envelope {
           (Array.isArray(b.points) &&
             b.points.length <= 40 &&
             b.points.every((p) => p && typeof p === 'object' && isLatLng(p as Record<string, unknown>)))) &&
-        (b.wave == null || validWave(b.wave))
+        (b.wave == null || validWave(b.wave)) &&
+        (b.zone == null || validZone(b.zone))
       );
     case 'vote':
       return isStr(b.markId, 120) && isStr(b.uid, 128) && (b.vote === 'stale' || b.vote === 'done');
@@ -141,6 +144,7 @@ export function toMeshMark(m: TacMarker, deleted = false): MeshMark {
     ...(m.points ? { points: m.points } : {}),
     ...(m.color ? { color: m.color } : {}),
     ...(m.wave !== undefined ? { wave: m.wave } : {}),
+    ...(m.zone !== undefined ? { zone: m.zone } : {}),
     ...(deleted ? { deleted: true } : {}),
   };
 }
@@ -247,8 +251,14 @@ export function mergeMeshMarkers(
     if (cur) {
       // A move or a new respawn schedule heard over the mesh; the server may lag.
       const wave = b.wave !== undefined ? b.wave : cur.wave;
-      if (cur.lat !== b.lat || cur.lng !== b.lng || JSON.stringify(wave) !== JSON.stringify(cur.wave)) {
-        byId.set(b.id, { ...cur, lat: b.lat, lng: b.lng, wave });
+      const zone = b.zone !== undefined ? b.zone : cur.zone;
+      if (
+        cur.lat !== b.lat ||
+        cur.lng !== b.lng ||
+        JSON.stringify(wave) !== JSON.stringify(cur.wave) ||
+        JSON.stringify(zone) !== JSON.stringify(cur.zone)
+      ) {
+        byId.set(b.id, { ...cur, lat: b.lat, lng: b.lng, wave, zone });
       }
       continue;
     }
@@ -265,6 +275,7 @@ export function mergeMeshMarkers(
       points: b.points,
       color: b.color,
       wave: b.wave ?? null,
+      zone: b.zone ?? null,
       teamId,
       staleVotes: [],
       doneVotes: [],

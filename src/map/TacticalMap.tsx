@@ -178,9 +178,10 @@ export function TacticalMap(props: Props) {
         color: m.color ?? k.color,
         points: m.points,
         order: isOrder(m.kind),
-        admin: isAdminKind(m.kind),
+        admin: isAdminKind(m.kind) || m.kind === 'hotzone',
         movable: Boolean(isMovable?.(m)),
         wave: m.wave ?? null,
+        zone: m.zone ?? null,
         personal: Boolean(m.personal),
         time: formatClock(m.createdAt),
       };
