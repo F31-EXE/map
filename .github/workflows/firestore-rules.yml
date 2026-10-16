@@ -8,7 +8,7 @@ name: Firestore rules
 on:
   push:
     branches: [claude/friendly-pasteur-su6kfi, main]
-    paths: [firestore.rules, firebase.json, test/rules/**, .github/workflows/firestore-rules.yml]
+    paths: [firestore.rules, firebase.json, test/rules/**, scripts/deploy-rules.mjs, .github/workflows/firestore-rules.yml]
   workflow_dispatch:
 
 permissions:
@@ -47,5 +47,5 @@ jobs:
           fi
           key="$RUNNER_TEMP/sa.json"
           printf '%s' "$SERVICE_ACCOUNT" > "$key"
-          GOOGLE_APPLICATION_CREDENTIALS="$key" npx -y ${{ env.FIREBASE_TOOLS }} deploy --only firestore:rules --project airsoftcalendar --non-interactive
-          rm -f "$key"
+          trap 'rm -f "$key"' EXIT
+          GOOGLE_APPLICATION_CREDENTIALS="$key" node scripts/deploy-rules.mjs airsoftcalendar
