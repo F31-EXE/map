@@ -79,3 +79,4 @@ Docs: https://docs.expo.dev/eas/index.md
 - First launch: `src/ui/RegionPrompt.tsx` offers once (AsyncStorage `regionPrompted`, only with no downloaded areas) to download the current base layer 1–10 km around the first GPS fix (`boundsAround` in tiles.ts).
 - `TacticalMap` queues imperative commands (setView, fitPoints…) until the page posts `ready`; the page posts its initial `viewChanged` right after `ready`.
 - On web, React Native's `Alert.alert` is a no-op; `src/ui/webAlert.ts` (installed in the root layout) maps it to `window.alert`/`confirm`.
+- Android APK without EAS cloud quota: `.github/workflows/android-apk.yml` (manual run) does `eas build --local` on a GitHub runner with the `EXPO_TOKEN` secret (keystore still from Expo) and uploads the APK as an artifact.

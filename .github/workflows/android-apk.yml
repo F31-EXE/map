@@ -1,0 +1,54 @@
+# Builds the Android APK (EAS "preview" profile) on a GitHub runner with
+# `eas build --local`, so it doesn't count against the Expo plan's cloud builds.
+# Signing still uses the keystore stored on Expo, so the APK installs over earlier ones.
+# One-time setup: expo.dev → Account settings → Access tokens → Create; paste the token
+# into the repository secret EXPO_TOKEN (Settings → Secrets and variables → Actions).
+# Run: Actions → Android APK → Run workflow; the APK is under the run's Artifacts.
+name: Android APK
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-apk
+  cancel-in-progress: true
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - name: Check the Expo token
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          if [ -z "$EXPO_TOKEN" ]; then
+            echo "::error::Add the EXPO_TOKEN repository secret first (see the top of this file)."
+            exit 1
+          fi
+      - run: npm ci
+      - name: Build APK
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: npx -y eas-cli@latest build --platform android --profile preview --local --non-interactive --output "$RUNNER_TEMP/grimmap.apk"
+      - name: Name the APK after the app version
+        run: |
+          v=$(node -p "require('./app.json').expo.version")
+          mkdir -p out && cp "$RUNNER_TEMP/grimmap.apk" "out/GrimMap-$v.apk"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: GrimMap-apk
+          path: out/*.apk
+          retention-days: 30
