@@ -1,0 +1,51 @@
+# Tests firestore.rules in the emulator and publishes them to Firebase (airsoftcalendar).
+# One-time setup: Firebase console → Project settings → Service accounts → Generate new
+# private key; paste the whole JSON file into the repository secret
+# FIREBASE_SERVICE_ACCOUNT (Settings → Secrets and variables → Actions).
+# Without the secret the rules are still tested, just not published.
+name: Firestore rules
+
+on:
+  push:
+    branches: [claude/friendly-pasteur-su6kfi, main]
+    paths: [firestore.rules, firebase.json, test/rules/**, .github/workflows/firestore-rules.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: firestore-rules
+  cancel-in-progress: false
+
+env:
+  FIREBASE_TOOLS: firebase-tools@15.34.0
+
+jobs:
+  rules:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - run: npm ci
+      - name: Test rules in the emulator
+        run: npx -y ${{ env.FIREBASE_TOOLS }} emulators:exec --only firestore --project demo-tacmap "node --experimental-strip-types --import ./scripts/ts-resolve.mjs --test test/rules/*.spec.ts"
+      - name: Publish rules
+        env:
+          SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: |
+          if [ -z "$SERVICE_ACCOUNT" ]; then
+            echo "::warning::FIREBASE_SERVICE_ACCOUNT secret is not set: rules were tested but not published."
+            exit 0
+          fi
+          key="$RUNNER_TEMP/sa.json"
+          printf '%s' "$SERVICE_ACCOUNT" > "$key"
+          GOOGLE_APPLICATION_CREDENTIALS="$key" npx -y ${{ env.FIREBASE_TOOLS }} deploy --only firestore:rules --project airsoftcalendar --non-interactive
+          rm -f "$key"
