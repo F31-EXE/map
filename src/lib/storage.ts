@@ -20,6 +20,9 @@ export const KEYS = {
   keepAwake: 'tacmap.keepAwake',
   offlineAreas: 'tacmap.offlineAreas',
   background: 'tacmap.background',
+  pendingTracks: 'tacmap.pendingTracks',
+  /** Active recording of the squad as last seen, for starting up without a connection. */
+  recording: 'tacmap.recording',
 } as const;
 
 export async function loadJson<T>(key: string, fallback: T): Promise<T> {

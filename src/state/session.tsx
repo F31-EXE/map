@@ -16,6 +16,15 @@ import { isOrder, isVotedOut } from '../lib/markerKinds';
 import { mergeMeshMarkers, mergeMeshMembers } from '../lib/mesh';
 import { DEFAULT_ROLE, DEFAULT_TEAM_COLOR, roleOf, type RoleId } from '../lib/roles';
 import { hotState, type HotZone } from '../lib/hotzone';
+import {
+  addPoint,
+  dropSent,
+  nextBatch,
+  pendingKey,
+  shouldSample,
+  type PendingTracks,
+} from '../lib/trackBuffer';
+import type { TrackPoint } from '../lib/tracks';
 import { nextWave, type Wave } from '../lib/waves';
 import { KEYS, loadJson, newId, saveJson } from '../lib/storage';
 import type { LatLng, Member, MemberStatus, SelfPosition, TacMarker, Team } from '../lib/types';
@@ -518,11 +527,87 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     [teamId]
   );
 
+  // Active recording: from the team doc, or as last seen when the app starts without
+  // a connection (the team doc then never arrives).
+  const [savedRecording, setSavedRecording] = useState<{ teamId: string; recId: string | null } | null>(null);
+  useEffect(() => {
+    loadJson<{ teamId: string; recId: string | null } | null>(KEYS.recording, null).then(setSavedRecording);
+  }, []);
+  const liveRecording = team && team.id === teamId ? (team.recordingId ?? null) : undefined;
+  useEffect(() => {
+    if (teamId && liveRecording !== undefined) {
+      saveJson(KEYS.recording, { teamId, recId: liveRecording }).catch(() => {});
+    }
+  }, [teamId, liveRecording]);
   // Read inside reportPosition without re-creating it on every change.
   const recordingRef = useRef<string | null>(null);
-  recordingRef.current = team?.recordingId ?? null;
+  recordingRef.current =
+    liveRecording !== undefined ? liveRecording : savedRecording?.teamId === teamId ? savedRecording.recId : null;
   const profileRef = useRef({ callsign, role });
   profileRef.current = { callsign: callsign || 'Боец', role };
+
+  // Movement recording: points are queued on the phone and uploaded in batches, so a
+  // route walked without a connection is sent once the phone is back online.
+  const pendingTracks = useRef<PendingTracks>({});
+  const lastTrackPoint = useRef<TrackPoint | null>(null);
+  const uploadingTracks = useRef(false);
+  const savePendingTracks = useCallback(() => {
+    saveJson(KEYS.pendingTracks, pendingTracks.current).catch(() => {});
+  }, []);
+  const flushTracks = useRef<() => void>(() => {});
+  flushTracks.current = () => {
+    if (uploadingTracks.current || !uid) return;
+    const batch = nextBatch(pendingTracks.current);
+    if (!batch) return;
+    const [tid, recId] = batch.key.split('/');
+    uploadingTracks.current = true;
+    // Offline this only settles once the connection is back; points keep queuing meanwhile.
+    recordings
+      .appendTrackPoints(tid, recId, uid, profileRef.current, batch.points)
+      .then(() => {
+        pendingTracks.current = dropSent(pendingTracks.current, batch.key, batch.points);
+        savePendingTracks();
+        uploadingTracks.current = false;
+        flushTracks.current();
+      })
+      .catch((e: { code?: string }) => {
+        uploadingTracks.current = false;
+        // No longer allowed (left the squad): these points can't go anywhere.
+        if (e?.code === 'permission-denied') {
+          pendingTracks.current = dropSent(pendingTracks.current, batch.key, batch.points);
+          savePendingTracks();
+        }
+      });
+  };
+  useEffect(() => {
+    loadJson<PendingTracks>(KEYS.pendingTracks, {}).then((stored) => {
+      // Points recorded before the load finished go after the stored ones.
+      const merged: PendingTracks = { ...stored };
+      for (const [k, list] of Object.entries(pendingTracks.current)) merged[k] = [...(merged[k] ?? []), ...list];
+      pendingTracks.current = merged;
+      flushTracks.current();
+    });
+    const t = setInterval(() => flushTracks.current(), 20_000);
+    return () => clearInterval(t);
+  }, []);
+  // Signed in (or back from a refused upload): send what's waiting.
+  useEffect(() => {
+    if (uid) flushTracks.current();
+  }, [uid]);
+  const recordTrack = useCallback(
+    (p: SelfPosition) => {
+      const recId = recordingRef.current;
+      if (!recId || !teamId) return;
+      const now = Date.now();
+      if (!shouldSample(lastTrackPoint.current, p, now)) return;
+      const point = { lat: p.lat, lng: p.lng, t: now };
+      lastTrackPoint.current = point;
+      pendingTracks.current = addPoint(pendingTracks.current, pendingKey(teamId, recId), point);
+      savePendingTracks();
+      flushTracks.current();
+    },
+    [teamId, savePendingTracks]
+  );
 
   // Throttled position publishing.
   const lastSent = useRef<{ at: number; pos: SelfPosition } | null>(null);
@@ -532,6 +617,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const reportPosition = useCallback(
     (p: SelfPosition) => {
       if (shareLocation) reportSelf(p);
+      if (shareLocation) recordTrack(p);
       if (!teamId || !uid || !shareLocation || inFlight.current) return;
       const last = lastSent.current;
       const now = Date.now();
@@ -541,23 +627,17 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         if (elapsed < HEARTBEAT_MS && distanceMeters(last.pos, p) < MIN_MOVE_M) return;
       }
       inFlight.current = true;
-      const recId = recordingRef.current;
       teams
         .publishPosition(teamId, uid, p)
         .then(() => {
           lastSent.current = { at: now, pos: p };
-          if (recId) {
-            recordings
-              .appendTrackPoint(teamId, recId, uid, profileRef.current, { lat: p.lat, lng: p.lng, t: now })
-              .catch(() => {});
-          }
         })
         .catch(() => {})
         .finally(() => {
           inFlight.current = false;
         });
     },
-    [teamId, uid, shareLocation, reportSelf]
+    [teamId, uid, shareLocation, reportSelf, recordTrack]
   );
 
   useEffect(() => {

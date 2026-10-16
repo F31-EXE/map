@@ -51,17 +51,25 @@ export async function stopRecording(teamId: string, recId: string): Promise<void
   await batch.commit();
 }
 
-/** Appends one point to the caller's track (called alongside position publishing). */
-export async function appendTrackPoint(
+/**
+ * Appends points to the caller's track. Points are queued on the phone first
+ * (src/lib/trackBuffer.ts), so this may upload a whole stretch recorded offline;
+ * arrayUnion makes re-sending the same points harmless.
+ */
+export async function appendTrackPoints(
   teamId: string,
   recId: string,
   uid: string,
   who: { callsign: string; role: RoleId },
-  p: TrackPoint
+  points: TrackPoint[]
 ): Promise<void> {
   await setDoc(
     doc(firestore(), 'teams', teamId, 'recordings', recId, 'tracks', uid),
-    { callsign: who.callsign, role: who.role, points: arrayUnion({ lat: p.lat, lng: p.lng, t: p.t }) },
+    {
+      callsign: who.callsign.slice(0, 24),
+      role: who.role,
+      points: arrayUnion(...points.map((p) => ({ lat: p.lat, lng: p.lng, t: p.t }))),
+    },
     { merge: true }
   );
 }
