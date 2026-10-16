@@ -34,7 +34,13 @@
         "POST_NOTIFICATIONS",
         "RECEIVE_BOOT_COMPLETED"
       ],
-      "versionCode": 24
+      "versionCode": 25,
+      "blockedPermissions": [
+        "android.permission.SYSTEM_ALERT_WINDOW",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.RECORD_AUDIO"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
