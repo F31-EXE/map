@@ -36,6 +36,13 @@ export const TILE_LAYERS: Record<string, TileLayerDef> = {
 
 export type Bounds = { south: number; west: number; north: number; east: number };
 
+/** Square around a point, `km` from the center to each side. */
+export function boundsAround(p: { lat: number; lng: number }, km: number): Bounds {
+  const dLat = (km * 1000) / 111_320;
+  const dLng = (km * 1000) / (111_320 * Math.cos((p.lat * Math.PI) / 180));
+  return { south: p.lat - dLat, north: p.lat + dLat, west: p.lng - dLng, east: p.lng + dLng };
+}
+
 const E = 0.0818191908426; // WGS84 eccentricity, as in Leaflet's EPSG:3395
 
 /** Tile column/row containing a point at zoom z. */

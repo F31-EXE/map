@@ -27,6 +27,7 @@ import { useSession, type MarkerScope } from '../../state/session';
 import { useSide, type OrderTarget } from '../../state/side';
 import { AddMarkerModal } from '../../ui/AddMarkerModal';
 import { OfflineSheet } from '../../ui/OfflineSheet';
+import { RegionPrompt } from '../../ui/RegionPrompt';
 import { WavePanel } from '../../ui/WavePanel';
 import { HOT, phaseText, selfInZone, useNow, ZonePanel } from '../../ui/ZonePanel';
 import { Avatar, Button, Glass, GlassButton, Icon, RoleIcon, Sheet, tap, type IconName } from '../../ui/components';
@@ -660,6 +661,7 @@ export default function MapScreen() {
       </Glass>
 
       <OfflineSheet visible={offlineSheet} onClose={() => setOfflineSheet(false)} layer={baseLayer} view={view} />
+      <RegionPrompt position={position} layer={baseLayer} />
 
       <AddMarkerModal
         at={addAt}

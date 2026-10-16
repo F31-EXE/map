@@ -1177,7 +1177,7 @@
   map.on('zoomend', updateLod);
   updateLod();
 
-  map.on('moveend', function () {
+  function postView() {
     var c = map.getCenter();
     var b = map.getBounds();
     post('viewChanged', {
@@ -1186,7 +1186,8 @@
       zoom: map.getZoom(),
       bounds: { south: b.getSouth(), west: b.getWest(), north: b.getNorth(), east: b.getEast() },
     });
-  });
+  }
+  map.on('moveend', postView);
 
   // ---------------------------------------------------------------------------
   // Bridge
@@ -1402,4 +1403,6 @@
 
   setBaseLayer('yandex-sat');
   post('ready', {});
+  // The crosshair readout and the "+" button need a view before the first pan.
+  postView();
 })();

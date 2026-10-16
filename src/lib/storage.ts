@@ -21,6 +21,8 @@ export const KEYS = {
   offlineAreas: 'tacmap.offlineAreas',
   background: 'tacmap.background',
   pendingTracks: 'tacmap.pendingTracks',
+  /** The first-launch "download your area" offer was shown. */
+  regionPrompted: 'tacmap.regionPrompted',
   /** Active recording of the squad as last seen, for starting up without a connection. */
   recording: 'tacmap.recording',
 } as const;

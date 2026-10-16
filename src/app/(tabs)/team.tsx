@@ -437,10 +437,9 @@ export default function TeamScreen() {
             icon="logout"
             busy={busy === 'leave'}
             onPress={() =>
-              Alert.alert('Покинуть команду?', 'Вернуться можно по коду.', [
-                { text: 'Отмена', style: 'cancel' },
-                { text: 'Покинуть', style: 'destructive', onPress: () => run('leave', s.leaveTeam) },
-              ])
+              confirmDestructive('Покинуть команду?', 'Вернуться можно по коду.', 'Покинуть', () =>
+                run('leave', s.leaveTeam)
+              )
             }
           />
         </>

@@ -398,9 +398,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     async (dataUri: string | null) => {
       setAvatarState(dataUri);
       await saveJson(KEYS.avatar, dataUri);
-      if (teamId && uid) await teams.setAvatar(teamId, uid, dataUri);
+      if (teamId && uid) fireAndReport(teams.setAvatar(teamId, uid, dataUri), 'Аватар не сохранился');
     },
-    [teamId, uid]
+    [teamId, uid, fireAndReport]
   );
 
   // Publish the locally chosen avatar when joining a team (or after reinstalling).
@@ -427,12 +427,13 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
   const leaveTeam = useCallback(async () => {
     if (teamId && uid) {
-      try {
-        await teams.setAvatar(teamId, uid, null);
-        await teams.leaveTeam(teamId, uid);
-      } catch {
-        // Already removed — still forget the team locally.
-      }
+      // Offline these settle only on reconnect; don't keep the button spinning meanwhile.
+      // Already removed — fine, the team is forgotten locally either way.
+      const tid = teamId;
+      teams
+        .setAvatar(tid, uid, null)
+        .then(() => teams.leaveTeam(tid, uid))
+        .catch(() => {});
     }
     await persistTeamId(null);
   }, [teamId, uid, persistTeamId]);
@@ -648,7 +649,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     async (v: boolean) => {
       setShareLocationState(v);
       await saveJson(KEYS.shareLocation, v);
-      if (!v && teamId && uid) await teams.clearPosition(teamId, uid).catch(() => {});
+      if (!v && teamId && uid) teams.clearPosition(teamId, uid).catch(() => {});
       lastSent.current = null;
     },
     [teamId, uid]
@@ -774,9 +775,11 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   // Waiting at the respawn: buzz a minute before the next departure and again when it
   // leaves, so a "dead" fighter doesn't have to stare at the countdown.
   const waveMarkers = useMemo(() => markers.filter((m) => m.wave), [markers]);
+  // Kept across marker updates so a departure doesn't buzz twice.
+  const firedWaves = useRef(new Set<string>());
   useEffect(() => {
     if (status !== 'dead' || !waveMarkers.length) return;
-    const fired = new Set<string>();
+    const fired = firedWaves.current;
     const t = setInterval(() => {
       const now = Date.now();
       for (const m of waveMarkers) {
@@ -801,9 +804,11 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
   // Hot zone: buzz when its next spot appears on the map and when it starts sliding.
   const zoneMarkers = useMemo(() => markers.filter((m) => m.zone), [markers]);
+  // Kept across marker updates, which would otherwise hide a phase change.
+  const zonePhases = useRef(new Map<string, string>());
   useEffect(() => {
     if (!zoneMarkers.length) return;
-    const seen = new Map<string, string>();
+    const seen = zonePhases.current;
     const t = setInterval(() => {
       const now = Date.now();
       for (const m of zoneMarkers) {

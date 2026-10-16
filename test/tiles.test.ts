@@ -45,3 +45,12 @@ test('a big area splits into parts that each fit and together cover it', () => {
   assert.ok(sum >= countTiles(b, 18, 18, '3395'));
   assert.deepEqual(splitToFit(b, 12, 13, '3395', 20_000), [b], 'small enough stays whole');
 });
+
+test('square around a point is km on each side of it', async () => {
+  const { boundsAround } = await import('../src/lib/tiles.ts');
+  const { distanceMeters } = await import('../src/lib/geo.ts');
+  const p = { lat: 55.75, lng: 37.62 };
+  const b = boundsAround(p, 3);
+  assert.ok(Math.abs(distanceMeters(p, { lat: b.north, lng: p.lng }) - 3000) < 5);
+  assert.ok(Math.abs(distanceMeters(p, { lat: p.lat, lng: b.east }) - 3000) < 5);
+});

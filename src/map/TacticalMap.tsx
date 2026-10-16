@@ -99,15 +99,27 @@ export function TacticalMap(props: Props) {
     frameRef.current?.post(msg);
   }, []);
 
+  // Commands from the screen (e.g. "center on the first GPS fix") can come before the
+  // page has loaded; hold them until it's ready instead of dropping them.
+  const readyRef = useRef(false);
+  const queued = useRef<Outgoing[]>([]);
+  const command = useCallback(
+    (msg: Outgoing) => {
+      if (readyRef.current) send(msg);
+      else queued.current.push(msg);
+    },
+    [send]
+  );
+
   useImperativeHandle(
     props.ref,
     () => ({
-      centerOnSelf: () => send({ type: 'centerOnSelf' }),
-      fitOverlay: (id) => send({ type: 'fitOverlay', payload: { id } }),
-      setView: (p, zoom) => send({ type: 'setView', payload: { ...p, zoom } }),
-      fitPoints: (points) => send({ type: 'fitPoints', payload: points }),
+      centerOnSelf: () => command({ type: 'centerOnSelf' }),
+      fitOverlay: (id) => command({ type: 'fitOverlay', payload: { id } }),
+      setView: (p, zoom) => command({ type: 'setView', payload: { ...p, zoom } }),
+      fitPoints: (points) => command({ type: 'fitPoints', payload: points }),
     }),
-    [send]
+    [command]
   );
 
   // Re-evaluate member staleness even when nothing else changes.
@@ -117,6 +129,7 @@ export function TacticalMap(props: Props) {
   }, []);
 
   const ready = generation > 0;
+  readyRef.current = ready;
 
   useEffect(() => {
     if (ready) send({ type: 'setBaseLayer', payload: { id: props.baseLayer } });
@@ -240,6 +253,14 @@ export function TacticalMap(props: Props) {
       pendingFocus.current = focusOverlay;
     }
   }, [ready, generation, focusOverlay, onFocusHandled, send]);
+
+  // Declared after the other effects so it runs after them, so layers and markers are in place first.
+  useEffect(() => {
+    if (!ready || !queued.current.length) return;
+    const list = queued.current;
+    queued.current = [];
+    list.forEach(send);
+  }, [ready, generation, send]);
 
   const onMessage = useCallback(
     (data: string) => {

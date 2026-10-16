@@ -10,6 +10,7 @@ import { STALE_MS } from '../map/TacticalMap';
 import { useSession } from '../state/session';
 import { useSide, type Squad } from '../state/side';
 import { Button, Card, Eyebrow, Icon, KeyboardScroll, tap } from '../ui/components';
+import { confirmDestructive } from '../ui/confirm';
 import { QrCode } from '../ui/QrCode';
 import { C, F, R } from '../ui/theme';
 
@@ -152,10 +153,9 @@ export default function SideScreen() {
                 setEditing(null);
               }}
               onDrop={() =>
-                Alert.alert('Отключить отряд от стороны?', sq.name, [
-                  { text: 'Отмена', style: 'cancel' },
-                  { text: 'Отключить', style: 'destructive', onPress: () => run(() => side.dropSquad(sq.id)) },
-                ])
+                confirmDestructive('Отключить отряд от стороны?', sq.name, 'Отключить', () =>
+                  run(() => side.dropSquad(sq.id))
+                )
               }
             />
           ))
@@ -167,13 +167,11 @@ export default function SideScreen() {
         kind="danger"
         icon="flag-off-outline"
         onPress={() =>
-          Alert.alert(
+          confirmDestructive(
             'Сложить полномочия?',
             'Сторона перестанет отображаться у вас. Отряды останутся привязанными к ней.',
-            [
-              { text: 'Отмена', style: 'cancel' },
-              { text: 'Сложить', style: 'destructive', onPress: () => run(side.resign) },
-            ]
+            'Сложить',
+            () => run(side.resign)
           )
         }
       />

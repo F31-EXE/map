@@ -16,8 +16,10 @@ import { SessionProvider } from '../state/session';
 import { ChatProvider } from '../state/chat';
 import { SideProvider } from '../state/side';
 import { C, F } from '../ui/theme';
+import { installWebAlert } from '../ui/webAlert';
 
 installErrorRecorder();
+installWebAlert();
 
 // Keep the logo up until the fonts are in, so the app doesn't flash blank.
 SplashScreen.preventAutoHideAsync().catch(() => {});

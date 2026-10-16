@@ -2,7 +2,7 @@
   "expo": {
     "name": "GrimMap",
     "slug": "tacmap",
-    "version": "1.9.1",
+    "version": "1.9.2",
     "orientation": "default",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
@@ -34,7 +34,7 @@
         "POST_NOTIFICATIONS",
         "RECEIVE_BOOT_COMPLETED"
       ],
-      "versionCode": 22
+      "versionCode": 23
     },
     "web": {
       "favicon": "./assets/favicon.png"

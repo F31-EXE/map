@@ -140,10 +140,7 @@ export default function MapsScreen() {
             hitSlop={8}
             style={styles.delete}
             onPress={() =>
-              Alert.alert('Удалить карту?', item.name, [
-                { text: 'Отмена', style: 'cancel' },
-                { text: 'Удалить', style: 'destructive', onPress: () => removeOverlay(item.id) },
-              ])
+              confirmDestructive('Удалить карту?', item.name, 'Удалить', () => removeOverlay(item.id))
             }
           >
             <Icon name="trash-can-outline" size={20} color={C.dim} />

@@ -61,7 +61,9 @@ export function planDownload(layer: string, b: Bounds, minZoom: number, maxZoom:
   const mb = Math.ceil((tiles * def.avgKb) / 1024);
   let freeMb: number | null = null;
   try {
-    freeMb = Math.floor(Paths.availableDiskSpace / 1048576);
+    const free = Paths.availableDiskSpace;
+    // 0 means "couldn't tell" (e.g. the browser), not a full phone.
+    if (free > 0) freeMb = Math.floor(free / 1048576);
   } catch {
     // Not available (web).
   }
