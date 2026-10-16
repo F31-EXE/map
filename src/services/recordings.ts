@@ -1,6 +1,7 @@
 import {
   arrayUnion,
   collection,
+  deleteDoc,
   doc,
   getDocs,
   onSnapshot,
@@ -103,4 +104,10 @@ export async function loadTracks(teamId: string, recId: string): Promise<Track[]
       points: Array.isArray(v.points) ? v.points : [],
     };
   });
+}
+
+/** Deletes the user's own track from every recording of the squad ("delete my data"). */
+export async function deleteMyTracks(teamId: string, uid: string): Promise<void> {
+  const recs = await getDocs(collection(firestore(), 'teams', teamId, 'recordings'));
+  await Promise.all(recs.docs.map((r) => deleteDoc(doc(r.ref, 'tracks', uid))));
 }

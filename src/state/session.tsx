@@ -1,4 +1,5 @@
-import { onAuthStateChanged, signInAnonymously } from 'firebase/auth';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { deleteUser, onAuthStateChanged, signInAnonymously } from 'firebase/auth';
 import {
   createContext,
   useCallback,
@@ -34,6 +35,7 @@ import { Alert, Vibration } from 'react-native';
 import { signalNewOrder } from '../services/orderAlert';
 import { startBackgroundLocation, stopBackgroundLocation } from '../services/backgroundLocation';
 import { checkSafeMode } from '../services/crashGuard';
+import { deleteMyMessages } from '../services/chat';
 import * as recordings from '../services/recordings';
 import * as teams from '../services/teams';
 
@@ -121,6 +123,11 @@ type Session = {
    * included. Returns how many were deleted.
    */
   clearTeamMarkers: (allowed: (m: TacMarker) => boolean) => Promise<{ deleted: number; failed: number }>;
+  /**
+   * Erases the user's data: their chat messages, tracks and avatar in the squad, their
+   * membership, the anonymous account, and the profile kept on the phone. Needs internet.
+   */
+  deleteMyData: () => Promise<void>;
 };
 
 const Ctx = createContext<Session | null>(null);
@@ -759,6 +766,48 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     [teamId, shownTeamMarkers, sendMark]
   );
 
+  const deleteMyData = useCallback(async () => {
+    const offline = () => new Error('Нет связи с сервером. Подключитесь к интернету и повторите.');
+    const withTimeout = <T,>(p: Promise<T>) =>
+      Promise.race([p, new Promise<never>((_, reject) => setTimeout(() => reject(offline()), 20_000))]);
+    if (teamId && uid) {
+      // While still a member: the rules only let squad members delete their own things.
+      await withTimeout(
+        Promise.all([
+          deleteMyMessages(teamId, uid),
+          recordings.deleteMyTracks(teamId, uid),
+          teams.setAvatar(teamId, uid, null),
+        ])
+      );
+      await withTimeout(teams.leaveTeam(teamId, uid));
+    }
+    if (isFirebaseConfigured) {
+      const user = firebaseAuth().currentUser;
+      // A fresh anonymous account is created right after (onAuthStateChanged).
+      if (user) await withTimeout(deleteUser(user));
+    }
+    // Profile and game data on the phone; downloaded maps and display settings stay.
+    const keep = new Set<string>([
+      KEYS.offlineAreas,
+      KEYS.overlays,
+      KEYS.baseLayer,
+      KEYS.regionPrompted,
+      KEYS.grid,
+      KEYS.keepAwake,
+      KEYS.orderSound,
+    ]);
+    const all = await AsyncStorage.getAllKeys();
+    await AsyncStorage.multiRemove(all.filter((k) => !keep.has(k)));
+    pendingTracks.current = {};
+    setTeamId(null);
+    setCallsignState('');
+    setAvatarState(null);
+    setRoleState(DEFAULT_ROLE);
+    setStatusState('alive');
+    setPersonalMarkers([]);
+    setSavedRecording(null);
+  }, [teamId, uid]);
+
   const markers = useMemo(
     () =>
       inTeam
@@ -876,6 +925,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       setMarkerWave,
       setMarkerZone,
       clearTeamMarkers,
+      deleteMyData,
     }),
     [
       ready,
@@ -925,6 +975,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       setMarkerWave,
       setMarkerZone,
       clearTeamMarkers,
+      deleteMyData,
     ]
   );
 

@@ -1,15 +1,18 @@
 import Constants from 'expo-constants';
 import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { Alert, Pressable, Share, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
+import { Alert, Linking, Pressable, Share, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 
 import { pickAvatar } from '../../services/avatar';
 import { BACKGROUND_SUPPORTED } from '../../services/backgroundLocation';
 import { clearLastError, lastError } from '../../services/crashGuard';
 import { useSession } from '../../state/session';
 import { Avatar, Button, Card, Eyebrow, Icon, KeyboardScroll, tap, type IconName } from '../../ui/components';
+import { confirmDestructive } from '../../ui/confirm';
 import { RolePicker } from '../../ui/RolePicker';
 import { C, F, R } from '../../ui/theme';
+
+const PRIVACY_URL = 'https://f31-exe.github.io/map/privacy.html';
 
 export default function SettingsScreen() {
   const s = useSession();
@@ -198,6 +201,37 @@ export default function SettingsScreen() {
           </View>
         </Card>
       )}
+
+      <Card style={{ gap: 0, paddingVertical: 6 }}>
+        <LinkRow
+          icon="shield-lock-outline"
+          title="Политика конфиденциальности"
+          sub="Какие данные хранятся и где"
+          onPress={() => Linking.openURL(PRIVACY_URL).catch(() => {})}
+        />
+        {s.firebaseEnabled && (
+          <>
+            <View style={styles.divider} />
+            <LinkRow
+              icon="account-remove-outline"
+              title="Удалить мои данные"
+              sub="Сообщения, маршруты, аватар, участие в отряде и профиль"
+              onPress={() =>
+                confirmDestructive(
+                  'Удалить мои данные?',
+                  'Ваши сообщения в чате, маршруты записей и аватар будут удалены, вы выйдете из отряда, а позывной и личные метки сотрутся с телефона. Скачанные карты останутся. Отменить нельзя.',
+                  'Удалить',
+                  () =>
+                    run(async () => {
+                      await s.deleteMyData();
+                      Alert.alert('Данные удалены', 'Можно начать заново: задайте позывной и вступите в отряд.');
+                    })
+                )
+              }
+            />
+          </>
+        )}
+      </Card>
 
       <Text style={styles.version}>
         GRIMMAP v{Constants.expoConfig?.version ?? '—'}

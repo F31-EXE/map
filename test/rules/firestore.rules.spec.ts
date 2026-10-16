@@ -379,6 +379,13 @@ describe('movement recording', () => {
     await assertFails(track('bob', 'alice'));
     await assertFails(track('mallory'));
   });
+  test('a fighter deletes only their own track', async () => {
+    await start('alice');
+    await track('bob');
+    await track('alice');
+    await assertFails(deleteDoc(doc(as('bob'), 'teams', TEAM, 'recordings', 'r1', 'tracks', 'alice')));
+    await assertSucceeds(deleteDoc(doc(as('bob'), 'teams', TEAM, 'recordings', 'r1', 'tracks', 'bob')));
+  });
   test('only commanders stop it', async () => {
     await start('alice');
     await assertFails(updateDoc(doc(as('bob'), 'teams', TEAM, 'recordings', 'r1'), { endedAt: 1 }));

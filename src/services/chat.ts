@@ -1,6 +1,8 @@
 import {
   collection,
+  deleteDoc,
   doc,
+  getDocs,
   limit,
   onSnapshot,
   orderBy,
@@ -8,6 +10,7 @@ import {
   serverTimestamp,
   setDoc,
   Timestamp,
+  where,
   type Unsubscribe,
 } from 'firebase/firestore';
 
@@ -96,4 +99,10 @@ export async function relayMessage(
     createdAt: Timestamp.fromMillis(m.t),
     relayedBy,
   });
+}
+
+/** Deletes every message the user wrote in the squad chat ("delete my data"). */
+export async function deleteMyMessages(teamId: string, uid: string): Promise<void> {
+  const s = await getDocs(query(collection(firestore(), 'teams', teamId, 'messages'), where('uid', '==', uid)));
+  await Promise.all(s.docs.map((d) => deleteDoc(d.ref)));
 }

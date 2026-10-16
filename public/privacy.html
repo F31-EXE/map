@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GrimMap — политика конфиденциальности</title>
+<style>
+  :root { color-scheme: dark light; --bg: #050a07; --fg: #e3efe6; --dim: #9db3a4; --accent: #8ef07a; }
+  @media (prefers-color-scheme: light) { :root { --bg: #f6faf7; --fg: #13201a; --dim: #4b5d52; --accent: #2f8a1f; } }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.6 -apple-system, system-ui, Segoe UI, Roboto, sans-serif; }
+  main { max-width: 720px; margin: 0 auto; padding: 32px 16px 64px; }
+  h1 { font-size: 28px; margin: 0 0 4px; }
+  h2 { font-size: 19px; margin: 28px 0 8px; color: var(--accent); }
+  p, li { color: var(--fg); }
+  .dim { color: var(--dim); }
+  ul { padding-left: 20px; }
+</style>
+</head>
+<body>
+<main>
+<h1>Политика конфиденциальности GrimMap</h1>
+<p class="dim">Действует с 16 октября 2026 года.</p>
+
+<p>GrimMap — тактическая карта для страйкбола: бойцы отряда видят друг друга, метки, приказы и чат. Ниже — какие данные приложение использует, зачем и как их удалить.</p>
+
+<h2>Учётная запись</h2>
+<p>Регистрации нет. При первом запуске создаётся анонимный идентификатор (Firebase Authentication). Имя, e-mail и телефон не запрашиваются.</p>
+
+<h2>Что хранится на сервере</h2>
+<p>Только когда вы состоите в отряде, на серверах Google Firebase (Cloud Firestore) хранятся:</p>
+<ul>
+  <li>позывной, роль и игровой статус (жив / убит / АФК), которые вы указали;</li>
+  <li>аватар, если вы его выбрали;</li>
+  <li>ваша последняя позиция — пока включена «Передавать позицию»;</li>
+  <li>метки, стрелки и приказы, которые вы поставили, и голоса за них;</li>
+  <li>сообщения в чате отряда;</li>
+  <li>маршрут передвижения — только во время записи игры, которую запустил командир.</li>
+</ul>
+<p>Эти данные видят только участники вашего отряда и, если отряд присоединён к стороне, её командир.</p>
+
+<h2>Геопозиция</h2>
+<p>Позиция нужна, чтобы показать вас на карте и передать отряду. В фоне (с погасшим экраном) она используется только если вы включили «Работа в фоне»; при этом в шторке висит уведомление. Передачу позиции можно выключить в настройках.</p>
+
+<h2>Связь без интернета (Android)</h2>
+<p>Если включена «Связь без интернета», позиции, метки и сообщения передаются напрямую между телефонами бойцов вашего отряда по Bluetooth и Wi-Fi Direct и не уходят третьим лицам.</p>
+
+<h2>Что остаётся только на телефоне</h2>
+<p>Личные метки, скачанные карты, импортированные карты полигона и настройки хранятся только на устройстве. Текст последней ошибки приложения тоже хранится только на телефоне и отправляется разработчику, лишь если вы сами нажмёте «Отправить».</p>
+
+<h2>Картографические сервисы</h2>
+<p>Подложки карты загружаются с серверов Яндекс Карт, Esri, OpenStreetMap и OpenTopoMap. Эти сервисы получают ваш IP-адрес и запрашиваемые фрагменты карты, как при обычном просмотре карт в браузере.</p>
+
+<h2>Чего нет</h2>
+<ul>
+  <li>рекламы и рекламных идентификаторов;</li>
+  <li>аналитики и отслеживания между приложениями;</li>
+  <li>продажи или передачи данных третьим лицам.</li>
+</ul>
+
+<h2>Сроки хранения и удаление</h2>
+<p>Данные хранятся, пока вы состоите в отряде, или пока их не удалит отряд. Удалить всё о себе можно в приложении: <b>Настройки → Удалить мои данные</b>. Будут удалены ваши сообщения, маршруты, аватар, участие в отряде и анонимная учётная запись; позывной и личные метки сотрутся с телефона. Метки, которые вы ставили для отряда, остаются у отряда как часть общей карты, их может удалить командир.</p>
+
+<h2>Дети</h2>
+<p>Приложение предназначено для участников страйкбольных игр и не ориентировано на детей младше 13 лет.</p>
+
+<h2>Связь</h2>
+<p>Вопросы о данных и запросы на удаление: <a href="https://github.com/F31-EXE/map/issues" style="color:var(--accent)">github.com/F31-EXE/map/issues</a>.</p>
+
+<h2>Изменения</h2>
+<p>При изменении политики новая версия публикуется на этой странице с новой датой.</p>
+
+<hr>
+<h2 lang="en">Summary in English</h2>
+<p lang="en">GrimMap uses an anonymous account (no name, e-mail or phone). While you are in a squad, your callsign, role, status, optional avatar, last position (while sharing is on), the markers and chat messages you post, and your track during a recorded game are stored in Google Firebase and visible only to your squad (and its side commander). Location is used to show you on the map and share it with your squad; in the background only if you turn on background mode. There are no ads, no analytics, no tracking and no data sales. Map tiles come from Yandex, Esri, OpenStreetMap and OpenTopoMap. Delete your data any time in Settings → “Удалить мои данные”.</p>
+</main>
+</body>
+</html>

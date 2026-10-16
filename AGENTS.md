@@ -80,3 +80,4 @@ Docs: https://docs.expo.dev/eas/index.md
 - `TacticalMap` queues imperative commands (setView, fitPoints…) until the page posts `ready`; the page posts its initial `viewChanged` right after `ready`.
 - On web, React Native's `Alert.alert` is a no-op; `src/ui/webAlert.ts` (installed in the root layout) maps it to `window.alert`/`confirm`.
 - Android APK without EAS cloud quota: `.github/workflows/android-apk.yml` (manual run) does `eas build --local` on a GitHub runner with the `EXPO_TOKEN` secret (keystore still from Expo) and uploads the APK as an artifact.
+- App Store: privacy policy and support pages are `public/privacy.html` / `public/support.html` (published with the web build at f31-exe.github.io/map/); store listing texts in `store/app-store.md`. Settings → «Удалить мои данные» (`deleteMyData` in session.tsx) deletes own messages, tracks (rules allow deleting your own track), avatar, membership and the anonymous account (Apple 5.1.1(v)).
