@@ -12,6 +12,7 @@ import {
   doc,
   getDoc,
   getDocs,
+  increment,
   query,
   setDoc,
   updateDoc,
@@ -553,5 +554,32 @@ describe('control zone / hot zone', () => {
     await assertFails(
       setDoc(doc(as('bob'), 'teams', TEAM, 'markers', 'z5'), { ...marker('alice', 'hotzone'), zone, relayedBy: 'bob' })
     );
+  });
+});
+
+describe('team game', () => {
+  beforeEach(async () => {
+    await createTeam(as('alice'), 'alice');
+    await join(as('bob'), 'bob');
+    await join(as('carol'), 'carol');
+    await updateDoc(doc(as('alice'), 'teams', TEAM, 'members', 'bob'), { canCommand: true });
+  });
+  const factions = [{ name: 'Красные', color: '#FF4D4D' }, { name: 'Синие', color: '#3D9BFF' }];
+
+  test('only the creator sets up teams', async () => {
+    await assertSucceeds(updateDoc(doc(as('alice'), 'teams', TEAM), { factions }));
+    await assertFails(updateDoc(doc(as('bob'), 'teams', TEAM), { factions: factions.slice(0, 1) }));
+    await assertFails(updateDoc(doc(as('alice'), 'teams', TEAM), { factions: Array(7).fill(factions[0]) }));
+    await assertSucceeds(updateDoc(doc(as('alice'), 'teams', TEAM), { factions: null }));
+  });
+  test('only the creator puts players into teams; nobody switches their own team', async () => {
+    await assertSucceeds(updateDoc(doc(as('alice'), 'teams', TEAM, 'members', 'carol'), { faction: 1 }));
+    await assertFails(updateDoc(doc(as('bob'), 'teams', TEAM, 'members', 'carol'), { faction: 0 }));
+    await assertFails(updateDoc(doc(as('carol'), 'teams', TEAM, 'members', 'carol'), { faction: 0 }));
+    await assertFails(updateDoc(doc(as('alice'), 'teams', TEAM, 'members', 'carol'), { faction: 6 }));
+  });
+  test('players add their own points', async () => {
+    await assertSucceeds(updateDoc(doc(as('carol'), 'teams', TEAM, 'members', 'carol'), { 'pts.z1': increment(2) }));
+    await assertFails(updateDoc(doc(as('carol'), 'teams', TEAM, 'members', 'bob'), { 'pts.z1': increment(2) }));
   });
 });

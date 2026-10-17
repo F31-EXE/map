@@ -419,11 +419,30 @@
     return st.phase === 'move' ? 'ХОТЗОНА · едет ' + t : st.phase === 'warn' ? 'ХОТЗОНА · сдвиг ' + t : 'ХОТЗОНА';
   }
 
-  function drawZone(g, now) {
+  // Redrawing a vector layer in the middle of a zoom animation draws it at the wrong
+  // place (the renderer is still CSS-scaled), so the hot zone jumped while zooming.
+  var zooming = false;
+  map.on('zoomstart', function () {
+    zooming = true;
+  });
+  map.on('zoomend', function () {
+    zooming = false;
+    var now = Date.now();
+    Object.keys(zoneShapes).forEach(function (id) {
+      drawZone(zoneShapes[id], now, true);
+    });
+  });
+
+  function drawZone(g, now, force) {
     var m = g._zoneMarker;
     var st = hzState(m.lat, m.lng, m.zone, now);
-    g._hot.setLatLng([st.lat, st.lng]);
-    g._label.setLatLng([st.lat, st.lng]);
+    // Only move the circle when it actually moved (it holds still most of the time).
+    var at = st.lat.toFixed(7) + ',' + st.lng.toFixed(7);
+    if (force || at !== g._at) {
+      g._at = at;
+      g._hot.setLatLng([st.lat, st.lng]);
+      g._label.setLatLng([st.lat, st.lng]);
+    }
     var key = st.phase + ':' + st.k;
     if (key !== g._phaseKey) {
       g._phaseKey = key;
@@ -438,7 +457,7 @@
         g.removeLayer(g._path);
       }
     }
-    if (st.next && st.phase === 'move') g._path.setLatLngs([[st.lat, st.lng], [st.next.lat, st.next.lng]]);
+    if (st.next && st.phase === 'move' && !zooming) g._path.setLatLngs([[st.lat, st.lng], [st.next.lat, st.next.lng]]);
     var el = g._label.getElement();
     if (el) {
       el.classList.toggle('hz-warn', st.phase === 'warn');
@@ -488,7 +507,7 @@
     });
     g._key = JSON.stringify(m.zone);
     g._phaseKey = null;
-    drawZone(g, Date.now());
+    drawZone(g, Date.now(), true);
     return g;
   }
 
@@ -496,7 +515,8 @@
     syncKeyed(zoneShapes, zonesLayer, list, buildZone, function (g, m) {
       var key = JSON.stringify(m.zone);
       g._zoneMarker = m;
-      g._area.setLatLng([m.lat, m.lng]);
+      var c = g._area.getLatLng();
+      if (c.lat !== m.lat || c.lng !== m.lng) g._area.setLatLng([m.lat, m.lng]);
       if (key !== g._key) {
         g._key = key;
         g._area.setRadius(m.zone.r);
@@ -504,11 +524,12 @@
         g._next.setRadius(m.zone.hot);
         g._phaseKey = null;
       }
-      drawZone(g, Date.now());
+      if (!zooming) drawZone(g, Date.now(), true);
     });
   }
 
   setInterval(function () {
+    if (zooming) return;
     var now = Date.now();
     Object.keys(zoneShapes).forEach(function (id) {
       drawZone(zoneShapes[id], now);

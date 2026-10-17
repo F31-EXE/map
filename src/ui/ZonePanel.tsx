@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { bearingDegrees, distanceMeters, formatDistance } from '../lib/geo';
@@ -118,11 +118,14 @@ export function ZonePanel({
   self,
   canEdit,
   onSet,
+  score,
 }: {
   marker: TacMarker;
   self: LatLng | null;
   canEdit: boolean;
   onSet: (z: HotZone) => void;
+  /** Team game score for this zone. */
+  score?: ReactNode;
 }) {
   const now = useNow();
   const zone = marker.zone;
@@ -146,6 +149,12 @@ export function ZonePanel({
           <Text style={styles.sub}>{phaseText(st, now)}</Text>
         </View>
       </View>
+      {score && (
+        <View style={{ gap: 6 }}>
+          <Eyebrow>Счёт · 1 очко в минуту в зоне, 2 в хотзоне</Eyebrow>
+          {score}
+        </View>
+      )}
       {me && (
         <Text style={[styles.me, me.inHot && { color: HOT }]}>
           {me.inHot

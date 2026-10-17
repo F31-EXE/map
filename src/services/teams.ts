@@ -5,6 +5,7 @@ import {
   doc,
   getDoc,
   getDocFromServer,
+  increment,
   onSnapshot,
   serverTimestamp,
   setDoc,
@@ -17,6 +18,7 @@ import {
 import { firestore } from '../lib/firebase';
 import { normalizeCode } from '../lib/invite';
 import { DEFAULT_TEAM_COLOR, roleOf, type RoleId } from '../lib/roles';
+import { MAX_FACTIONS, type Faction } from '../lib/game';
 import { validZone, type HotZone } from '../lib/hotzone';
 import { validWave, type Wave } from '../lib/waves';
 import type { Member, MemberStatus, PinnedMessage, SelfPosition, TacMarker, Team } from '../lib/types';
@@ -201,6 +203,7 @@ export function subscribeTeam(
               sideId: typeof d.sideId === 'string' ? d.sideId : null,
               recordingId: typeof d.recordingId === 'string' ? d.recordingId : null,
               pinned: d.pinned && typeof d.pinned.text === 'string' ? (d.pinned as PinnedMessage) : null,
+              factions: parseFactions(d.factions),
             }
           : null
       );
@@ -230,6 +233,8 @@ export function subscribeMembers(
             lng: typeof v.lng === 'number' ? v.lng : null,
             heading: typeof v.heading === 'number' ? v.heading : null,
             updatedAt: millis(v.updatedAt),
+            faction: Number.isInteger(v.faction) ? v.faction : null,
+            pts: parsePoints(v.pts),
           };
         })
       );
@@ -267,12 +272,45 @@ export function subscribeTeamMarkers(
             color: typeof v.color === 'string' ? v.color : undefined,
             wave: validWave(v.wave) ? { every: v.wave.every, start: v.wave.start } : null,
             zone: validZone(v.zone) ? pickZone(v.zone) : null,
+            faction: Number.isInteger(v.faction) ? v.faction : null,
           };
         })
       );
     },
     onError
   );
+}
+
+function parseFactions(f: unknown): Faction[] | undefined {
+  if (!Array.isArray(f) || !f.length) return undefined;
+  return f
+    .slice(0, MAX_FACTIONS)
+    .map((x, i) => ({
+      name: typeof x?.name === 'string' ? x.name.slice(0, 24) : `Команда ${i + 1}`,
+      color: typeof x?.color === 'string' && /^#[0-9A-Fa-f]{6}$/.test(x.color) ? x.color : '#C3CCC6',
+    }));
+}
+
+function parsePoints(p: unknown): Record<string, number> | undefined {
+  if (!p || typeof p !== 'object') return undefined;
+  const out: Record<string, number> = {};
+  for (const [k, v] of Object.entries(p as Record<string, unknown>)) if (typeof v === 'number' && Number.isFinite(v)) out[k] = v;
+  return out;
+}
+
+/** Game master: split players into teams (null ends the team game). */
+export async function setFactions(teamId: string, factions: Faction[] | null): Promise<void> {
+  await updateDoc(doc(firestore(), 'teams', teamId), { factions });
+}
+
+/** Game master: put a player into a team (null: no team). */
+export async function setMemberFaction(teamId: string, memberId: string, faction: number | null): Promise<void> {
+  await updateDoc(doc(firestore(), 'teams', teamId, 'members', memberId), { faction });
+}
+
+/** A player adds the points they earned this minute in a control zone. */
+export async function addPoints(teamId: string, uid: string, zoneId: string, n: number): Promise<void> {
+  await updateDoc(doc(firestore(), 'teams', teamId, 'members', uid), { [`pts.${zoneId}`]: increment(n) });
 }
 
 function pickZone(z: HotZone): HotZone {
@@ -286,16 +324,17 @@ export function newMarkerId(teamId: string): string {
 
 export async function addTeamMarker(
   teamId: string,
-  m: Pick<TacMarker, 'kind' | 'label' | 'lat' | 'lng' | 'createdBy' | 'createdByName' | 'points' | 'color' | 'wave' | 'zone'>,
+  m: Pick<TacMarker, 'kind' | 'label' | 'lat' | 'lng' | 'createdBy' | 'createdByName' | 'points' | 'color' | 'wave' | 'zone' | 'faction'>,
   id = newMarkerId(teamId)
 ): Promise<void> {
-  const { points, color, wave, zone, ...rest } = m;
+  const { points, color, wave, zone, faction, ...rest } = m;
   await setDoc(doc(firestore(), 'teams', teamId, 'markers', id), {
     ...rest,
     ...(points ? { points } : {}),
     ...(color ? { color } : {}),
     ...(wave ? { wave } : {}),
     ...(zone ? { zone } : {}),
+    ...(faction != null ? { faction } : {}),
     createdAt: serverTimestamp(),
   });
 }
@@ -315,6 +354,7 @@ export async function relayTeamMarker(teamId: string, relayedBy: string, m: TacM
     createdByName: m.createdByName,
     ...(m.points ? { points: m.points } : {}),
     ...(m.color ? { color: m.color } : {}),
+    ...(m.faction != null ? { faction: m.faction } : {}),
     createdAt: Timestamp.fromMillis(m.createdAt),
     relayedBy,
   });

@@ -29,7 +29,9 @@ import { AddMarkerModal } from '../../ui/AddMarkerModal';
 import { OfflineSheet } from '../../ui/OfflineSheet';
 import { RegionPrompt } from '../../ui/RegionPrompt';
 import { WavePanel } from '../../ui/WavePanel';
+import { ScoreRow } from '../../ui/GameCard';
 import { HOT, phaseText, selfInZone, useNow, ZonePanel } from '../../ui/ZonePanel';
+import type { GameState } from '../../state/session';
 import { Avatar, Button, Glass, GlassButton, Icon, RoleIcon, Sheet, tap, type IconName } from '../../ui/components';
 import { InfoSheet, type Stat } from '../../ui/InfoSheet';
 import { C, eyebrow, F, R } from '../../ui/theme';
@@ -118,11 +120,13 @@ function KindBadge({ kind }: { kind: MarkerKind }) {
 function ZoneChip({
   marker,
   self,
+  game,
   style,
   onPress,
 }: {
   marker: TacMarker;
   self: SelfPosition | null;
+  game: GameState;
   style: object;
   onPress: () => void;
 }) {
@@ -151,6 +155,11 @@ function ZoneChip({
           <Text style={[styles.zoneChipSub, alert && { color: C.warn }]} numberOfLines={1}>
             {phaseText(st, now)}
           </Text>
+          {game.zoneId === marker.id && (
+            <View style={{ marginTop: 5 }}>
+              <ScoreRow game={game} compact />
+            </View>
+          )}
         </View>
       </Glass>
     </Pressable>
@@ -532,6 +541,7 @@ export default function MapScreen() {
         <ZoneChip
           marker={zoneMarker}
           self={position}
+          game={session.game}
           style={
             landscape
               ? { top: insets.top + 60, left: 12 + insets.left }
@@ -694,6 +704,7 @@ export default function MapScreen() {
             self={position}
             canEdit={session.canCommand && (!selectedMarker.teamId || selectedMarker.teamId === session.teamId)}
             onSet={(z) => session.setMarkerZone(selectedMarker, z)}
+            score={selectedMarker.id === session.game.zoneId ? <ScoreRow game={session.game} /> : null}
           />
         )}
         {selectedMarker && canVote(selectedMarker) && (

@@ -37,7 +37,7 @@ export type MeshPos = {
   accuracy: number | null;
 };
 
-export type MeshChat = { id: string; uid: string; callsign: string; text: string };
+export type MeshChat = { id: string; uid: string; callsign: string; text: string; faction?: number | null };
 
 /** A squad marker as it stands now; `deleted` is a tombstone. */
 export type MeshMark = {
@@ -54,6 +54,7 @@ export type MeshMark = {
   color?: string;
   wave?: Wave | null;
   zone?: HotZone | null;
+  faction?: number | null;
   deleted?: boolean;
 };
 
@@ -145,6 +146,7 @@ export function toMeshMark(m: TacMarker, deleted = false): MeshMark {
     ...(m.color ? { color: m.color } : {}),
     ...(m.wave !== undefined ? { wave: m.wave } : {}),
     ...(m.zone !== undefined ? { zone: m.zone } : {}),
+    ...(m.faction != null ? { faction: m.faction } : {}),
     ...(deleted ? { deleted: true } : {}),
   };
 }
@@ -276,6 +278,7 @@ export function mergeMeshMarkers(
       color: b.color,
       wave: b.wave ?? null,
       zone: b.zone ?? null,
+      faction: Number.isInteger(b.faction) ? b.faction : null,
       teamId,
       staleVotes: [],
       doneVotes: [],

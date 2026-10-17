@@ -16,6 +16,15 @@ import { distanceMeters } from '../lib/geo';
 import { isOrder, isVotedOut } from '../lib/markerKinds';
 import { mergeMeshMarkers, mergeMeshMembers } from '../lib/mesh';
 import { DEFAULT_ROLE, DEFAULT_TEAM_COLOR, roleOf, type RoleId } from '../lib/roles';
+import {
+  defaultFactions,
+  pointsAt,
+  scoreMinute,
+  teamScores,
+  validFaction,
+  visibleTo,
+  type Faction,
+} from '../lib/game';
 import { hotState, type HotZone } from '../lib/hotzone';
 import {
   addPoint,
@@ -128,6 +137,24 @@ type Session = {
    * membership, the anonymous account, and the profile kept on the phone. Needs internet.
    */
   deleteMyData: () => Promise<void>;
+
+  /** Team game run by the squad creator (game master). */
+  game: GameState;
+  /** Game master: number of teams (0 ends the team game). */
+  setFactionCount: (n: number) => Promise<void>;
+  /** Game master: put a player into a team (null: none). */
+  setMemberFaction: (memberId: string, faction: number | null) => Promise<void>;
+};
+
+export type GameState = {
+  on: boolean;
+  /** The squad creator: sees every team and the overall score. */
+  isMaster: boolean;
+  factions: Faction[];
+  myFaction: number | null;
+  /** Current control zone (newest `hotzone` marker) and the teams' points in it. */
+  zoneId: string | null;
+  scores: number[];
 };
 
 const Ctx = createContext<Session | null>(null);
@@ -307,6 +334,14 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const canCommand = inTeam && (isOwner || Boolean(me?.canCommand));
   canCommandRef.current = canCommand;
 
+  // Team game: players see only their own team; the creator runs the game and sees all.
+  const factions = useMemo(() => team?.factions ?? [], [team?.factions]);
+  const gameOn = inTeam && factions.length > 0;
+  // The creator runs the game (and may start it, so this holds before it is on too).
+  const isMaster = inTeam && isOwner;
+  const myFaction = gameOn && validFaction(me?.faction, factions.length) ? (me!.faction as number) : null;
+  const viewer = useMemo(() => ({ gameOn, isMaster, faction: myFaction }), [gameOn, isMaster, myFaction]);
+
   const mesh = useMesh({
     teamId,
     uid,
@@ -322,9 +357,18 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     },
   });
   // Positions and statuses heard over Bluetooth fill in while the server is out of reach.
-  const shownMembers = useMemo(
+  const allMembers = useMemo(
     () => (mesh.positions.length ? mergeMeshMembers(members, mesh.positions) : members),
     [members, mesh.positions]
+  );
+  const shownMembers = useMemo(
+    () =>
+      gameOn
+        ? allMembers
+            .filter((m) => m.id === uid || visibleTo(viewer, validFaction(m.faction, factions.length) ? m.faction : -1))
+            .map((m) => (validFaction(m.faction, factions.length) ? { ...m, color: factions[m.faction].color } : m))
+        : allMembers,
+    [allMembers, gameOn, viewer, factions, uid]
   );
   // Markers created, moved, deleted or voted on over Bluetooth, on top of the server's.
   const shownTeamMarkers = useMemo(
@@ -617,6 +661,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     [teamId, savePendingTracks]
   );
 
+  // Latest own fix, for team game scoring.
+  const lastFix = useRef<SelfPosition | null>(null);
   // Throttled position publishing.
   const lastSent = useRef<{ at: number; pos: SelfPosition } | null>(null);
   const inFlight = useRef(false);
@@ -624,6 +670,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const { reportSelf } = mesh;
   const reportPosition = useCallback(
     (p: SelfPosition) => {
+      lastFix.current = p;
       if (shareLocation) reportSelf(p);
       if (shareLocation) recordTrack(p);
       if (!teamId || !uid || !shareLocation || inFlight.current) return;
@@ -676,7 +723,13 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
   const addMarker = useCallback(
     async (m: Pick<TacMarker, 'kind' | 'label' | 'lat' | 'lng' | 'points' | 'color' | 'wave' | 'zone'>, scope: MarkerScope) => {
-      const base = { ...m, label: m.label.trim().slice(0, 40), createdByName: callsign || 'Я' };
+      const base = {
+        ...m,
+        label: m.label.trim().slice(0, 40),
+        createdByName: callsign || 'Я',
+        // A player's markers stay within their team; the master's are for everyone.
+        ...(gameOn && !isMaster && myFaction != null ? { faction: myFaction } : {}),
+      };
       if (scope === 'team' && teamId && uid) {
         const id = teams.newMarkerId(teamId);
         sendMark({ ...base, id, createdBy: uid, createdAt: Date.now(), teamId });
@@ -688,7 +741,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         ]);
       }
     },
-    [teamId, uid, callsign, personalMarkers, savePersonal, sendMark, fireAndReport]
+    [teamId, uid, callsign, personalMarkers, savePersonal, sendMark, fireAndReport, gameOn, isMaster, myFaction]
   );
 
   const deleteMarker = useCallback(
@@ -813,12 +866,15 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       inTeam
         ? [
             ...shownTeamMarkers.filter(
-              (m) => (m.audience !== 'commanders' || canCommand) && !isVotedOut(m, members.length)
+              (m) =>
+                (m.audience !== 'commanders' || canCommand) &&
+                !isVotedOut(m, members.length) &&
+                visibleTo(viewer, m.faction)
             ),
             ...personalMarkers,
           ]
         : personalMarkers,
-    [inTeam, shownTeamMarkers, personalMarkers, canCommand, members.length]
+    [inTeam, shownTeamMarkers, personalMarkers, canCommand, members.length, viewer]
   );
 
   // Waiting at the respawn: buzz a minute before the next departure and again when it
@@ -874,6 +930,67 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     return () => clearInterval(t);
   }, [zoneMarkers]);
 
+  // Team game scoring: the newest control zone counts; each phone adds its own player's
+  // points once a minute (2 in the hot zone, 1 in the control zone), from its last fix.
+  const gameZone = useMemo(
+    () =>
+      gameOn
+        ? shownTeamMarkers
+            .filter((m) => m.zone)
+            .reduce<TacMarker | null>((a, m) => (!a || m.createdAt > a.createdAt ? m : a), null)
+        : null,
+    [gameOn, shownTeamMarkers]
+  );
+  const scores = useMemo(
+    () => (gameZone ? teamScores(allMembers, gameZone.id, factions.length) : factions.map(() => 0)),
+    [gameZone, allMembers, factions]
+  );
+  const game = useMemo<GameState>(
+    () => ({ on: gameOn, isMaster, factions, myFaction, zoneId: gameZone?.id ?? null, scores }),
+    [gameOn, isMaster, factions, myFaction, gameZone, scores]
+  );
+  const scoredMinutes = useRef<Record<string, number> | null>(null);
+  useEffect(() => {
+    loadJson<Record<string, number>>(KEYS.zoneTicks, {}).then((v) => {
+      scoredMinutes.current = { ...v, ...(scoredMinutes.current ?? {}) };
+    });
+  }, []);
+  useEffect(() => {
+    if (!gameZone?.zone || myFaction == null || !teamId || !uid || status === 'dead') return;
+    const zone = gameZone.zone;
+    const t = setInterval(() => {
+      const seen = scoredMinutes.current;
+      if (!seen) return;
+      const now = Date.now();
+      const minute = scoreMinute(zone, now);
+      const last = seen[gameZone.id];
+      if (last != null && minute <= last) return;
+      seen[gameZone.id] = minute;
+      saveJson(KEYS.zoneTicks, seen).catch(() => {});
+      // The first look at a zone only starts the clock; points from the next minute on.
+      if (last == null || minute < 1) return;
+      const pos = lastFix.current;
+      // A player standing still gets no new fixes, so the last one stays valid for a while.
+      if (!pos || now - pos.timestamp > 10 * 60_000) return;
+      const n = pointsAt(pos, gameZone, zone, hotState(gameZone, zone, now));
+      if (n > 0) teams.addPoints(teamId, uid, gameZone.id, n).catch(() => {});
+    }, 5000);
+    return () => clearInterval(t);
+  }, [gameZone, myFaction, teamId, uid, status]);
+
+  const setFactionCount = useCallback(
+    async (n: number) => {
+      if (teamId) await teams.setFactions(teamId, n > 0 ? defaultFactions(n) : null);
+    },
+    [teamId]
+  );
+  const setMemberFaction = useCallback(
+    async (memberId: string, f: number | null) => {
+      if (teamId) fireAndReport(teams.setMemberFaction(teamId, memberId, f), 'Команда игрока не сохранилась');
+    },
+    [teamId, fireAndReport]
+  );
+
   const value = useMemo<Session>(
     () => ({
       ready,
@@ -889,7 +1006,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       avatars,
       teamId,
       team,
-      teamColor: team?.color ?? DEFAULT_TEAM_COLOR,
+      teamColor: myFaction != null ? factions[myFaction].color : (team?.color ?? DEFAULT_TEAM_COLOR),
       members: shownMembers,
       mesh,
       teamError,
@@ -926,6 +1043,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       setMarkerZone,
       clearTeamMarkers,
       deleteMyData,
+      game,
+      setFactionCount,
+      setMemberFaction,
     }),
     [
       ready,
@@ -940,6 +1060,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       avatars,
       teamId,
       team,
+      factions,
+      myFaction,
       shownMembers,
       mesh,
       teamError,
@@ -976,6 +1098,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       setMarkerZone,
       clearTeamMarkers,
       deleteMyData,
+      game,
+      setFactionCount,
+      setMemberFaction,
     ]
   );
 

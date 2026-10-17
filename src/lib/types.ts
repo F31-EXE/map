@@ -1,4 +1,5 @@
 import type { RoleId } from './roles';
+import type { Faction } from './game';
 import type { HotZone } from './hotzone';
 import type { Wave } from './waves';
 
@@ -23,6 +24,8 @@ export type Team = {
   recordingId?: string | null;
   /** Chat message pinned by a commander. */
   pinned?: PinnedMessage | null;
+  /** Team game: the teams players are split into (set by the creator as game master). */
+  factions?: Faction[];
 };
 
 export type PinnedMessage = { id: string; text: string; callsign: string; uid: string; at: number };
@@ -57,6 +60,10 @@ export type Member = {
   teamId?: string;
   /** Last position came over Bluetooth, not from the server. */
   viaMesh?: boolean;
+  /** Team game: index into the squad's `factions`. */
+  faction?: number | null;
+  /** Team game: points earned per control zone (marker id). */
+  pts?: Record<string, number>;
 };
 
 export type OrderKind = 'order-move' | 'order-attack' | 'order-defend';
@@ -107,6 +114,8 @@ export type TacMarker = {
   wave?: Wave | null;
   /** Control zone with a moving hot zone (`hotzone` markers), set by commanders. */
   zone?: HotZone | null;
+  /** Team game: placed by a player of this team, shown only to that team. */
+  faction?: number | null;
 };
 
 export type OverlayFormat = 'kml' | 'kmz' | 'gpx' | 'geojson';

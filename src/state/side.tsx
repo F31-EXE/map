@@ -170,7 +170,8 @@ export function SideProvider({ children }: { children: ReactNode }) {
     const own = teamId
       ? members.map((m) => ({
           ...m,
-          color: teamColor,
+          // Team game: players come colored by their team.
+          color: m.color ?? teamColor,
           leader: m.canCommand || m.id === team?.ownerId,
           teamId,
         }))

@@ -83,7 +83,13 @@ service cloud.firestore {
       return d.callsign is string
         && d.callsign.size() <= 24
         && (!('role' in d) || (d.role is string && d.role.size() <= 20))
-        && (!('status' in d) || d.status in ['alive', 'dead', 'afk']);
+        && (!('status' in d) || d.status in ['alive', 'dead', 'afk'])
+        && (!('faction' in d) || d.faction == null || (d.faction is int && d.faction >= 0 && d.faction < 6))
+        && (!('pts' in d) || (d.pts is map && d.pts.size() <= 50));
+    }
+    // Team game: up to six teams of { name, color } on the squad doc.
+    function validFactions(f) {
+      return f == null || (f is list && f.size() <= 6);
     }
     function validPinned(p) {
       return p == null
@@ -137,7 +143,8 @@ service cloud.firestore {
       // that side's code) or detach it; code and owner are fixed.
       allow update: if signedIn() && (
         (resource.data.ownerId == request.auth.uid
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'color', 'sideId', 'sideCode'])
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'color', 'sideId', 'sideCode', 'factions'])
+          && validFactions(request.resource.data.get('factions', null))
           && request.resource.data.name is string
           && request.resource.data.name.size() <= 40
           && (!('color' in request.resource.data) || validColor(request.resource.data.color))
@@ -166,12 +173,16 @@ service cloud.firestore {
         allow update: if signedIn() && (
           // Own profile and position.
           (uid == request.auth.uid
-            && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['joinCode', 'canCommand'])
+            && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['joinCode', 'canCommand', 'faction'])
             && validProfile(request.resource.data))
           // The creator grants or revokes command rights, and nothing else.
           || (isOwner(teamId)
             && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['canCommand'])
             && request.resource.data.canCommand is bool)
+          // The creator, as game master, puts players into teams.
+          || (isOwner(teamId)
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['faction'])
+            && validProfile(request.resource.data))
           // Commanders assign roles and set the status of anyone below them.
           || (canCommand(teamId)
             && rank(teamId, request.auth.uid) > rank(teamId, uid)

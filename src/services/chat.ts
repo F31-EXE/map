@@ -28,6 +28,8 @@ export type ChatMessage = {
   pending?: boolean;
   /** Heard over Bluetooth only, not (yet) on the server. */
   viaMesh?: boolean;
+  /** Team game: written by a player of this team, shown only to that team. */
+  faction?: number | null;
 };
 
 export const newMessageId = (uid: string) => `${uid.slice(0, 8)}-${newId()}`;
@@ -59,6 +61,7 @@ export function subscribeMessages(
               text: v.text ?? '',
               createdAt: v.createdAt instanceof Timestamp ? v.createdAt.toMillis() : Date.now(),
               pending: d.metadata.hasPendingWrites,
+              faction: Number.isInteger(v.faction) ? (v.faction as number) : null,
             };
           })
           .reverse()
@@ -72,12 +75,14 @@ export async function sendMessage(
   uid: string,
   callsign: string,
   text: string,
-  id = newMessageId(uid)
+  id = newMessageId(uid),
+  faction: number | null = null
 ): Promise<void> {
   await setDoc(doc(firestore(), 'teams', teamId, 'messages', id), {
     uid,
     callsign,
     text: text.trim().slice(0, MAX_MESSAGE),
+    ...(faction != null ? { faction } : {}),
     createdAt: serverTimestamp(),
   });
 }
@@ -90,12 +95,13 @@ export async function sendMessage(
 export async function relayMessage(
   teamId: string,
   relayedBy: string,
-  m: { id: string; uid: string; callsign: string; text: string; t: number }
+  m: { id: string; uid: string; callsign: string; text: string; t: number; faction?: number | null }
 ): Promise<void> {
   await setDoc(doc(firestore(), 'teams', teamId, 'messages', m.id), {
     uid: m.uid,
     callsign: m.callsign.slice(0, 24),
     text: m.text.trim().slice(0, MAX_MESSAGE),
+    ...(m.faction != null ? { faction: m.faction } : {}),
     createdAt: Timestamp.fromMillis(m.t),
     relayedBy,
   });
