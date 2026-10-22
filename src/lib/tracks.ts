@@ -3,8 +3,12 @@ import type { LatLng } from './types';
 
 export type TrackPoint = LatLng & { t: number };
 
-/** Gaps longer than this mean the phone was off or out of coverage: don't bridge them. */
-export const MAX_GAP_MS = 2 * 60_000;
+/**
+ * Gaps longer than this mean the phone was off or out of coverage: don't bridge them.
+ * Generous on purpose: with the screen off (no background mode) a phone may report only
+ * every few minutes, and a stricter limit used to leave the whole game blank.
+ */
+export const MAX_GAP_MS = 10 * 60_000;
 
 /**
  * Positions arrive irregularly: every few seconds while moving, every 30 s while
@@ -13,23 +17,21 @@ export const MAX_GAP_MS = 2 * 60_000;
  * player holding a spot for ten minutes weighs as much as ten minutes of walking.
  */
 export function resampleByTime(points: TrackPoint[], stepMs = 10_000): LatLng[] {
-  const pts = [...points].sort((a, b) => a.t - b.t);
   const out: LatLng[] = [];
-  if (!pts.length) return out;
-  // One clock for the whole track, so short segments don't each get a sample.
-  let next = pts[0].t;
-  for (let i = 0; i < pts.length - 1; i++) {
-    const a = pts[i];
-    const b = pts[i + 1];
-    const dt = b.t - a.t;
-    if (dt > MAX_GAP_MS) {
-      next = b.t;
-      continue;
+  for (const seg of splitSegments(points)) {
+    // Every stretch counts, even a lone point between long gaps.
+    let next = seg[0].t;
+    for (let i = 0; i < seg.length - 1; i++) {
+      const a = seg[i];
+      const b = seg[i + 1];
+      const dt = b.t - a.t;
+      for (; next < b.t; next += stepMs) {
+        const k = dt > 0 ? (next - a.t) / dt : 0;
+        out.push({ lat: a.lat + (b.lat - a.lat) * k, lng: a.lng + (b.lng - a.lng) * k });
+      }
     }
-    for (; next < b.t; next += stepMs) {
-      const k = dt > 0 ? (next - a.t) / dt : 0;
-      out.push({ lat: a.lat + (b.lat - a.lat) * k, lng: a.lng + (b.lng - a.lng) * k });
-    }
+    const last = seg[seg.length - 1];
+    out.push({ lat: last.lat, lng: last.lng });
   }
   return out;
 }

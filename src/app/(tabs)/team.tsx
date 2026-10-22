@@ -202,7 +202,7 @@ export default function TeamScreen() {
               m={managed}
               color={managed.color ?? color}
               factionPicker={
-                s.game.isMaster ? (
+                s.game.isMaster && managed.id !== s.team?.ownerId ? (
                   <FactionPicker
                     game={s.game}
                     value={managed.faction}

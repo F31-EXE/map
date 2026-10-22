@@ -11,14 +11,23 @@ test('resampling weighs by time, not by how often points were sent', () => {
   const stand = [p(55.0012, 90_000), p(55.0012, 120_000)];
   const out = resampleByTime([...walk, ...stand], 10_000);
   const standing = out.filter((q) => Math.abs(q.lat - 55.0012) < 1e-9).length;
-  assert.equal(out.length, 12); // 120 s / 10 s
+  assert.equal(out.length, 13); // 120 s / 10 s, plus the last point
   assert.ok(standing >= 5, `standing samples: ${standing}`);
 });
 
 test('long gaps are neither interpolated nor drawn', () => {
-  const pts = [p(55, 0), p(55.001, 10_000), p(56, 10 * 60_000), p(56.001, 10 * 60_000 + 10_000)];
-  assert.equal(resampleByTime(pts, 10_000).length, 2);
+  const pts = [p(55, 0), p(55.001, 10_000), p(56, 30 * 60_000), p(56.001, 30 * 60_000 + 10_000)];
+  assert.equal(resampleByTime(pts, 10_000).length, 4);
   assert.equal(splitSegments(pts).length, 2);
+});
+
+test('sparse tracks (phone in a pocket, a point every few minutes) still show up', () => {
+  const pts = [p(55, 0), p(55.001, 4 * 60_000), p(55.002, 9 * 60_000), p(56, 40 * 60_000)];
+  assert.equal(splitSegments(pts).length, 2);
+  const heat = resampleByTime(pts, 10_000);
+  assert.ok(heat.length > 50, `heat samples: ${heat.length}`);
+  // The lone point after the long gap is still on the heat map.
+  assert.ok(heat.some((q) => q.lat === 56));
 });
 
 test('distance and duration skip gaps', () => {

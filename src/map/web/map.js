@@ -684,7 +684,15 @@
     }
     (a.tracks || []).forEach(function (t) {
       t.segments.forEach(function (seg) {
-        if (seg.length < 2) return;
+        if (!seg.length) return;
+        if (seg.length === 1) {
+          // A lone fix between long gaps: a dot, so the player still shows up.
+          if (a.showTracks) {
+            L.circleMarker(seg[0], { radius: 4, color: '#0B0F0C', weight: 2, fillColor: t.color, fillOpacity: 1, interactive: false }).addTo(analysisLayer);
+          }
+          bounds.extend(seg[0]);
+          return;
+        }
         if (a.showTracks) {
           L.polyline(seg, { color: '#0B0F0C', weight: 5, opacity: 0.5, interactive: false }).addTo(analysisLayer);
           L.polyline(seg, { color: t.color, weight: 2.5, opacity: 0.95, interactive: false }).addTo(analysisLayer);

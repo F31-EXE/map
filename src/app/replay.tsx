@@ -104,7 +104,7 @@ function RecordingView({ id }: { id: string }) {
   const colored = useMemo(
     () =>
       (tracks ?? [])
-        .filter((t) => t.points.length > 1)
+        .filter((t) => t.points.length > 0)
         .map((t, i) => ({ ...t, color: TEAM_COLORS[i % TEAM_COLORS.length], stats: trackStats(t.points) })),
     [tracks]
   );
@@ -156,7 +156,11 @@ function RecordingView({ id }: { id: string }) {
         {!tracks ? (
           <ActivityIndicator color={C.accent} />
         ) : colored.length === 0 ? (
-          <Text style={styles.sub}>В этой записи нет перемещений</Text>
+          <Text style={styles.sub}>
+            {(tracks.length ? 'Бойцы не прислали ни одной точки. ' : 'Ни один телефон ещё не прислал маршрут. ') +
+              'Точки копятся на телефонах и приходят, когда телефон выходит в интернет с открытым GrimMap. ' +
+              'Чтобы маршрут писался с погасшим экраном, у бойцов должна быть включена «Работа в фоне».'}
+          </Text>
         ) : (
           <ScrollView style={{ maxHeight: 150 }}>
             {colored.map((t) => (
@@ -166,7 +170,7 @@ function RecordingView({ id }: { id: string }) {
                   {t.callsign}
                 </Text>
                 <Text style={styles.legendStat}>
-                  {formatDistance(t.stats.distance)} · {formatDuration(t.stats.duration)}
+                  {formatDistance(t.stats.distance)} · {formatDuration(t.stats.duration)} · {t.points.length} т.
                 </Text>
               </View>
             ))}

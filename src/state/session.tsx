@@ -339,7 +339,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const gameOn = inTeam && factions.length > 0;
   // The creator runs the game (and may start it, so this holds before it is on too).
   const isMaster = inTeam && isOwner;
-  const myFaction = gameOn && validFaction(me?.faction, factions.length) ? (me!.faction as number) : null;
+  const myFaction =
+    gameOn && !isOwner && validFaction(me?.faction, factions.length) ? (me!.faction as number) : null;
   const viewer = useMemo(() => ({ gameOn, isMaster, faction: myFaction }), [gameOn, isMaster, myFaction]);
 
   const mesh = useMesh({
@@ -365,10 +366,14 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     () =>
       gameOn
         ? allMembers
+            .map((m) =>
+              // The game master is not on any team.
+              m.id === team?.ownerId ? { ...m, faction: null } : m
+            )
             .filter((m) => m.id === uid || visibleTo(viewer, validFaction(m.faction, factions.length) ? m.faction : -1))
             .map((m) => (validFaction(m.faction, factions.length) ? { ...m, color: factions[m.faction].color } : m))
         : allMembers,
-    [allMembers, gameOn, viewer, factions, uid]
+    [allMembers, gameOn, viewer, factions, uid, team?.ownerId]
   );
   // Markers created, moved, deleted or voted on over Bluetooth, on top of the server's.
   const shownTeamMarkers = useMemo(
@@ -941,9 +946,18 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         : null,
     [gameOn, shownTeamMarkers]
   );
+  // The game master never plays for a team, even if once put into one.
+  const ownerId = team?.ownerId;
   const scores = useMemo(
-    () => (gameZone ? teamScores(allMembers, gameZone.id, factions.length) : factions.map(() => 0)),
-    [gameZone, allMembers, factions]
+    () =>
+      gameZone
+        ? teamScores(
+            allMembers.filter((m) => m.id !== ownerId),
+            gameZone.id,
+            factions.length
+          )
+        : factions.map(() => 0),
+    [gameZone, allMembers, factions, ownerId]
   );
   const game = useMemo<GameState>(
     () => ({ on: gameOn, isMaster, factions, myFaction, zoneId: gameZone?.id ?? null, scores }),
@@ -956,7 +970,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     });
   }, []);
   useEffect(() => {
-    if (!gameZone?.zone || myFaction == null || !teamId || !uid || status === 'dead') return;
+    if (!gameZone?.zone || myFaction == null || isMaster || !teamId || !uid || status === 'dead') return;
     const zone = gameZone.zone;
     const t = setInterval(() => {
       const seen = scoredMinutes.current;
@@ -976,7 +990,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       if (n > 0) teams.addPoints(teamId, uid, gameZone.id, n).catch(() => {});
     }, 5000);
     return () => clearInterval(t);
-  }, [gameZone, myFaction, teamId, uid, status]);
+  }, [gameZone, myFaction, isMaster, teamId, uid, status]);
 
   const setFactionCount = useCallback(
     async (n: number) => {
