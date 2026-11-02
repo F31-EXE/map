@@ -3,7 +3,7 @@ rules_version = '2';
 // Data model:
 //   teamCodes/{code}                 -> { teamId }            join code lookup
 //   teams/{teamId}                   -> { name, code, ownerId, color, createdAt, recordingId?, pinned? }
-//   teams/{teamId}/members/{uid}     -> { callsign, role, status?, canCommand?, joinCode, lat, lng, heading, accuracy, updatedAt }
+//   teams/{teamId}/members/{uid}     -> { callsign, role, status?, canCommand?, joinCode, lat, lng, heading, accuracy, updatedAt, range? }
 //     pinned = { id, text, callsign, uid, at }: chat message pinned by a commander
 //   teams/{teamId}/markers/{id}      -> { kind, label, lat, lng, createdBy, createdByName, createdAt, relayedBy? }
 //   teams/{teamId}/avatars/{uid}     -> { data, updatedAt }   small JPEG data URI
@@ -85,7 +85,8 @@ service cloud.firestore {
         && (!('role' in d) || (d.role is string && d.role.size() <= 20))
         && (!('status' in d) || d.status in ['alive', 'dead', 'afk'])
         && (!('faction' in d) || d.faction == null || (d.faction is int && d.faction >= 0 && d.faction < 6))
-        && (!('pts' in d) || (d.pts is map && d.pts.size() <= 50));
+        && (!('pts' in d) || (d.pts is map && d.pts.size() <= 50))
+        && (!('range' in d) || (d.range is number && d.range > 0 && d.range <= 2000));
     }
     // Team game: up to six teams of { name, color } on the squad doc.
     function validFactions(f) {

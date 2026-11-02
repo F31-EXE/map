@@ -582,4 +582,10 @@ describe('team game', () => {
     await assertSucceeds(updateDoc(doc(as('carol'), 'teams', TEAM, 'members', 'carol'), { 'pts.z1': increment(2) }));
     await assertFails(updateDoc(doc(as('carol'), 'teams', TEAM, 'members', 'bob'), { 'pts.z1': increment(2) }));
   });
+  test('mortar crews set their own range', async () => {
+    await assertSucceeds(updateDoc(doc(as('carol'), 'teams', TEAM, 'members', 'carol'), { role: 'mortar', range: 200 }));
+    await assertFails(updateDoc(doc(as('carol'), 'teams', TEAM, 'members', 'carol'), { range: 0 }));
+    await assertFails(updateDoc(doc(as('carol'), 'teams', TEAM, 'members', 'carol'), { range: '200' }));
+    await assertFails(updateDoc(doc(as('carol'), 'teams', TEAM, 'members', 'bob'), { range: 150 }));
+  });
 });

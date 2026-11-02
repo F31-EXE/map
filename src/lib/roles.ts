@@ -30,6 +30,9 @@ const SHOVEL =
   'M9.8 4.5L14.2 4.5L14.2 6.3L9.8 6.3Z M11.3 6.3L12.7 6.3L12.7 12.5L11.3 12.5Z ' +
   'M9.5 12.5L14.5 12.5L14.5 16.3C14.5 17.9 13.3 19 12 19.6C10.7 19 9.5 17.9 9.5 16.3Z';
 
+// Tube with a muzzle ring, drawn horizontal and tilted up by xf().
+const MORTAR_TUBE = 'M6 10.8L16.6 10.8L16.6 13.2L6 13.2Z M16.6 10.3L18.6 10.3L18.6 13.7L16.6 13.7Z';
+
 const FRAMES = {
   diamond: 'M12 0.8L23.2 12L12 23.2L0.8 12Z M12 3.6L3.6 12L12 20.4L20.4 12Z',
   shield:
@@ -58,6 +61,11 @@ const GLYPHS = {
   launcher:
     'M7 11.1L14.2 11.1L14.2 12.9L7 12.9Z M14.2 10.2L16.2 10.2L18.4 12L16.2 13.8L14.2 13.8Z ' +
     'M6 9.4L8.8 11.1L6 11.1Z M6 14.6L8.8 12.9L6 12.9Z',
+  mortar: xf(
+    xf(MORTAR_TUBE, { rotate: -55, dx: 0.6, dy: -0.6 }) +
+      ' M5.6 17.2L11.8 17.2L11.8 18.8L5.6 18.8Z M12.9 11.2L13.9 10.7L16.8 18.8L15.7 18.8Z',
+    { scale: 0.8, dx: 0.3, dy: -0.4 }
+  ),
   sniper:
     'M12 7.6C14.4 7.6 16.4 9.6 16.4 12C16.4 14.4 14.4 16.4 12 16.4C9.6 16.4 7.6 14.4 7.6 12C7.6 9.6 9.6 7.6 12 7.6Z ' +
     'M12 9.6C10.7 9.6 9.6 10.7 9.6 12C9.6 13.3 10.7 14.4 12 14.4C13.3 14.4 14.4 13.3 14.4 12C14.4 10.7 13.3 9.6 12 9.6Z ' +
@@ -94,6 +102,7 @@ export const ROLES: Record<RoleId, RoleDef> = {
   machinegunner: def('Пулемётчик', 'ПУЛ', 'diamond', 'machinegunner'),
   grenadier: def('Гренадёр', 'ГРН', 'diamond', 'grenadier'),
   launcher: def('Гранатомётчик', 'РПГ', 'diamond', 'launcher'),
+  mortar: def('Миномётчик', 'МИН', 'diamond', 'mortar'),
   sniper: def('Снайпер', 'СНП', 'diamond', 'sniper'),
   scout: def('Разведчик', 'РЗВ', 'diamond', 'scout'),
   raider: def('Штурмовик', 'ШТМ', 'diamond', 'raider'),
@@ -114,6 +123,7 @@ export const ROLE_ORDER: RoleId[] = [
   'machinegunner',
   'grenadier',
   'launcher',
+  'mortar',
   'sniper',
   'scout',
   'raider',

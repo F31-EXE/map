@@ -427,6 +427,7 @@
   });
   map.on('zoomend', function () {
     zooming = false;
+    renderMortar();
     var now = Date.now();
     Object.keys(zoneShapes).forEach(function (id) {
       drawZone(zoneShapes[id], now, true);
@@ -535,6 +536,76 @@
       drawZone(zoneShapes[id], now);
     });
   }, 1000);
+
+  // ---------------------------------------------------------------------------
+  // Mortar: range circles around mortar crews and, in calculator mode, the line of
+  // fire from the firing position to the crosshair (map center), following it live.
+  // ---------------------------------------------------------------------------
+  var mortarLayer = L.layerGroup().addTo(map);
+  var mortarState = null;
+  var aimLine = null;
+  var aimLabel = null;
+
+  function renderMortar() {
+    mortarLayer.clearLayers();
+    aimLine = aimLabel = null;
+    var p = mortarState;
+    if (!p) return;
+    (p.guns || []).forEach(function (g) {
+      L.circle([g.lat, g.lng], {
+        radius: g.r,
+        color: g.color,
+        weight: 2,
+        opacity: 0.9,
+        dashArray: '3 7',
+        fillColor: g.color,
+        fillOpacity: 0.06,
+        interactive: false,
+      }).addTo(mortarLayer);
+    });
+    if (p.aim) {
+      aimLine = L.polyline([], { color: '#FFFFFF', weight: 2, dashArray: '8 6', interactive: false }).addTo(mortarLayer);
+      L.circleMarker([p.aim.lat, p.aim.lng], {
+        radius: 6,
+        color: '#0B0F0C',
+        weight: 2,
+        fillColor: '#FFC83D',
+        fillOpacity: 1,
+        interactive: false,
+      }).addTo(mortarLayer);
+      aimLabel = L.marker([p.aim.lat, p.aim.lng], {
+        keyboard: false,
+        interactive: false,
+        icon: L.divIcon({ className: 'aim-label', html: '<span></span>', iconSize: [0, 0] }),
+      }).addTo(mortarLayer);
+      updateAim();
+    }
+  }
+
+  function updateAim() {
+    if (!aimLine || !mortarState || !mortarState.aim) return;
+    var a = mortarState.aim;
+    var c = map.getCenter();
+    var d = map.distance([a.lat, a.lng], c);
+    var far = d > a.r;
+    aimLine.setLatLngs([[a.lat, a.lng], c]);
+    aimLine.setStyle({ color: far ? '#FF4D4D' : '#FFFFFF' });
+    aimLabel.setLatLng(c);
+    var el = aimLabel.getElement();
+    if (el) {
+      el.classList.toggle('far', far);
+      el.querySelector('span').textContent = Math.round(d) + ' м';
+    }
+  }
+
+  function setMortar(p) {
+    mortarState = p;
+    if (!zooming) renderMortar();
+  }
+
+  map.on('move', function () {
+    if (!zooming) updateAim();
+  });
 
   var markersLayer = L.layerGroup().addTo(map);
   var tacMarkers = {};
@@ -1414,6 +1485,7 @@
     setOffline: setOffline,
     setMembers: setMembers,
     setMarkers: setMarkers,
+    setMortar: setMortar,
     addOverlay: addOverlay,
     removeOverlay: removeOverlay,
     setOverlayVisible: setOverlayVisible,

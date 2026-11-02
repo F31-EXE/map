@@ -106,7 +106,7 @@ export async function kickMember(teamId: string, memberId: string): Promise<void
 export async function updateProfile(
   teamId: string,
   uid: string,
-  profile: { callsign?: string; role?: RoleId; status?: MemberStatus }
+  profile: { callsign?: string; role?: RoleId; status?: MemberStatus; range?: number }
 ): Promise<void> {
   await updateDoc(doc(firestore(), 'teams', teamId, 'members', uid), profile);
 }
@@ -235,6 +235,7 @@ export function subscribeMembers(
             updatedAt: millis(v.updatedAt),
             faction: Number.isInteger(v.faction) ? v.faction : null,
             pts: parsePoints(v.pts),
+            range: typeof v.range === 'number' ? v.range : null,
           };
         })
       );

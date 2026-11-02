@@ -64,6 +64,8 @@ export type Member = {
   faction?: number | null;
   /** Team game: points earned per control zone (marker id). */
   pts?: Record<string, number>;
+  /** Mortar crews: maximum range in meters (circle on the map). */
+  range?: number | null;
 };
 
 export type OrderKind = 'order-move' | 'order-attack' | 'order-defend';

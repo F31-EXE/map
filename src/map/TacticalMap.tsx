@@ -75,6 +75,14 @@ type Props = {
     showTracks: boolean;
     showHeat: boolean;
   } | null;
+  /**
+   * Mortar range circles, and in calculator mode the firing position whose line of fire
+   * follows the crosshair (`r`: maximum range, the line turns red past it).
+   */
+  mortar?: {
+    guns: { id: string; lat: number; lng: number; r: number; color: string }[];
+    aim: { lat: number; lng: number; r: number } | null;
+  } | null;
   /** Pixels at the bottom covered by native panels (scale bar goes above). */
   bottomInset?: number;
   /** Pixels at the top covered by native panels (grid labels go below). */
@@ -206,6 +214,11 @@ export function TacticalMap(props: Props) {
   useEffect(() => {
     if (ready) send({ type: 'setAnalysis', payload: analysis ?? null });
   }, [ready, generation, analysis, send]);
+
+  const mortar = props.mortar;
+  useEffect(() => {
+    if (ready) send({ type: 'setMortar', payload: mortar ?? null });
+  }, [ready, generation, mortar, send]);
 
   const { bottomInset, topInset } = props;
   useEffect(() => {

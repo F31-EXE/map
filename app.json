@@ -2,7 +2,7 @@
   "expo": {
     "name": "GrimMap",
     "slug": "tacmap",
-    "version": "1.10.1",
+    "version": "1.11.0",
     "orientation": "default",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
@@ -14,7 +14,7 @@
         "NSMotionUsageDescription": "Компас для направления взгляда на карте.",
         "ITSAppUsesNonExemptEncryption": false
       },
-      "buildNumber": "6"
+      "buildNumber": "7"
     },
     "android": {
       "adaptiveIcon": {
@@ -34,7 +34,7 @@
         "POST_NOTIFICATIONS",
         "RECEIVE_BOOT_COMPLETED"
       ],
-      "versionCode": 27,
+      "versionCode": 28,
       "blockedPermissions": [
         "android.permission.SYSTEM_ALERT_WINDOW",
         "android.permission.READ_EXTERNAL_STORAGE",

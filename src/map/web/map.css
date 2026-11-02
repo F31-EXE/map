@@ -320,6 +320,24 @@ body,
   display: none;
 }
 
+/* Mortar calculator: distance next to the crosshair, red past the maximum range. */
+.aim-label span {
+  position: absolute;
+  left: 18px;
+  top: -34px;
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: rgba(5, 12, 8, 0.88);
+  border: 1px solid #ffc83d;
+  color: #ffc83d;
+  font: 700 13px/1.3 ui-monospace, 'JetBrains Mono', Menlo, monospace;
+  white-space: nowrap;
+}
+.aim-label.far span {
+  border-color: #ff4d4d;
+  color: #ff4d4d;
+}
+
 /* Hot zone: label riding the moving circle. */
 .hz-label span {
   position: absolute;

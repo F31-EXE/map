@@ -27,6 +27,10 @@ export const KEYS = {
   zoneTicks: 'tacmap.zoneTicks',
   /** Active recording of the squad as last seen, for starting up without a connection. */
   recording: 'tacmap.recording',
+  /** Mortar range and test shots (src/lib/mortar.ts). */
+  mortar: 'tacmap.mortar',
+  /** Fixed mortar firing position, or null to fire from the GPS position. */
+  mortarPos: 'tacmap.mortarPos',
 } as const;
 
 export async function loadJson<T>(key: string, fallback: T): Promise<T> {

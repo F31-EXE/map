@@ -8,6 +8,7 @@ import { useSelfPosition } from '../../hooks/useSelfPosition';
 import { bearingDegrees, distanceMeters, formatClock, formatCoords, formatDistance, timeAgo } from '../../lib/geo';
 import { hotState, type HotZone } from '../../lib/hotzone';
 import { isOrder, MARKER_KINDS, voteThreshold } from '../../lib/markerKinds';
+import { correct, DEFAULT_RANGE, solve } from '../../lib/mortar';
 import { ROLES } from '../../lib/roles';
 import { STATUSES } from '../../lib/status';
 import { KEYS, loadJson, saveJson } from '../../lib/storage';
@@ -25,9 +26,11 @@ import { markerErrorText } from '../../services/teams';
 import { useOverlays } from '../../state/overlays';
 import { useSession, type MarkerScope } from '../../state/session';
 import { useSide, type OrderTarget } from '../../state/side';
+import { useMortar } from '../../state/useMortar';
 import { AddMarkerModal } from '../../ui/AddMarkerModal';
 import { OfflineSheet } from '../../ui/OfflineSheet';
 import { RegionPrompt } from '../../ui/RegionPrompt';
+import { fireText, MortarPanel, MortarSheet } from '../../ui/MortarPanel';
 import { WavePanel } from '../../ui/WavePanel';
 import { ScoreRow } from '../../ui/GameCard';
 import { HOT, phaseText, selfInZone, useNow, ZonePanel } from '../../ui/ZonePanel';
@@ -222,6 +225,12 @@ export default function MapScreen() {
   const [hudTop, setHudTop] = useState<number | null>(null);
   const drawingRef = useRef(false);
   drawingRef.current = drawing != null;
+  // Mortar calculator: fire data from the firing position to the crosshair.
+  const mortar = useMortar();
+  const [mortarOn, setMortarOn] = useState(false);
+  const [mortarSheet, setMortarSheet] = useState(false);
+  const calculator = mortarOn && mortar.isMortar;
+  const gunAt: LatLng | null = mortar.fixed ?? (position ? { lat: position.lat, lng: position.lng } : null);
   const centeredOnce = useRef(false);
 
   useEffect(() => {
@@ -325,7 +334,7 @@ export default function MapScreen() {
   // Votes apply to my own squad's shared markers.
   const canVote = (m: TacMarker) => inTeam && !m.personal && (!m.teamId || m.teamId === session.teamId);
 
-  const toolbarButtons = 5 + (visibleMembers.length > 0 ? 1 : 0);
+  const toolbarButtons = 5 + (visibleMembers.length > 0 ? 1 : 0) + (mortar.isMortar ? 1 : 0);
   const toolbarWidth = toolbarButtons * 50 + 8;
 
   // Landscape top row: [team pill][toolbar].
@@ -358,6 +367,26 @@ export default function MapScreen() {
   const zoneMarker = side.mapMarkers
     .filter((m) => m.zone)
     .reduce<TacMarker | undefined>((a, m) => (!a || m.createdAt > a.createdAt ? m : a), undefined);
+
+  const solution = calculator && gunAt && center ? solve(gunAt, center, mortar.config) : null;
+
+  // Range circles around every mortar crew in view, mine at my firing position.
+  const mortarMap = useMemo(() => {
+    const guns = side.mapMembers
+      .filter((m) => m.role === 'mortar' && m.id !== session.uid && m.lat != null && m.lng != null)
+      .map((m) => ({
+        id: m.id,
+        lat: m.lat!,
+        lng: m.lng!,
+        r: m.range ?? DEFAULT_RANGE,
+        color: m.color ?? session.teamColor,
+      }));
+    if (mortar.isMortar && gunAt) guns.push({ id: 'self', ...gunAt, r: mortar.config.range, color: session.teamColor });
+    if (!guns.length) return null;
+    return { guns, aim: calculator && gunAt ? { ...gunAt, r: mortar.config.range } : null };
+    // gunAt is rebuilt every render; its coordinates are what matter.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [side.mapMembers, session.uid, session.teamColor, mortar.isMortar, mortar.config.range, calculator, gunAt?.lat, gunAt?.lng]);
 
   const banner =
     status === 'denied'
@@ -403,6 +432,7 @@ export default function MapScreen() {
         onOverlayError={onOverlayError}
         bottomInset={hudTop == null ? undefined : height - hudTop + 6}
         drawing={drawing}
+        mortar={mortarMap}
         onDrawChanged={(points) => setDrawing((d) => (d ? { ...d, points } : d))}
       />
 
@@ -510,6 +540,20 @@ export default function MapScreen() {
               setDrawing({ color: ARROW_COLORS[0], points: [], scope: 'team' });
             }}
           />
+          {mortar.isMortar && (
+            <>
+              <View style={[styles.toolbarSep, landscape && styles.toolbarSepRow]} />
+              <ToolbarButton
+                icon="bullseye-arrow"
+                label="Миномётный калькулятор"
+                active={calculator}
+                onPress={() => {
+                  if (!calculator) setFollow(false);
+                  setMortarOn(!calculator);
+                }}
+              />
+            </>
+          )}
           {visibleMembers.length > 0 && (
             <>
               <View style={[styles.toolbarSep, landscape && styles.toolbarSepRow]} />
@@ -588,7 +632,13 @@ export default function MapScreen() {
         style={[
           drawing && { opacity: 0 },
           styles.actions,
-          { bottom: insets.bottom + (landscape ? 12 : 108), right: 12 + insets.right },
+          {
+            bottom:
+              calculator && !landscape && hudTop != null
+                ? height - hudTop + 12
+                : insets.bottom + (landscape ? 12 : 108),
+            right: 12 + insets.right,
+          },
           landscape && { flexDirection: 'row-reverse' },
         ]}
       >
@@ -632,12 +682,38 @@ export default function MapScreen() {
         </Pressable>
       </View>
 
+      {calculator && !drawing && (
+        <View
+          onLayout={(e) => setHudTop(e.nativeEvent.layout.y)}
+          style={[
+            styles.mortarWrap,
+            { bottom: insets.bottom + 12, left: 12 + insets.left, right: 12 + insets.right },
+            // Landscape: keep to the left half so the crosshair in the middle stays clear.
+            landscape && { right: undefined, width: Math.min(460, width / 2 - 12 - insets.left - 30) },
+          ]}
+        >
+          <MortarPanel
+            solution={solution}
+            range={mortar.config.range}
+            fixed={mortar.fixed != null}
+            compact={landscape}
+            onCorrect={(longer, right) => {
+              if (gunAt && center) mapRef.current?.setView(correct(gunAt, center, longer, right));
+            }}
+            onFixHere={() => center && mortar.setFixed({ lat: center.lat, lng: center.lng })}
+            onUseGps={() => mortar.setFixed(null)}
+            onSettings={() => setMortarSheet(true)}
+            onClose={() => setMortarOn(false)}
+          />
+        </View>
+      )}
+
       {/* Bottom HUD */}
       <Glass
         radius={R.lg}
         onLayout={(e) => setHudTop(e.nativeEvent.layout.y)}
         style={[
-          drawing && { display: 'none' },
+          (drawing || calculator) && { display: 'none' },
           styles.hud,
           { bottom: insets.bottom + 12, left: 12 + insets.left, right: 12 + insets.right },
           landscape && styles.hudCompact,
@@ -670,6 +746,13 @@ export default function MapScreen() {
         </View>
       </Glass>
 
+      <MortarSheet
+        visible={mortarSheet}
+        config={mortar.config}
+        aimDistance={gunAt && center ? distanceMeters(gunAt, center) : null}
+        onChange={mortar.setConfig}
+        onClose={() => setMortarSheet(false)}
+      />
       <OfflineSheet visible={offlineSheet} onClose={() => setOfflineSheet(false)} layer={baseLayer} view={view} />
       <RegionPrompt position={position} layer={baseLayer} />
 
@@ -689,8 +772,30 @@ export default function MapScreen() {
         leading={selectedMarker && <KindBadge kind={selectedMarker.kind} />}
         title={selectedMarker?.label || (selectedMarker ? MARKER_KINDS[selectedMarker.kind].title : '')}
         subtitle={selectedMarker && markerSubtitle(selectedMarker)}
-        stats={selectedMarker ? vectorStats(position, selectedMarker) : []}
+        stats={
+          selectedMarker
+            ? [
+                ...vectorStats(position, selectedMarker),
+                ...(mortar.isMortar && gunAt
+                  ? [{ label: 'Миномёт', value: fireText(solve(gunAt, selectedMarker, mortar.config), mortar.config.range) }]
+                  : []),
+              ]
+            : []
+        }
       >
+        {selectedMarker && mortar.isMortar && selectedMarker.kind !== 'arrow' && (
+          <Button
+            title="Навести миномёт"
+            icon="bullseye-arrow"
+            kind="secondary"
+            onPress={() => {
+              setFollow(false);
+              setMortarOn(true);
+              mapRef.current?.setView({ lat: selectedMarker.lat, lng: selectedMarker.lng });
+              setSelection(null);
+            }}
+          />
+        )}
         {selectedMarker && (selectedMarker.kind === 'respawn' || selectedMarker.kind === 'deadzone') && !selectedMarker.personal && (
           <WavePanel
             marker={selectedMarker}
@@ -1024,6 +1129,7 @@ const styles = StyleSheet.create({
   gpsText: { color: C.dim, fontSize: 11, fontFamily: F.mono },
 
   voteRow: { flexDirection: 'row', gap: 10 },
+  mortarWrap: { position: 'absolute', maxWidth: 560 },
   rec: {
     flexDirection: 'row',
     alignItems: 'center',
