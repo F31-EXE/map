@@ -351,13 +351,13 @@ export default function MapScreen() {
   // Votes apply to my own squad's shared markers.
   const canVote = (m: TacMarker) => inTeam && !m.personal && (!m.teamId || m.teamId === session.teamId);
 
-  const toolbarButtons = 5 + (visibleMembers.length > 0 ? 1 : 0) + (mortar.isMortar ? 1 : 0);
+  const toolbarButtons = 5 + (visibleMembers.length > 0 ? 1 : 0);
   const toolbarWidth = toolbarButtons * 50 + 8;
 
   // Landscape top row: [team pill][toolbar].
   const pillW = Math.min(420, width - insets.left - insets.right - 24 - toolbarWidth - 10);
   // Landscape bottom row: [HUD][FAB][locate][status] — buttons are 64 + 52 + 52 plus gaps.
-  const actionsW = 64 + 52 + (inTeam ? 52 + 14 : 0) + 14;
+  const actionsW = 64 + 52 + (inTeam ? 52 + 14 : 0) + (mortar.isMortar ? 52 + 14 : 0) + 14;
 
   // Side commander without a squad of their own: the pill shows the side instead.
   const sideOnly = side.isSideCommander && !inTeam;
@@ -387,7 +387,8 @@ export default function MapScreen() {
 
   const solution = calculator && gunAt && center ? solve(gunAt, center, mortar.config) : null;
 
-  // Range circles around every mortar crew in view, mine at my firing position.
+  // Range circles around every other mortar crew in view; mine (at my firing position)
+  // only while the calculator is open, so closing it clears my circle and line of fire.
   const mortarMap = useMemo(() => {
     const guns = side.mapMembers
       .filter((m) => m.role === 'mortar' && m.id !== session.uid && m.lat != null && m.lng != null)
@@ -398,12 +399,12 @@ export default function MapScreen() {
         r: m.range ?? DEFAULT_RANGE,
         color: m.color ?? session.teamColor,
       }));
-    if (mortar.isMortar && gunAt) guns.push({ id: 'self', ...gunAt, r: mortar.config.range, color: session.teamColor });
+    if (calculator && gunAt) guns.push({ id: 'self', ...gunAt, r: mortar.config.range, color: session.teamColor });
     if (!guns.length) return null;
     return { guns, aim: calculator && gunAt ? { ...gunAt, r: mortar.config.range } : null };
     // gunAt is rebuilt every render; its coordinates are what matter.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [side.mapMembers, session.uid, session.teamColor, mortar.isMortar, mortar.config.range, calculator, gunAt?.lat, gunAt?.lng]);
+  }, [side.mapMembers, session.uid, session.teamColor, mortar.config.range, calculator, gunAt?.lat, gunAt?.lng]);
 
   const banner =
     status === 'denied'
@@ -557,20 +558,6 @@ export default function MapScreen() {
               setDrawing({ color: ARROW_COLORS[0], points: [], scope: 'team' });
             }}
           />
-          {mortar.isMortar && (
-            <>
-              <View style={[styles.toolbarSep, landscape && styles.toolbarSepRow]} />
-              <ToolbarButton
-                icon="bullseye-arrow"
-                label="Миномётный калькулятор"
-                active={calculator}
-                onPress={() => {
-                  if (!calculator) setFollow(false);
-                  setMortarOn(!calculator);
-                }}
-              />
-            </>
-          )}
           {visibleMembers.length > 0 && (
             <>
               <View style={[styles.toolbarSep, landscape && styles.toolbarSepRow]} />
@@ -670,6 +657,18 @@ export default function MapScreen() {
               const next = session.status === 'dead' ? 'alive' : 'dead';
               session.setStatus(next).catch((e: Error) => Alert.alert('Ошибка', e.message));
               if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
+            }}
+          />
+        )}
+        {mortar.isMortar && (
+          <GlassButton
+            icon="bullseye-arrow"
+            label="Миномётный калькулятор"
+            size={52}
+            active={calculator}
+            onPress={() => {
+              if (!calculator) setFollow(false);
+              setMortarOn(!calculator);
             }}
           />
         )}
