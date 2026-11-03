@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Alert, Pressable, StyleSheet, Text, TextInput, View, type StyleProp, type ViewStyle } from 'react-native';
 
 import { formatDistance } from '../lib/geo';
+import { turnText } from '../lib/heading';
 import { formatMils, MAX_ANGLE, RANGE_CHOICES, type FireSolution, type MortarConfig } from '../lib/mortar';
 
 import { Button, Eyebrow, Glass, Icon, RoleIcon, Sheet, tap, type IconName } from './components';
@@ -9,11 +10,11 @@ import { C, eyebrow, F, R } from './theme';
 
 const STEPS = [5, 10, 25];
 
-/** Short fire data for marker cards: "68.5° · 152 м", or why it can't be fired. */
-export function fireText(s: FireSolution, range: number): string {
-  if (s.reach === 'far') return `дальше ${range} м`;
-  if (s.reach === 'close') return `ближе минимума (${MAX_ANGLE}°)`;
-  return `прицел ${s.angle}° · ${formatDistance(s.dist)}`;
+/** Elevation for marker cards ("74.6°"), or why it can't be fired. */
+export function fireText(s: FireSolution): string {
+  if (s.reach === 'far') return 'не достанет';
+  if (s.reach === 'close') return 'слишком близко';
+  return `${s.angle}°`;
 }
 
 function SmallButton({
@@ -46,6 +47,7 @@ function SmallButton({
  */
 export function MortarPanel({
   solution,
+  heading,
   range,
   fixed,
   compact,
@@ -58,6 +60,8 @@ export function MortarPanel({
 }: {
   /** Null while there is no firing position (no GPS fix yet). */
   solution: FireSolution | null;
+  /** Where the phone looks (compass), to say which way to turn. */
+  heading: number | null;
   range: number;
   fixed: boolean;
   compact?: boolean;
@@ -103,6 +107,14 @@ export function MortarPanel({
         <Datum label="Прицел" value={s?.angle != null ? `${s.angle}°` : '—'} big bad={s?.reach === 'close'} />
         <Datum label="Полёт" value={s?.flight != null ? `${s.flight} с` : '—'} />
       </View>
+      {s && heading != null && (
+        <View style={styles.warn}>
+          <Icon name="compass-outline" size={16} color={C.dim} />
+          <Text style={styles.turnText}>
+            Вы смотрите {Math.round(heading)}° · к цели {turnText(heading, s.bearing)}
+          </Text>
+        </View>
+      )}
       {warn && (
         <View style={styles.warn}>
           <Icon name="alert-outline" size={16} color={C.danger} />
@@ -285,6 +297,7 @@ const styles = StyleSheet.create({
   valueBig: { fontSize: 22, color: C.text },
   warn: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   warnText: { color: C.danger, fontSize: 13, fontFamily: F.semibold, flex: 1 },
+  turnText: { color: C.text, fontSize: 13, fontFamily: F.mono, flex: 1 },
   row: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8 },
   step: {
     minWidth: 40,

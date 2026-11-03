@@ -6,6 +6,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useSelfPosition } from '../../hooks/useSelfPosition';
 import { bearingDegrees, distanceMeters, formatClock, formatCoords, formatDistance, timeAgo } from '../../lib/geo';
+import { turnText } from '../../lib/heading';
 import { hotState, type HotZone } from '../../lib/hotzone';
 import { isOrder, MARKER_KINDS, voteThreshold } from '../../lib/markerKinds';
 import { correct, DEFAULT_RANGE, solve } from '../../lib/mortar';
@@ -41,11 +42,19 @@ import { C, eyebrow, F, R } from '../../ui/theme';
 
 type Selection = { type: 'marker' | 'member'; id: string } | null;
 
-function vectorStats(from: SelfPosition | null, to: LatLng): Stat[] {
+function vectorStats(from: SelfPosition | null, to: LatLng, heading: number | null): Stat[] {
   if (!from) return [{ label: 'Координаты', value: formatCoords(to) }];
+  const bearing = bearingDegrees(from, to);
   return [
     { label: 'Дистанция', value: formatDistance(distanceMeters(from, to)) },
-    { label: 'Азимут', value: `${Math.round(bearingDegrees(from, to))}°` },
+    { label: 'Азимут', value: `${Math.round(bearing)}°` },
+    // Where I'm looking, and which way to turn to face it.
+    ...(heading != null
+      ? [
+          { label: 'Мой курс', value: `${Math.round(heading)}°` },
+          { label: 'Повернуть', value: turnText(heading, bearing) },
+        ]
+      : []),
     { label: 'Координаты', value: formatCoords(to) },
   ];
 }
@@ -189,7 +198,7 @@ export default function MapScreen() {
   const session = useSession();
   const side = useSide();
   const { overlays, focusRequest, requestFocus, areas, download } = useOverlays();
-  const { position, status } = useSelfPosition();
+  const { position, status, heading } = useSelfPosition();
   const mapRef = useRef<TacticalMapHandle>(null);
 
   const [baseLayer, setBaseLayer] = useState<BaseLayerId>('yandex-sat');
@@ -694,6 +703,7 @@ export default function MapScreen() {
         >
           <MortarPanel
             solution={solution}
+            heading={heading}
             range={mortar.config.range}
             fixed={mortar.fixed != null}
             compact={landscape}
@@ -725,7 +735,7 @@ export default function MapScreen() {
       >
         <View style={{ flex: 1.3 }}>
           {!landscape && <Text style={eyebrow}>Перекрестие</Text>}
-          <Text style={[styles.hudValue, landscape && styles.hudValueCompact]} numberOfLines={1}>
+          <Text style={[styles.hudValue, landscape && styles.hudValueCompact]} numberOfLines={1} adjustsFontSizeToFit>
             {center ? formatCoords(center) : '—'}
           </Text>
         </View>
@@ -736,6 +746,13 @@ export default function MapScreen() {
             {center && position
               ? `${formatDistance(distanceMeters(position, center))} · ${Math.round(bearingDegrees(position, center))}°`
               : '—'}
+          </Text>
+        </View>
+        <View style={styles.hudSep} />
+        <View>
+          {!landscape && <Text style={eyebrow}>Курс</Text>}
+          <Text style={[styles.hudValue, landscape && styles.hudValueCompact]} numberOfLines={1}>
+            {heading != null ? `${Math.round(heading)}°` : '—'}
           </Text>
         </View>
         <View style={[styles.gps, landscape && styles.gpsCompact]}>
@@ -775,9 +792,9 @@ export default function MapScreen() {
         stats={
           selectedMarker
             ? [
-                ...vectorStats(position, selectedMarker),
+                ...vectorStats(position, selectedMarker, heading),
                 ...(mortar.isMortar && gunAt
-                  ? [{ label: 'Миномёт', value: fireText(solve(gunAt, selectedMarker, mortar.config), mortar.config.range) }]
+                  ? [{ label: 'Прицел миномёта', value: fireText(solve(gunAt, selectedMarker, mortar.config)) }]
                   : []),
               ]
             : []
@@ -874,7 +891,7 @@ export default function MapScreen() {
         }
         stats={
           selectedMember && selectedMember.lat != null && selectedMember.lng != null
-            ? vectorStats(position, { lat: selectedMember.lat, lng: selectedMember.lng })
+            ? vectorStats(position, { lat: selectedMember.lat, lng: selectedMember.lng }, heading)
             : []
         }
       />
@@ -1113,7 +1130,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 16,
     paddingVertical: 12,
-    gap: 12,
+    gap: 10,
   },
   hudValue: { color: C.accent, fontSize: 13, fontFamily: F.mono, marginTop: 3 },
   hudCompact: { paddingVertical: 7, paddingHorizontal: 12, gap: 10 },

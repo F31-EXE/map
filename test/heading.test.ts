@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { angleDiff, HeadingSmoother } from '../src/lib/heading.ts';
+import { angleDiff, HeadingSmoother, turnText } from '../src/lib/heading.ts';
 
 test('angleDiff wraps around north', () => {
   assert.equal(angleDiff(359, 1), 2);
@@ -21,4 +21,12 @@ test('smoother damps jitter around a steady heading', () => {
   let v = 0;
   for (let i = 0; i < 50; i++) v = s.push(90 + (i % 2 ? 6 : -6));
   assert.ok(angleDiff(v, 90) < 2, `got ${v}`);
+});
+
+test('turn directions wrap around north', () => {
+  assert.equal(turnText(98, 105), 'правее 7°');
+  assert.equal(turnText(350, 10), 'правее 20°');
+  assert.equal(turnText(10, 350), 'левее 20°');
+  assert.equal(turnText(0, 180), 'левее 180°');
+  assert.equal(turnText(100, 101), 'прямо');
 });
