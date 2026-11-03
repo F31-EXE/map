@@ -197,7 +197,7 @@ export default function MapScreen() {
   const insets = { top: safe.top, bottom: 0, left: landscape ? 0 : safe.left, right: safe.right };
   const session = useSession();
   const side = useSide();
-  const { overlays, focusRequest, requestFocus, areas, download } = useOverlays();
+  const { overlays, focusRequest, requestFocus, viewRequest, requestView, areas, download } = useOverlays();
   const { position, status, heading } = useSelfPosition();
   const mapRef = useRef<TacticalMapHandle>(null);
 
@@ -260,11 +260,19 @@ export default function MapScreen() {
 
   // Jump to the first GPS fix once, unless an imported map is being focused.
   useEffect(() => {
-    if (position && !centeredOnce.current && !focusRequest) {
+    if (position && !centeredOnce.current && !focusRequest && !viewRequest) {
       centeredOnce.current = true;
       mapRef.current?.setView(position, 16);
     }
-  }, [position, focusRequest]);
+  }, [position, focusRequest, viewRequest]);
+
+  // A calendar polygon without a map file: center on its point once.
+  useEffect(() => {
+    if (!viewRequest) return;
+    centeredOnce.current = true;
+    mapRef.current?.setView({ lat: viewRequest.lat, lng: viewRequest.lng }, viewRequest.zoom);
+    requestView(null);
+  }, [viewRequest, requestView]);
 
   // An overlay was just imported/selected on the maps screen; TacticalMap zooms to it.
   const onFocusHandled = useCallback(() => {
