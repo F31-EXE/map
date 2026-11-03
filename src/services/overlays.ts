@@ -64,6 +64,22 @@ export async function pickAndImportOverlay(): Promise<OverlayMeta | null> {
   return meta;
 }
 
+/** Downloads a map file by URL (e.g. a polygon map from the calendar) into app storage. */
+export async function importOverlayFromUrl(url: string, name: string, format: OverlayFormat): Promise<OverlayMeta> {
+  const id = newId();
+  const fileName = `${id}.${format}`;
+  const dest = new File(overlaysDir(), fileName);
+  await File.downloadFileAsync(url, dest, { idempotent: true });
+  const meta: OverlayMeta = { id, name: name.replace(/\.[^.]+$/, '') || 'Полигон', format, fileName, visible: true, addedAt: Date.now() };
+  try {
+    await loadOverlayPayload(meta);
+  } catch (e) {
+    if (dest.exists) dest.delete();
+    throw e;
+  }
+  return meta;
+}
+
 export function deleteOverlayFile(meta: OverlayMeta): void {
   const f = new File(overlaysDir(), meta.fileName);
   if (f.exists) f.delete();

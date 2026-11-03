@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 
-import type { OverlayMeta } from '../lib/types';
+import type { LatLng, OverlayFormat, OverlayMeta } from '../lib/types';
 import type { Bounds } from '../lib/tiles';
 import * as offline from '../services/offlineMaps';
 import * as svc from '../services/overlays';
@@ -8,11 +8,16 @@ import * as svc from '../services/overlays';
 type Overlays = {
   overlays: OverlayMeta[];
   importOverlay: () => Promise<OverlayMeta | null>;
+  /** Downloads a map by URL (calendar polygon); replaces an earlier copy with the same name. */
+  importOverlayFromUrl: (url: string, name: string, format: OverlayFormat) => Promise<OverlayMeta>;
   removeOverlay: (id: string) => Promise<void>;
   setVisible: (id: string, visible: boolean) => Promise<void>;
   /** Set by the maps screen; the map screen fits to it once and clears it. */
   focusRequest: string | null;
   requestFocus: (id: string | null) => void;
+  /** A point to center the map on (calendar polygon without a map file); consumed like focusRequest. */
+  viewRequest: (LatLng & { zoom: number }) | null;
+  requestView: (v: (LatLng & { zoom: number }) | null) => void;
 
   /** Base-layer areas saved for use without internet. */
   areas: offline.OfflineArea[];
@@ -34,6 +39,7 @@ export function useOverlays(): Overlays {
 export function OverlaysProvider({ children }: { children: ReactNode }) {
   const [overlays, setOverlays] = useState<OverlayMeta[]>([]);
   const [focusRequest, requestFocus] = useState<string | null>(null);
+  const [viewRequest, requestView] = useState<(LatLng & { zoom: number }) | null>(null);
   const [areas, setAreas] = useState<offline.OfflineArea[]>([]);
   const [download, setDownload] = useState<{ areaId: string; done: number; total: number; part: number; parts: number } | null>(
     null
@@ -113,6 +119,19 @@ export function OverlaysProvider({ children }: { children: ReactNode }) {
     return meta;
   }, [overlays, commit]);
 
+  const importOverlayFromUrl = useCallback(
+    async (url: string, name: string, format: OverlayFormat) => {
+      const meta = await svc.importOverlayFromUrl(url, name, format);
+      // The same polygon opened again replaces its old copy instead of piling up.
+      const stale = overlays.filter((o) => o.name === meta.name);
+      stale.forEach((o) => svc.deleteOverlayFile(o));
+      await commit([...overlays.filter((o) => o.name !== meta.name), meta]);
+      requestFocus(meta.id);
+      return meta;
+    },
+    [overlays, commit]
+  );
+
   const removeOverlay = useCallback(
     async (id: string) => {
       const meta = overlays.find((o) => o.id === id);
@@ -133,17 +152,20 @@ export function OverlaysProvider({ children }: { children: ReactNode }) {
     () => ({
       overlays,
       importOverlay,
+      importOverlayFromUrl,
       removeOverlay,
       setVisible,
       focusRequest,
       requestFocus,
+      viewRequest,
+      requestView,
       areas,
       download,
       downloadArea,
       cancelDownload,
       removeArea,
     }),
-    [overlays, importOverlay, removeOverlay, setVisible, focusRequest, areas, download, downloadArea, cancelDownload, removeArea]
+    [overlays, importOverlay, importOverlayFromUrl, removeOverlay, setVisible, focusRequest, viewRequest, areas, download, downloadArea, cancelDownload, removeArea]
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
