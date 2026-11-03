@@ -1,8 +1,10 @@
 import { router } from 'expo-router';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, Pressable, StyleSheet, Switch, Text, View } from 'react-native';
 
+import { formatGameDate, type CalendarGame } from '../lib/calendar';
 import type { OverlayFormat } from '../lib/types';
+import { fetchUpcomingGames } from '../services/calendar';
 import { TILE_LAYERS } from '../lib/tiles';
 import { useOverlays } from '../state/overlays';
 import { confirmDestructive } from '../ui/confirm';
@@ -19,6 +21,11 @@ const FORMAT_ICON: Record<OverlayFormat, IconName> = {
 export default function MapsScreen() {
   const { overlays, importOverlay, removeOverlay, setVisible, requestFocus, areas, download, removeArea } = useOverlays();
   const [busy, setBusy] = useState(false);
+  // Ближайшие игры из календаря THE GRIM TEAM, у которых есть карта или координаты
+  const [games, setGames] = useState<CalendarGame[]>([]);
+  useEffect(() => {
+    fetchUpcomingGames().then((g) => setGames(g.slice(0, 5)), () => {});
+  }, []);
 
   const onImport = async () => {
     tap();
@@ -56,6 +63,36 @@ export default function MapsScreen() {
               работает без интернета.
             </Text>
           </Pressable>
+          {games.length > 0 && (
+            <View style={{ gap: 10 }}>
+              <Eyebrow style={{ paddingHorizontal: 4 }}>Ближайшие игры · календарь THE GRIM TEAM</Eyebrow>
+              {games.map((g) => (
+                <Pressable
+                  key={g.id}
+                  style={({ pressed }) => [styles.item, pressed && { borderColor: C.lineStrong }]}
+                  onPress={() => {
+                    tap();
+                    router.push({ pathname: '/polygon', params: { game: g.id } });
+                  }}
+                >
+                  <View style={styles.itemIcon}>
+                    <Icon name={g.mapUrl ? 'map-legend' : 'map-marker-radius-outline'} size={22} color={C.accent} />
+                  </View>
+                  <View style={{ flex: 1, gap: 4 }}>
+                    <Text style={styles.name} numberOfLines={1}>
+                      {g.title}
+                    </Text>
+                    <Text style={styles.meta} numberOfLines={1}>
+                      {formatGameDate(g.start)}
+                      {g.mapUrl ? ' · карта полигона' : ''}
+                      {g.points.length ? ` · точек ${g.points.length}` : ''}
+                    </Text>
+                  </View>
+                  <Icon name="chevron-right" size={22} color={C.dim} />
+                </Pressable>
+              ))}
+            </View>
+          )}
           {overlays.length > 0 && <Eyebrow style={{ paddingHorizontal: 4 }}>Загруженные · {overlays.length}</Eyebrow>}
         </View>
       }

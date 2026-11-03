@@ -62,6 +62,7 @@ export default function RootLayout() {
               <Stack.Screen name="side" options={{ title: 'Командование стороной' }} />
               <Stack.Screen name="scan" options={{ title: 'Сканировать QR', presentation: 'modal' }} />
               <Stack.Screen name="join" options={{ title: 'Приглашение' }} />
+              <Stack.Screen name="polygon" options={{ title: 'Игра из календаря' }} />
               <Stack.Screen name="replay" options={{ title: 'Записи игр' }} />
             </Stack>
           </OverlaysProvider>
