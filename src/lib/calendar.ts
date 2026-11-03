@@ -111,7 +111,7 @@ export function toCalendarGame(doc: FsDoc): CalendarGame {
 /** Upcoming, not cancelled games that have something to show on the map, soonest first. */
 export function upcomingWithMap(games: CalendarGame[], now = Date.now()): CalendarGame[] {
   return games
-    .filter((g) => !g.cancelled && Date.parse(g.start) > now - 12 * 3600_000 && (g.center || g.mapUrl))
+    .filter((g) => !g.cancelled && Date.parse(g.start) > now - 12 * 3600_000 && (g.mapUrl || g.points.length > 0))
     .sort((a, b) => Date.parse(a.start) - Date.parse(b.start));
 }
 

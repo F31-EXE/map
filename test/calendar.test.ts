@@ -29,14 +29,15 @@ test('toCalendarGame decodes a Firestore REST document', () => {
   assert.equal(formatFromName(g.mapUrl), 'kmz');
 });
 
-test('upcomingWithMap keeps future games with something to show', () => {
+test('upcomingWithMap keeps future games with an uploaded map or points', () => {
   const base = { location: '', mapName: '', points: [], cancelled: false };
   const now = Date.parse('2030-01-01T00:00:00Z');
   const list = upcomingWithMap(
     [
       { ...base, id: 'past', title: '', start: '2029-12-01T00:00:00Z', center: { lat: 1, lng: 1 }, mapUrl: '' },
       { ...base, id: 'b', title: '', start: '2030-03-01T00:00:00Z', center: null, mapUrl: 'https://x/m.kml' },
-      { ...base, id: 'a', title: '', start: '2030-02-01T00:00:00Z', center: { lat: 1, lng: 1 }, mapUrl: '' },
+      { ...base, id: 'a', title: '', start: '2030-02-01T00:00:00Z', center: { lat: 1, lng: 1 }, mapUrl: '', points: [{ kind: 'respawn', lat: 1, lng: 1, label: '' }] },
+      { ...base, id: 'only-place', title: '', start: '2030-02-01T00:00:00Z', center: { lat: 1, lng: 1 }, mapUrl: '' },
       { ...base, id: 'nothing', title: '', start: '2030-02-01T00:00:00Z', center: null, mapUrl: '' },
       { ...base, id: 'off', title: '', start: '2030-02-01T00:00:00Z', center: { lat: 1, lng: 1 }, mapUrl: '', cancelled: true },
     ],
