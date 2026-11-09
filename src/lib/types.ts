@@ -26,7 +26,12 @@ export type Team = {
   pinned?: PinnedMessage | null;
   /** Team game: the teams players are split into (set by the creator as game master). */
   factions?: Faction[];
+  /** Snail grid: NW corner of square А1, set by a commander for the whole squad. */
+  grid?: LatLng | null;
 };
+
+/** Grid over the map: none, UTM kilometre squares, or 500 m squares with the snail. */
+export type GridMode = 'off' | 'utm' | 'snail';
 
 export type PinnedMessage = { id: string; text: string; callsign: string; uid: string; at: number };
 
@@ -66,6 +71,8 @@ export type Member = {
   pts?: Record<string, number>;
   /** Mortar crews: maximum range in meters (circle on the map). */
   range?: number | null;
+  /** Map label instead of callsign and role (side view: the squad's name on its commander). */
+  mapLabel?: string;
 };
 
 export type OrderKind = 'order-move' | 'order-attack' | 'order-defend';

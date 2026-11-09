@@ -429,6 +429,15 @@ describe('status, assigned roles and pinned messages', () => {
     await assertFails(pin('carol'));
     await assertFails(pin('alice', 'x'.repeat(501)));
   });
+  test('commanders place the snail grid; fighters cannot; only a lat/lng point', async () => {
+    const team = (by: string) => doc(as(by), 'teams', TEAM);
+    await assertSucceeds(updateDoc(team('alice'), { grid: { lat: 56.83, lng: 60.61 } }));
+    await assertSucceeds(updateDoc(team('bob'), { grid: { lat: 56.84, lng: 60.62 } }));
+    await assertSucceeds(updateDoc(team('bob'), { grid: null }));
+    await assertFails(updateDoc(team('carol'), { grid: { lat: 56.83, lng: 60.61 } }));
+    await assertFails(updateDoc(team('alice'), { grid: { lat: 156, lng: 60.61 } }));
+    await assertFails(updateDoc(team('alice'), { grid: { lat: 56.83, lng: 60.61, x: 1 } }));
+  });
 });
 
 describe('moving markers', () => {

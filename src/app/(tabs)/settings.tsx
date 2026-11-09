@@ -164,13 +164,37 @@ export default function SettingsScreen() {
           onChange={(v) => run(() => s.setKeepAwake(v))}
         />
         <View style={styles.divider} />
-        <SettingRow
-          icon="grid"
-          title="Сетка координат"
-          sub="Квадраты UTM на карте, подписи по краям"
-          value={s.showGrid}
-          onChange={(v) => run(() => s.setShowGrid(v))}
-        />
+        <View style={styles.row}>
+          <View style={[styles.rowIcon, s.gridMode !== 'off' && { backgroundColor: C.accentSoft, borderColor: C.lineStrong }]}>
+            <Icon name={s.gridMode === 'snail' ? 'grid-large' : 'grid'} size={22} color={s.gridMode !== 'off' ? C.accent : C.dim} />
+          </View>
+          <View style={{ flex: 1, gap: 8 }}>
+            <View>
+              <Text style={styles.rowTitle}>Сетка на карте</Text>
+              <Text style={styles.sub}>UTM по 1 км или улитка: квадраты 500 м, деление 3×3</Text>
+            </View>
+            <View style={styles.chips}>
+              {(
+                [
+                  ['off', 'Нет'],
+                  ['utm', 'UTM'],
+                  ['snail', 'Улитка'],
+                ] as const
+              ).map(([m, label]) => (
+                <Pressable
+                  key={m}
+                  onPress={() => {
+                    tap();
+                    s.setGridMode(m);
+                  }}
+                  style={[styles.chip, s.gridMode === m && styles.chipOn]}
+                >
+                  <Text style={[styles.chipText, s.gridMode === m && { color: C.accentInk }]}>{label}</Text>
+                </Pressable>
+              ))}
+            </View>
+          </View>
+        </View>
       </Card>
 
       <RadioCard radio={s.mesh.radio} inTeam={Boolean(s.teamId)} peers={s.mesh.radioPeers} />
@@ -337,6 +361,18 @@ const styles = StyleSheet.create({
   rowTitle: { color: C.text, fontSize: 16, fontFamily: F.semibold },
   sub: { color: C.dim, fontSize: 13, fontFamily: F.regular, marginTop: 1 },
   divider: { height: StyleSheet.hairlineWidth, backgroundColor: C.line },
+  chips: { flexDirection: 'row', gap: 8 },
+  chip: {
+    paddingHorizontal: 14,
+    height: 32,
+    borderRadius: R.sm,
+    borderWidth: 1,
+    borderColor: C.lineStrong,
+    backgroundColor: C.elevated,
+    justifyContent: 'center',
+  },
+  chipOn: { backgroundColor: C.accent, borderColor: C.accent },
+  chipText: { color: C.text, fontFamily: F.semibold, fontSize: 13 },
   crash: { color: C.dim, fontFamily: F.mono, fontSize: 11 },
   version: { color: C.faint, fontFamily: F.mono, fontSize: 11, letterSpacing: 1.5, textAlign: 'center' },
 });

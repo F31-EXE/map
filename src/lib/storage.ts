@@ -33,6 +33,8 @@ export const KEYS = {
   mortarPos: 'tacmap.mortarPos',
   /** Meshtastic radio picked in settings ({ id, name }), reconnected on start. */
   radio: 'tacmap.radio',
+  /** Snail grid origin when not in a squad (in a squad it's on the team doc). */
+  gridOrigin: 'tacmap.gridOrigin',
 } as const;
 
 export async function loadJson<T>(key: string, fallback: T): Promise<T> {

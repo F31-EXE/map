@@ -31,6 +31,7 @@ import { useMortar } from '../../state/useMortar';
 import { AddMarkerModal } from '../../ui/AddMarkerModal';
 import { OfflineSheet } from '../../ui/OfflineSheet';
 import { RegionPrompt } from '../../ui/RegionPrompt';
+import { GridSheet } from '../../ui/GridSheet';
 import { fireText, MortarPanel, MortarSheet } from '../../ui/MortarPanel';
 import { WavePanel } from '../../ui/WavePanel';
 import { ScoreRow } from '../../ui/GameCard';
@@ -204,7 +205,11 @@ export default function MapScreen() {
   const [baseLayer, setBaseLayer] = useState<BaseLayerId>('yandex-sat');
   const [layerPicker, setLayerPicker] = useState(false);
   const [follow, setFollow] = useState(false);
-  const [view, setView] = useState<(LatLng & { zoom: number; bounds?: Bounds }) | null>(null);
+  const [view, setView] = useState<(LatLng & { zoom: number; bounds?: Bounds; snail?: string | null }) | null>(null);
+  const [gridSheet, setGridSheet] = useState(false);
+  // Map rotation: bearing as turned by hand, or following the compass.
+  const [bearing, setBearing] = useState(0);
+  const [headingUp, setHeadingUp] = useState(false);
   const center = view;
   const [offlineSheet, setOfflineSheet] = useState(false);
   // Downloaded areas, for the map page to read tiles from disk.
@@ -351,7 +356,7 @@ export default function MapScreen() {
   // Votes apply to my own squad's shared markers.
   const canVote = (m: TacMarker) => inTeam && !m.personal && (!m.teamId || m.teamId === session.teamId);
 
-  const toolbarButtons = 5 + (visibleMembers.length > 0 ? 1 : 0);
+  const toolbarButtons = 6 + (visibleMembers.length > 0 ? 1 : 0);
   const toolbarWidth = toolbarButtons * 50 + 8;
 
   // Landscape top row: [team pill][toolbar].
@@ -427,7 +432,11 @@ export default function MapScreen() {
         self={position}
         selfRole={session.role}
         selfColor={session.teamColor}
-        grid={session.showGrid}
+        grid={session.gridMode}
+        gridOrigin={session.gridOrigin}
+        headingUp={headingUp}
+        onBearingChanged={setBearing}
+        onHeadingUpChanged={setHeadingUp}
         topInset={landscape ? insets.top + 60 : pillTop + 58}
         follow={follow}
         members={side.mapMembers}
@@ -556,11 +565,37 @@ export default function MapScreen() {
           <ToolbarButton icon="map-plus" label="Карты полигона" onPress={() => router.push('/maps')} />
           <View style={[styles.toolbarSep, landscape && styles.toolbarSepRow]} />
           <ToolbarButton
-            icon={session.showGrid ? 'grid' : 'grid-off'}
+            icon={session.gridMode === 'snail' ? 'grid-large' : session.gridMode === 'utm' ? 'grid' : 'grid-off'}
             label="Сетка координат"
-            active={session.showGrid}
-            onPress={() => session.setShowGrid(!session.showGrid)}
+            active={session.gridMode !== 'off'}
+            onPress={() => setGridSheet(true)}
           />
+          <View style={[styles.toolbarSep, landscape && styles.toolbarSepRow]} />
+          <Pressable
+            accessibilityLabel={headingUp ? 'Карта по компасу, нажмите для севера вверху' : 'Поворот карты'}
+            hitSlop={4}
+            onPress={() => {
+              tap();
+              if (headingUp) {
+                setHeadingUp(false);
+                mapRef.current?.resetNorth();
+              } else if (Math.abs(((bearing + 180) % 360) - 180) > 1) {
+                mapRef.current?.resetNorth();
+              } else if (heading == null) {
+                Alert.alert('Нет компаса', 'Компас телефона ещё не дал направление');
+              } else {
+                setFollow(true);
+                mapRef.current?.centerOnSelf();
+                setHeadingUp(true);
+              }
+            }}
+            style={({ pressed }) => [styles.toolbarButton, pressed && { opacity: 0.6 }]}
+          >
+            {/* The needle points north on screen. */}
+            <View style={{ transform: [{ rotate: `${bearing}deg` }] }}>
+              <Icon name="navigation" size={22} color={headingUp ? C.accent : C.text} />
+            </View>
+          </Pressable>
           <View style={[styles.toolbarSep, landscape && styles.toolbarSepRow]} />
           <ToolbarButton
             icon="draw"
@@ -753,9 +788,9 @@ export default function MapScreen() {
         ]}
       >
         <View style={{ flex: 1.3 }}>
-          {!landscape && <Text style={eyebrow}>Перекрестие</Text>}
+          {!landscape && <Text style={eyebrow}>{center?.snail ? 'Квадрат' : 'Перекрестие'}</Text>}
           <Text style={[styles.hudValue, landscape && styles.hudValueCompact]} numberOfLines={1} adjustsFontSizeToFit>
-            {center ? formatCoords(center) : '—'}
+            {center?.snail ? `${center.snail} по улитке` : center ? formatCoords(center) : '—'}
           </Text>
         </View>
         <View style={styles.hudSep} />
@@ -788,6 +823,21 @@ export default function MapScreen() {
         aimDistance={gunAt && center ? distanceMeters(gunAt, center) : null}
         onChange={mortar.setConfig}
         onClose={() => setMortarSheet(false)}
+      />
+      <GridSheet
+        visible={gridSheet}
+        mode={session.gridMode}
+        origin={session.gridOrigin}
+        canPlace={!inTeam || session.canCommand}
+        onMode={(m) => session.setGridMode(m)}
+        onPlace={() => {
+          if (!center) return;
+          session
+            .setGridOrigin({ lat: center.lat, lng: center.lng })
+            .catch((e: Error) => Alert.alert('Не удалось', e.message));
+        }}
+        onReset={() => session.setGridOrigin(null).catch((e: Error) => Alert.alert('Не удалось', e.message))}
+        onClose={() => setGridSheet(false)}
       />
       <OfflineSheet visible={offlineSheet} onClose={() => setOfflineSheet(false)} layer={baseLayer} view={view} />
       <RegionPrompt position={position} layer={baseLayer} />
@@ -900,6 +950,7 @@ export default function MapScreen() {
         subtitle={
           selectedMember &&
           [
+            selectedMember.mapLabel ? `командир отряда «${selectedMember.mapLabel}»` : null,
             ROLES[selectedMember.role].title,
             selectedMember.status !== 'alive' ? STATUSES[selectedMember.status].title.toUpperCase() : null,
             selectedMember.canCommand || selectedMember.id === session.team?.ownerId ? 'отдаёт приказы' : null,

@@ -37,7 +37,7 @@ import {
 import type { TrackPoint } from '../lib/tracks';
 import { nextWave, type Wave } from '../lib/waves';
 import { KEYS, loadJson, newId, saveJson } from '../lib/storage';
-import type { LatLng, Member, MemberStatus, SelfPosition, TacMarker, Team } from '../lib/types';
+import type { GridMode, LatLng, Member, MemberStatus, SelfPosition, TacMarker, Team } from '../lib/types';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { Alert, Vibration } from 'react-native';
 
@@ -105,8 +105,12 @@ type Session = {
   keepAwake: boolean;
   setKeepAwake: (v: boolean) => Promise<void>;
   /** Coordinate grid on the map. */
-  showGrid: boolean;
-  setShowGrid: (v: boolean) => Promise<void>;
+  gridMode: GridMode;
+  setGridMode: (v: GridMode) => Promise<void>;
+  /** Snail grid origin (NW corner of А1): the squad's, or this phone's when solo. */
+  gridOrigin: LatLng | null;
+  /** Commanders (or anyone outside a squad) move square А1; null resets. */
+  setGridOrigin: (p: LatLng | null) => Promise<void>;
 
   /** Own game state: alive, dead (waiting for respawn) or away. */
   status: MemberStatus;
@@ -179,7 +183,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const [teamError, setTeamError] = useState<string | null>(null);
   const [shareLocation, setShareLocationState] = useState(true);
   const [orderSound, setOrderSoundState] = useState(true);
-  const [showGrid, setShowGridState] = useState(false);
+  const [gridMode, setGridModeState] = useState<GridMode>('off');
+  const [localGridOrigin, setLocalGridOrigin] = useState<LatLng | null>(null);
   const [keepAwake, setKeepAwakeState] = useState(false);
   const [background, setBackgroundState] = useState(false);
   const [status, setStatusState] = useState<MemberStatus>('alive');
@@ -197,7 +202,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         loadJson<boolean>(KEYS.shareLocation, true),
         loadJson<boolean>(KEYS.orderSound, true),
         loadJson<TacMarker[]>(KEYS.personalMarkers, []),
-        loadJson<boolean>(KEYS.grid, false),
+        // Older versions stored a plain on/off for the UTM grid.
+        loadJson<boolean | GridMode>(KEYS.grid, false),
         loadJson<MemberStatus>(KEYS.status, 'alive'),
         loadJson<boolean>(KEYS.keepAwake, false),
         loadJson<boolean>(KEYS.background, false),
@@ -219,7 +225,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         setTimeout(() => startBackgroundLocation().catch(() => {}), 4000);
       }
       setKeepAwakeState(awake);
-      setShowGridState(grid);
+      setGridModeState(grid === true ? 'utm' : grid === 'utm' || grid === 'snail' ? grid : 'off');
+      loadJson<LatLng | null>(KEYS.gridOrigin, null).then(setLocalGridOrigin);
       setStatusState(st === 'dead' || st === 'afk' ? st : 'alive');
       setCallsignState(cs);
       setRoleState(roleOf(r));
@@ -572,10 +579,23 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     };
   }, [keepAwake]);
 
-  const setShowGrid = useCallback(async (v: boolean) => {
-    setShowGridState(v);
+  const setGridMode = useCallback(async (v: GridMode) => {
+    setGridModeState(v);
     await saveJson(KEYS.grid, v);
   }, []);
+
+  const gridOrigin = teamId ? (team?.grid ?? null) : localGridOrigin;
+  const setGridOrigin = useCallback(
+    async (p: LatLng | null) => {
+      const v = p && { lat: p.lat, lng: p.lng };
+      if (teamId) await teams.setGridOrigin(teamId, v);
+      else {
+        setLocalGridOrigin(v);
+        await saveJson(KEYS.gridOrigin, v);
+      }
+    },
+    [teamId]
+  );
 
   const setTeamColor = useCallback(
     async (color: string) => {
@@ -851,6 +871,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       KEYS.baseLayer,
       KEYS.regionPrompted,
       KEYS.grid,
+      KEYS.gridOrigin,
       KEYS.keepAwake,
       KEYS.orderSound,
     ]);
@@ -1037,8 +1058,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       reportPosition,
       orderSound,
       setOrderSound,
-      showGrid,
-      setShowGrid,
+      gridMode,
+      setGridMode,
+      gridOrigin,
+      setGridOrigin,
       keepAwake,
       setKeepAwake,
       background,
@@ -1092,8 +1115,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       reportPosition,
       orderSound,
       setOrderSound,
-      showGrid,
-      setShowGrid,
+      gridMode,
+      setGridMode,
+      gridOrigin,
+      setGridOrigin,
       keepAwake,
       setKeepAwake,
       background,

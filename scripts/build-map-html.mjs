@@ -14,6 +14,8 @@ const read = (p) => readFileSync(p, 'utf8');
 const leafletJs = read(join(leafletDir, 'dist/leaflet.js'));
 const leafletCss = read(join(leafletDir, 'dist/leaflet.css'));
 const heatJs = read(join(dirname(require.resolve('leaflet.heat/package.json')), 'dist/leaflet-heat.js'));
+// Map rotation (two-finger gesture, heading-up); patches Leaflet, so it loads right after it.
+const rotateJs = read(join(dirname(require.resolve('leaflet-rotate/package.json')), 'dist/leaflet-rotate.js'));
 const appJs = read(join(root, 'src/map/web/map.js'));
 const appCss = read(join(root, 'src/map/web/map.css'));
 
@@ -31,6 +33,7 @@ const html = `<!DOCTYPE html>
 <body>
 <div id="map"></div>
 <script>${safe(leafletJs)}</script>
+<script>${safe(rotateJs)}</script>
 <script>${safe(heatJs)}</script>
 <script>${safe(appJs)}</script>
 </body>

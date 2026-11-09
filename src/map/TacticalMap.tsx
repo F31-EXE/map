@@ -4,7 +4,7 @@ import { formatClock } from '../lib/geo';
 import { isAdminKind, isOrder, MARKER_KINDS } from '../lib/markerKinds';
 import { ROLES, type RoleId } from '../lib/roles';
 import type { Bounds } from '../lib/tiles';
-import type { LatLng, Member, OverlayMeta, SelfPosition, TacMarker } from '../lib/types';
+import type { GridMode, LatLng, Member, OverlayMeta, SelfPosition, TacMarker } from '../lib/types';
 import { loadOverlayPayload } from '../services/overlays';
 import { MapFrame, type MapFrameHandle } from './MapFrame';
 
@@ -32,6 +32,8 @@ export type TacticalMapHandle = {
   fitOverlay: (id: string) => void;
   setView: (p: LatLng, zoom?: number) => void;
   fitPoints: (points: LatLng[]) => void;
+  /** Turns the map back to north-up. */
+  resetNorth: () => void;
 };
 
 type Props = {
@@ -42,8 +44,16 @@ type Props = {
   selfRole?: RoleId;
   selfColor?: string;
   follow: boolean;
-  /** Coordinate grid overlay. */
-  grid?: boolean;
+  /** Grid overlay: UTM squares or the 500 m snail grid. */
+  grid?: GridMode;
+  /** Snail grid: NW corner of square А1 (null: counted from 5 km blocks). */
+  gridOrigin?: LatLng | null;
+  /** Turn the map with the compass so what's ahead is at the top. */
+  headingUp?: boolean;
+  /** Map bearing in degrees (0 = north up), as the user turns it. */
+  onBearingChanged?: (bearing: number) => void;
+  /** Heading-up switched itself off (the user turned the map by hand). */
+  onHeadingUpChanged?: (on: boolean) => void;
   /** Downloaded base-layer areas (native only): tiles load from disk first. */
   offline?: { root: string; areas: unknown[] } | null;
   members: Member[];
@@ -65,7 +75,7 @@ type Props = {
   onMarkerDragStart?: (id: string) => void;
   onMarkerMoved?: (id: string, p: LatLng) => void;
   onMemberPress?: (id: string) => void;
-  onViewChanged?: (p: LatLng & { zoom: number; bounds?: Bounds }) => void;
+  onViewChanged?: (p: LatLng & { zoom: number; bounds?: Bounds; snail?: string | null }) => void;
   onFollowChanged?: (follow: boolean) => void;
   onOverlayError?: (id: string, message: string) => void;
   /** Game analysis overlay: tracks as [lat, lng] segments, heat as [lat, lng] samples. */
@@ -126,6 +136,7 @@ export function TacticalMap(props: Props) {
       fitOverlay: (id) => command({ type: 'fitOverlay', payload: { id } }),
       setView: (p, zoom) => command({ type: 'setView', payload: { ...p, zoom } }),
       fitPoints: (points) => command({ type: 'fitPoints', payload: points }),
+      resetNorth: () => command({ type: 'setBearing', payload: { bearing: 0 } }),
     }),
     [command]
   );
@@ -152,9 +163,18 @@ export function TacticalMap(props: Props) {
     });
   }, [ready, generation, props.self, props.selfRole, props.selfColor, send]);
 
+  const { grid, gridOrigin, headingUp } = props;
+  const originLat = gridOrigin?.lat;
+  const originLng = gridOrigin?.lng;
   useEffect(() => {
-    if (ready) send({ type: 'setGrid', payload: { on: Boolean(props.grid) } });
-  }, [ready, generation, props.grid, send]);
+    if (!ready) return;
+    const origin = originLat != null && originLng != null ? { lat: originLat, lng: originLng } : null;
+    send({ type: 'setGrid', payload: { mode: grid ?? 'off', origin } });
+  }, [ready, generation, grid, originLat, originLng, send]);
+
+  useEffect(() => {
+    if (ready) send({ type: 'setHeadingUp', payload: { on: Boolean(headingUp) } });
+  }, [ready, generation, headingUp, send]);
 
   const { offline } = props;
   useEffect(() => {
@@ -173,10 +193,10 @@ export function TacticalMap(props: Props) {
         id: m.id,
         lat: m.lat,
         lng: m.lng,
-        callsign: m.callsign,
+        callsign: m.mapLabel ?? m.callsign,
         color: m.color ?? props.teamColor,
         rolePath: ROLES[m.role].path,
-        roleTitle: ROLES[m.role].title,
+        roleTitle: m.mapLabel ? null : ROLES[m.role].title,
         commander: m.leader ?? (m.canCommand || m.id === props.ownerId),
         heading: m.heading,
         status: m.status,
@@ -307,6 +327,12 @@ export function TacticalMap(props: Props) {
           break;
         case 'viewChanged':
           props.onViewChanged?.(p);
+          break;
+        case 'bearingChanged':
+          props.onBearingChanged?.(p.bearing);
+          break;
+        case 'headingUpChanged':
+          props.onHeadingUpChanged?.(p.on);
           break;
         case 'drawChanged':
           props.onDrawChanged?.(p.points);

@@ -122,8 +122,12 @@ export default function SideScreen() {
           <Icon name={side.showAll ? 'account-multiple' : 'star'} size={22} color={side.showAll ? C.accent : C.warn} />
         </View>
         <View style={{ flex: 1 }}>
-          <Text style={styles.cardTitle}>{side.showAll ? 'Все бойцы' : 'Только командиры'}</Text>
-          <Text style={styles.sub}>Кого из отрядов показывать на вашей карте</Text>
+          <Text style={styles.cardTitle}>{side.showAll ? 'Все бойцы' : 'Командиры отрядов'}</Text>
+          <Text style={styles.sub}>
+            {side.showAll
+              ? 'На карте все бойцы всех отрядов'
+              : 'Одна метка на отряд: командир с названием отряда'}
+          </Text>
         </View>
         <Switch
           value={side.showAll}

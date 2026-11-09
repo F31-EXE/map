@@ -92,6 +92,13 @@ service cloud.firestore {
     function validFactions(f) {
       return f == null || (f is list && f.size() <= 6);
     }
+    // Snail grid origin: NW corner of square А1.
+    function validGrid(g) {
+      return g == null
+        || (g is map && g.keys().hasOnly(['lat', 'lng'])
+          && g.lat is number && g.lng is number
+          && g.lat >= -90 && g.lat <= 90 && g.lng >= -180 && g.lng <= 180);
+    }
     function validPinned(p) {
       return p == null
         || (p.text is string && p.text.size() <= 500
@@ -151,10 +158,12 @@ service cloud.firestore {
           && (!('color' in request.resource.data) || validColor(request.resource.data.color))
           && (request.resource.data.get('sideId', null) == null
             || request.resource.data.get('sideCode', null) == get(sidePath(request.resource.data.sideId)).data.code))
-        // Commanders start and stop movement recording and pin chat messages.
+        // Commanders start and stop movement recording, pin chat messages and place
+        // the snail grid's square А1.
         || (canCommand(teamId)
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['recordingId', 'pinned'])
-          && validPinned(request.resource.data.get('pinned', null)))
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['recordingId', 'pinned', 'grid'])
+          && validPinned(request.resource.data.get('pinned', null))
+          && validGrid(request.resource.data.get('grid', null)))
         // The side commander may drop a squad from the side, and nothing else.
         || (isSideOwner(resource.data.get('sideId', null))
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['sideId', 'sideCode'])

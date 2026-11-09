@@ -55,6 +55,13 @@
     zoomSnap: 0,
     zoomDelta: 0.5,
     wheelPxPerZoomLevel: 120,
+    // leaflet-rotate: two-finger twist and Shift+wheel turn the map; no tilt.
+    rotate: true,
+    bearing: 0,
+    touchRotate: true,
+    shiftKeyRotate: true,
+    rotateControl: false,
+    pitchDrag: false,
   }).setView([55.751, 37.618], 10);
   map.attributionControl.setPrefix(false);
   // Exposed for automated layout tests.
@@ -172,8 +179,16 @@
   }
   var selfLook = null;
   var coneAngle = null;
+  var selfHeading = null;
+
+  // Icons stay upright when the map turns, so a compass heading points at
+  // heading + bearing on screen.
+  function bearing() {
+    return map.getBearing ? map.getBearing() : 0;
+  }
 
   function setHeading(heading) {
+    selfHeading = heading;
     var el = selfMarker && selfMarker.getElement();
     var cone = el && el.querySelector('.self-cone');
     if (!cone) return;
@@ -181,8 +196,9 @@
       cone.style.display = 'none';
       return;
     }
+    var onScreen = heading + bearing();
     // Unwrap so 359° → 1° turns 2° forward instead of spinning all the way back.
-    coneAngle = coneAngle == null ? heading : coneAngle + ((((heading - coneAngle) % 360) + 540) % 360) - 180;
+    coneAngle = coneAngle == null ? onScreen : coneAngle + ((((onScreen - coneAngle) % 360) + 540) % 360) - 180;
     cone.style.display = '';
     cone.style.transform = 'rotate(' + coneAngle + 'deg)';
   }
@@ -219,8 +235,49 @@
       selfAccuracy.setRadius(p.accuracy || 0);
     }
     setHeading(p.heading);
+    if (headingUp && p.heading != null) turnMap(360 - p.heading);
     if (follow) map.panTo(ll, { animate: true });
   }
+
+  // Map bearing: north-up, turned by hand (two fingers), or following the compass
+  // ("heading up": what's ahead of you is at the top of the screen).
+  var headingUp = false;
+  var turningByCode = false;
+
+  function turnMap(b) {
+    turningByCode = true;
+    try {
+      map.setBearing(b);
+    } finally {
+      turningByCode = false;
+    }
+  }
+
+  var bearingPostAt = 0;
+  map.on('rotate', function () {
+    if (!turningByCode && headingUp) {
+      // Turned by hand: stop following the compass.
+      headingUp = false;
+      post('headingUpChanged', { on: false });
+    }
+    setHeading(selfHeading);
+    Object.keys(memberMarkers).forEach(function (id) {
+      var mk = memberMarkers[id];
+      applyMemberHeading(mk, mk._heading);
+    });
+    // At most a few updates a second to the app, and always the final one.
+    var now = Date.now();
+    clearTimeout(bearingTail);
+    if (now - bearingPostAt > 150) {
+      bearingPostAt = now;
+      post('bearingChanged', { bearing: bearing() });
+    } else {
+      bearingTail = setTimeout(function () {
+        post('bearingChanged', { bearing: bearing() });
+      }, 200);
+    }
+  });
+  var bearingTail = null;
 
   function centerOnSelf(zoom) {
     if (!selfMarker) return;
@@ -308,7 +365,7 @@
       return;
     }
     dir.style.display = '';
-    dir.style.transform = 'rotate(' + heading + 'deg)';
+    dir.style.transform = 'rotate(' + (heading + bearing()) + 'deg)';
   }
 
   function memberKey(m) {
@@ -1285,6 +1342,7 @@
       lng: c.lng,
       zoom: map.getZoom(),
       bounds: { south: b.getSouth(), west: b.getWest(), north: b.getNorth(), east: b.getEast() },
+      snail: snailText(c),
     });
   }
   map.on('moveend', postView);
@@ -1366,7 +1424,10 @@
   }
 
   var gridLayer = L.layerGroup();
-  var gridOn = false;
+  // 'off' | 'utm' | 'snail'
+  var gridMode = 'off';
+  // Snail grid: NW corner of square А1 (shared by the squad), or null for the default.
+  var snailOrigin = null;
   // Screen area covered by native panels at the top; labels go just below it.
   var gridTopInset = 0;
   var gridBottomInset = 0;
@@ -1379,66 +1440,211 @@
     return String(km % 100).padStart(2, '0') + '.' + String(Math.round((v % 1000) / 100) % 10);
   }
 
-  function drawGrid() {
-    gridLayer.clearLayers();
-    if (!gridOn) return;
+  // snail:begin
+  // «Улитка»: 500 m squares named by letter (columns, west to east) and number (rows,
+  // north to south) from the NW corner of А1; each square splits into 3×3 numbered in a
+  // spiral from the top-left corner with 9 in the middle, and each ninth again.
+  var SNAIL = [[1, 2, 3], [8, 9, 4], [7, 6, 5]];
+  var SNAIL_LETTERS = 'АБВГДЕЖЗИКЛМНОПРСТУФХЦЧШЩЭЮЯ';
+  var SNAIL_SIZE = 500;
+  // Without a squad origin, squares are counted from the NW corner of each 5 km block.
+  var SNAIL_BLOCK = 5000;
+
+  function snailOriginFor(e, n, origin) {
+    if (origin) return origin;
+    return { e: Math.floor(e / SNAIL_BLOCK) * SNAIL_BLOCK, n: Math.ceil(n / SNAIL_BLOCK) * SNAIL_BLOCK };
+  }
+
+  function snailName(col, row) {
+    var k = SNAIL_LETTERS.length;
+    return SNAIL_LETTERS.charAt(((col % k) + k) % k) + String(row >= 0 ? row + 1 : row);
+  }
+
+  // Square and snail numbers of a UTM point: { col, row, name, s1, s2 }.
+  function snailCell(e, n, origin) {
+    var o = snailOriginFor(e, n, origin);
+    var x = (e - o.e) / SNAIL_SIZE;
+    var y = (o.n - n) / SNAIL_SIZE;
+    var col = Math.floor(x);
+    var row = Math.floor(y);
+    var fx = (x - col) * 3;
+    var fy = (y - row) * 3;
+    var i1 = Math.min(2, Math.floor(fx));
+    var j1 = Math.min(2, Math.floor(fy));
+    var i2 = Math.min(2, Math.floor((fx - i1) * 3));
+    var j2 = Math.min(2, Math.floor((fy - j1) * 3));
+    return { col: col, row: row, name: snailName(col, row), s1: SNAIL[j1][i1], s2: SNAIL[j2][i2] };
+  }
+  // snail:end
+
+  function utmZoneAt(ll) {
+    return Math.floor((ll.lng + 180) / 6) + 1;
+  }
+
+  // Snail origin in UTM of the zone on screen.
+  function snailUtmOrigin(zone) {
+    if (!snailOrigin) return null;
+    var u = toUtm(snailOrigin.lat, snailOrigin.lng, zone);
+    return { e: u.e, n: u.n };
+  }
+
+  // "Б3-7-4" for a point, when the snail grid is on.
+  function snailText(ll) {
+    if (gridMode !== 'snail') return null;
+    var zone = utmZoneAt(map.getCenter());
+    var u = toUtm(ll.lat, ll.lng, zone);
+    var c = snailCell(u.e, u.n, snailUtmOrigin(zone));
+    return c.name + '-' + c.s1 + '-' + c.s2;
+  }
+
+  // Where a grid line leaves the screen through the top (or left) edge, for its label.
+  // Works at any map bearing: everything is done in screen pixels.
+  function edgePoint(a, b, preferTop) {
+    var size = map.getSize();
+    var pa = map.latLngToContainerPoint(a);
+    var pb = map.latLngToContainerPoint(b);
+    var topY = gridTopInset + 6;
+    var bottomY = size.y - gridBottomInset - 8;
+    var atTop = function () {
+      if ((pa.y - topY) * (pb.y - topY) > 0 || pa.y === pb.y) return null;
+      var x = pa.x + ((topY - pa.y) / (pb.y - pa.y)) * (pb.x - pa.x);
+      return x >= 4 && x <= size.x - 30 ? L.point(x, topY) : null;
+    };
+    var atLeft = function () {
+      var X = 6;
+      if ((pa.x - X) * (pb.x - X) > 0 || pa.x === pb.x) return null;
+      var y = pa.y + ((X - pa.x) / (pb.x - pa.x)) * (pb.y - pa.y);
+      return y >= topY + 18 && y <= bottomY ? L.point(X, y) : null;
+    };
+    var p = preferTop ? atTop() || atLeft() : atLeft() || atTop();
+    return p ? map.containerPointToLatLng(p) : null;
+  }
+
+  function gridFrame() {
     var b = map.getBounds();
     var c = map.getCenter();
-    var zone = Math.floor((c.lng + 180) / 6) + 1;
-    var south = c.lat < 0;
+    var zone = utmZoneAt(c);
     var size = map.getSize();
-    var metersPerPx = map.distance(map.containerPointToLatLng([0, size.y / 2]), map.containerPointToLatLng([size.x, size.y / 2])) / size.x;
+    var metersPerPx =
+      map.distance(map.containerPointToLatLng([0, size.y / 2]), map.containerPointToLatLng([size.x, size.y / 2])) / size.x;
+    var corners = [b.getSouthWest(), b.getNorthWest(), b.getNorthEast(), b.getSouthEast()].map(function (p) {
+      return toUtm(p.lat, p.lng, zone);
+    });
+    return {
+      zone: zone,
+      south: c.lat < 0,
+      metersPerPx: metersPerPx,
+      minE: Math.min.apply(null, corners.map(function (p) { return p.e; })),
+      maxE: Math.max.apply(null, corners.map(function (p) { return p.e; })),
+      minN: Math.min.apply(null, corners.map(function (p) { return p.n; })),
+      maxN: Math.max.apply(null, corners.map(function (p) { return p.n; })),
+    };
+  }
+
+  function gridMarker(ll, cls, text) {
+    L.marker(ll, {
+      interactive: false,
+      keyboard: false,
+      icon: L.divIcon({ className: cls, html: '<span>' + text + '</span>', iconSize: [0, 0] }),
+    }).addTo(gridLayer);
+  }
+
+  function drawUtm(f) {
     var step = GRID_STEPS[GRID_STEPS.length - 1];
     for (var i = 0; i < GRID_STEPS.length; i++) {
-      if (GRID_STEPS[i] / metersPerPx >= 90) {
+      if (GRID_STEPS[i] / f.metersPerPx >= 90) {
         step = GRID_STEPS[i];
         break;
       }
     }
-    var corners = [b.getSouthWest(), b.getNorthWest(), b.getNorthEast(), b.getSouthEast()].map(function (p) {
-      return toUtm(p.lat, p.lng, zone);
-    });
-    var minE = Math.min.apply(null, corners.map(function (p) { return p.e; }));
-    var maxE = Math.max.apply(null, corners.map(function (p) { return p.e; }));
-    var minN = Math.min.apply(null, corners.map(function (p) { return p.n; }));
-    var maxN = Math.max.apply(null, corners.map(function (p) { return p.n; }));
     var style = { color: '#8EF07A', weight: 1, opacity: 0.55, interactive: false };
-    var labelAt = function (ll, text, cls) {
-      L.marker(ll, {
-        interactive: false,
-        keyboard: false,
-        icon: L.divIcon({ className: 'grid-label ' + cls, html: '<span>' + text + '</span>', iconSize: [0, 0] }),
-      }).addTo(gridLayer);
-    };
-    var e0 = Math.floor(minE / step) * step;
-    var n0 = Math.floor(minN / step) * step;
-    var top = map.containerPointToLatLng([0, gridTopInset + 6]).lat;
-    var left = map.containerPointToLatLng([6, 0]).lng;
-    for (var e = e0; e <= maxE + step; e += step) {
-      var line = [fromUtm(e, minN - step, zone, south), fromUtm(e, maxN + step, zone, south)];
+    for (var e = Math.floor(f.minE / step) * step; e <= f.maxE + step; e += step) {
+      var line = [fromUtm(e, f.minN - step, f.zone, f.south), fromUtm(e, f.maxN + step, f.zone, f.south)];
       L.polyline(line, style).addTo(gridLayer);
-      // Where this easting line crosses the top edge of the screen.
-      var f = (top - line[0][0]) / (line[1][0] - line[0][0]);
-      labelAt([top, line[0][1] + f * (line[1][1] - line[0][1])], gridLabel(e, step), 'grid-top');
+      var at = edgePoint(line[0], line[1], true);
+      if (at) gridMarker(at, 'grid-label grid-top', gridLabel(e, step));
     }
-    for (var n = n0; n <= maxN + step; n += step) {
-      var row = [fromUtm(minE - step, n, zone, south), fromUtm(maxE + step, n, zone, south)];
+    for (var n = Math.floor(f.minN / step) * step; n <= f.maxN + step; n += step) {
+      var row = [fromUtm(f.minE - step, n, f.zone, f.south), fromUtm(f.maxE + step, n, f.zone, f.south)];
       L.polyline(row, style).addTo(gridLayer);
-      var g = (left - row[0][1]) / (row[1][1] - row[0][1]);
-      var at = [row[0][0] + g * (row[1][0] - row[0][0]), left];
-      // Skip labels hidden under the native panels.
-      var py = map.latLngToContainerPoint(at).y;
-      if (py > gridTopInset + 24 && py < size.y - gridBottomInset - 8) labelAt(at, gridLabel(n, step), 'grid-left');
+      var at2 = edgePoint(row[0], row[1], false);
+      if (at2) gridMarker(at2, 'grid-label grid-left', gridLabel(n, step));
     }
   }
 
+  function drawSnail(f) {
+    var px = SNAIL_SIZE / f.metersPerPx;
+    // Zoomed far out the squares would be a solid mesh.
+    if (px < 14) return;
+    var origin = snailUtmOrigin(f.zone);
+    var o = origin || { e: 0, n: 0 };
+    var levels = [{ size: SNAIL_SIZE, style: { color: '#FFC83D', weight: 2, opacity: 0.85, interactive: false } }];
+    if (px / 3 >= 40) levels.push({ size: SNAIL_SIZE / 3, style: { color: '#FFC83D', weight: 1, opacity: 0.5, interactive: false } });
+    if (px / 9 >= 34) {
+      levels.push({ size: SNAIL_SIZE / 9, style: { color: '#FFFFFF', weight: 1, opacity: 0.3, dashArray: '3 5', interactive: false } });
+    }
+    // Lines: coarse last so they sit on top.
+    for (var li = levels.length - 1; li >= 0; li--) {
+      var st = levels[li].size;
+      var e0 = o.e + Math.floor((f.minE - o.e) / st) * st;
+      var n0 = o.n + Math.floor((f.minN - o.n) / st) * st;
+      for (var e = e0; e <= f.maxE + st; e += st) {
+        L.polyline([fromUtm(e, f.minN - st, f.zone, f.south), fromUtm(e, f.maxN + st, f.zone, f.south)], levels[li].style).addTo(gridLayer);
+      }
+      for (var n = n0; n <= f.maxN + st; n += st) {
+        L.polyline([fromUtm(f.minE - st, n, f.zone, f.south), fromUtm(f.maxE + st, n, f.zone, f.south)], levels[li].style).addTo(gridLayer);
+      }
+    }
+    // Square names in each square's NW corner; snail numbers in cell middles.
+    var finest = levels[levels.length - 1].size;
+    var cells = 0;
+    var e1 = o.e + Math.floor((f.minE - o.e) / finest) * finest;
+    var n1 = o.n + Math.floor((f.minN - o.n) / finest) * finest;
+    for (var ce = e1; ce <= f.maxE; ce += finest) {
+      for (var cn = n1; cn <= f.maxN + finest; cn += finest) {
+        if (++cells > 2500) return;
+        var mid = snailCell(ce + finest / 2, cn - finest / 2, origin);
+        var center = fromUtm(ce + finest / 2, cn - finest / 2, f.zone, f.south);
+        if (levels.length === 3) gridMarker(center, 'snail-num snail-num2', mid.s1 + '-' + mid.s2);
+        else if (levels.length === 2) gridMarker(center, 'snail-num', String(mid.s1));
+        // The NW corner of a big square gets its name. Default origins are multiples
+        // of the square size, so { 0, 0 } lines up with them.
+        var k = Math.round(SNAIL_SIZE / finest);
+        var ix = Math.round((ce - o.e) / finest);
+        var iy = Math.round((o.n - cn) / finest);
+        if (px >= 40 && ((ix % k) + k) % k === 0 && ((iy % k) + k) % k === 0) {
+          gridMarker(fromUtm(ce, cn, f.zone, f.south), 'snail-label', mid.name);
+        }
+      }
+    }
+  }
+
+  function drawGrid() {
+    gridLayer.clearLayers();
+    if (gridMode === 'off') return;
+    var f = gridFrame();
+    if (gridMode === 'snail') drawSnail(f);
+    else drawUtm(f);
+  }
+
   function setGrid(p) {
-    gridOn = !!(p && p.on);
-    if (gridOn) gridLayer.addTo(map);
+    gridMode = p && (p.mode === 'utm' || p.mode === 'snail') ? p.mode : p && p.on ? 'utm' : 'off';
+    snailOrigin = p && p.origin && isFinite(p.origin.lat) && isFinite(p.origin.lng) ? p.origin : null;
+    if (gridMode !== 'off') gridLayer.addTo(map);
     else map.removeLayer(gridLayer);
     drawGrid();
+    postView();
   }
-  map.on('moveend zoomend resize', drawGrid);
+  map.on('moveend zoomend resize rotate', drawGridSoon);
+  // Rotating fires many events; redraw once per frame at most.
+  var gridFrameReq = null;
+  function drawGridSoon() {
+    if (gridFrameReq) return;
+    gridFrameReq = requestAnimationFrame(function () {
+      gridFrameReq = null;
+      drawGrid();
+    });
+  }
   // Exposed for tests.
   window.__tacmapUtm = { toUtm: toUtm, fromUtm: fromUtm };
 
@@ -1467,6 +1673,20 @@
       map.fitBounds(b, { padding: [70, 70], maxZoom: 17 });
     },
     setDraw: setDraw,
+    // Back to north-up (animated), or a given bearing.
+    setBearing: function (p) {
+      headingUp = false;
+      turningByCode = true;
+      try {
+        map.setBearing((p && p.bearing) || 0);
+      } finally {
+        turningByCode = false;
+      }
+    },
+    setHeadingUp: function (p) {
+      headingUp = !!(p && p.on);
+      if (headingUp && selfHeading != null) turnMap(360 - selfHeading);
+    },
     // Keeps the scale bar and attribution above the native bottom panel.
     setInsets: function (p) {
       var b = Math.max(0, Math.round(p.bottom || 0)) + 'px';

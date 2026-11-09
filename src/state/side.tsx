@@ -179,17 +179,24 @@ export function SideProvider({ children }: { children: ReactNode }) {
     if (!isSideCommander) return own;
     const others = squads
       .filter((sq) => sq.id !== teamId)
-      .flatMap((sq) =>
-        sq.members.map((m) => ({
+      .flatMap((sq) => {
+        const tagged = sq.members.map((m) => ({
           ...m,
           // Unique across squads; the plain uid stays reserved for my own squad.
           id: `${sq.id}/${m.id}`,
           color: sq.displayColor,
           leader: m.canCommand || m.id === sq.ownerId,
           teamId: sq.id,
-        }))
-      )
-      .filter((m) => showAll || m.leader);
+        }));
+        if (showAll) return tagged;
+        // One mark per squad: its commander, named after the squad. Without a position
+        // of the commander, the freshest of those holding command rights stands in.
+        const placed = tagged.filter((m) => m.lat != null && m.lng != null);
+        const head =
+          placed.find((m) => m.id === `${sq.id}/${sq.ownerId}`) ??
+          placed.filter((m) => m.canCommand).sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))[0];
+        return head ? [{ ...head, mapLabel: sq.name }] : [];
+      });
     return [...own, ...others];
   }, [teamId, members, teamColor, team?.ownerId, isSideCommander, squads, showAll]);
 

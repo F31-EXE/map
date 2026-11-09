@@ -32,6 +32,7 @@
     "firebase": "^12.19.0",
     "jszip": "^3.10.2",
     "leaflet": "^1.9.4",
+    "leaflet-rotate": "^0.5.4",
     "leaflet.heat": "^0.2.0",
     "qrcode-generator": "^2.0.4",
     "react": "19.2.3",
