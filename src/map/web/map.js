@@ -170,7 +170,8 @@
       html:
         '<div class="self-cone"></div>' +
         '<div class="self-pulse" style="background:' + c + '"></div>' +
-        '<div class="self-pin" style="background:' + c + '">' +
+        '<div class="self-pin' + (look.tech ? ' tech' : '') + '" style="background:' + c + '">' +
+        (look.tech ? '<div class="tech-core"></div>' : '') +
         (look.rolePath ? '<svg viewBox="4 4 16 16"><path d="' + escapeHtml(look.rolePath) + '" fill="#04100A"/></svg>' : '') +
         '</div>',
       iconSize: [80, 80],
@@ -221,10 +222,10 @@
         opacity: 0.5,
         fillOpacity: 0.08,
       }).addTo(selfLayer);
-      selfLook = JSON.stringify([p.rolePath, p.color]);
+      selfLook = JSON.stringify([p.rolePath, p.color, p.tech]);
       selfMarker = L.marker(ll, { icon: selfIcon(p), interactive: false, zIndexOffset: 1000 }).addTo(selfLayer);
     } else {
-      var look = JSON.stringify([p.rolePath, p.color]);
+      var look = JSON.stringify([p.rolePath, p.color, p.tech]);
       if (look !== selfLook) {
         selfLook = look;
         selfMarker.setIcon(selfIcon(p));
@@ -395,12 +396,15 @@
     var c = escapeHtml(m.color);
     var status = m.status === 'dead' || m.status === 'afk' ? m.status : '';
     return L.divIcon({
-      className: 'member-icon' + (m.stale ? ' stale' : '') + (status ? ' ' + status : ''),
+      className: 'member-icon' + (m.tech ? ' tech' : '') + (m.stale ? ' stale' : '') + (status ? ' ' + status : ''),
       html:
         (m.stale || status ? '' : '<div class="member-halo" style="background:' + c + '"></div>') +
         '<div class="member-dir"><div class="member-dir-tip" style="border-bottom-color:' + c + '"></div></div>' +
         '<div class="member-pin" style="background:' + c + '">' +
-        '<svg viewBox="4 4 16 16"><path d="' + escapeHtml(m.rolePath) + '" fill="#04100A"/></svg></div>' +
+        (m.tech
+          ? '<div class="tech-core"></div>'
+          : '<svg viewBox="4 4 16 16"><path d="' + escapeHtml(m.rolePath) + '" fill="#04100A"/></svg>') +
+        '</div>' +
         (status
           ? '<div class="member-status"><svg viewBox="0 0 24 24"><path d="' +
             (status === 'dead' ? SKULL_PATH : SLEEP_PATH) + '" fill="#fff"/></svg></div>'
@@ -430,7 +434,7 @@
   }
 
   function memberKey(m) {
-    return JSON.stringify([m.callsign, m.color, m.stale, m.rolePath, m.roleTitle, m.commander, m.status]);
+    return JSON.stringify([m.callsign, m.color, m.stale, m.rolePath, m.roleTitle, m.commander, m.status, m.tech]);
   }
 
   function setMembers(list) {
@@ -808,6 +812,38 @@
     return g;
   }
 
+  // Football: the side's arrow, its ball where it has rolled to and the push zone around it.
+  function buildBall(m) {
+    var g = buildArrow(m);
+    var b = m.ball;
+    var c = escapeHtml(m.color);
+    L.circle([b.lat, b.lng], {
+      radius: b.r,
+      color: m.color,
+      weight: 2,
+      opacity: 0.9,
+      dashArray: '5 5',
+      fillColor: m.color,
+      fillOpacity: 0.14,
+      interactive: false,
+    }).addTo(g);
+    var state = b.goal ? 'ГОЛ' : b.push > 0 ? '▶' : b.push < 0 ? '◀' : '';
+    L.marker([b.lat, b.lng], {
+      keyboard: false,
+      zIndexOffset: 500,
+      icon: L.divIcon({
+        className: 'ball-icon' + (b.goal ? ' goal' : ''),
+        html:
+          '<div class="ball-pin" style="border-color:' + c + '">' +
+          '<svg viewBox="0 0 24 24"><path d="' + escapeHtml(m.path) + '" fill="#0B0F0C"/></svg></div>' +
+          '<div class="chip">' + escapeHtml(m.title) + (state ? ' ' + state : '') + '</div>',
+        iconSize: [30, 30],
+        iconAnchor: [15, 15],
+      }),
+    }).addTo(g);
+    return g;
+  }
+
   // Zones (dead zone, enemy zone, field boundary): filled outlines with their title.
   function buildArea(m, opts) {
     var pts = m.points.map(function (p) { return [p.lat, p.lng]; });
@@ -850,11 +886,11 @@
     var seen = {};
     list.forEach(function (m) {
       seen[m.id] = true;
-      var key = JSON.stringify([m.points, m.color, m.personal, m.area, m.title]);
+      var key = JSON.stringify([m.points, m.color, m.personal, m.area, m.title, m.ball]);
       var cur = arrowShapes[m.id];
       if (cur && cur._tacKey === key) return;
       if (cur) arrowsLayer.removeLayer(cur);
-      var g = m.area ? buildArea(m) : buildArrow(m);
+      var g = m.ball ? buildBall(m) : m.area ? buildArea(m) : buildArrow(m);
       g._tacKey = key;
       g.on('click', function () {
         post('markerTap', { id: m.id });

@@ -22,3 +22,14 @@ test('rejects unrelated QR codes', () => {
   assert.equal(parseInvite('grimmap://join?foo=bar'), null);
   assert.equal(parseInvite('hello world'), null);
 });
+
+test('game invites: tech, side into game, claiming a side', async () => {
+  const { inviteUrl, parseInvite } = await import('../src/lib/invite.ts');
+  for (const inv of [
+    { kind: 'game', code: 'T3CH42' },
+    { kind: 'gameside', code: 'S1DE42' },
+    { kind: 'claim', code: 'ABCDEF123456', sideId: 'aBc123XyZ' },
+  ] as const) {
+    assert.deepEqual(parseInvite(inviteUrl(inv)), inv);
+  }
+});

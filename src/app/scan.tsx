@@ -5,14 +5,14 @@ import { useRef, useState } from 'react';
 import { Alert, Platform, StyleSheet, Text, View } from 'react-native';
 
 import { parseInvite } from '../lib/invite';
-import { useSide } from '../state/side';
+import { useGame } from '../state/game';
 import { Button, Icon } from '../ui/components';
 import { C, F, R } from '../ui/theme';
 
 /** Scans a squad or side invite QR and acts on it right away. */
 export default function ScanScreen() {
   const [permission, requestPermission] = useCameraPermissions();
-  const { acceptInvite } = useSide();
+  const { acceptInvite } = useGame();
   const [busy, setBusy] = useState(false);
   const handled = useRef(false);
 

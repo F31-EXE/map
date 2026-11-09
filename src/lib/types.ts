@@ -1,6 +1,7 @@
 import type { RoleId } from './roles';
 import type { Faction } from './game';
 import type { HotZone } from './hotzone';
+import type { Ball } from './gameModes';
 import type { Wave } from './waves';
 
 export type LatLng = { lat: number; lng: number };
@@ -44,6 +45,49 @@ export type Side = {
   name: string;
   code: string;
   ownerId: string;
+  /** Big game this side plays in. */
+  gameId?: string | null;
+  /** Made by a game tech: the code a commander uses to take it over. */
+  claim?: string | null;
+};
+
+/** A big game run by game techs (organizers), above sides. */
+export type Game = {
+  id: string;
+  name: string;
+  ownerId: string;
+  /** Code for more techs to join (same rights as the creator). */
+  techCode: string;
+  /** Code for side commanders to bring their side into the game. */
+  sideCode: string;
+  /** Tickets mode: lives per side at the start (null = off). */
+  tickets: number | null;
+  match: { start: number; minutes: number; stoppedAt?: number | null } | null;
+  /** Territories: equal sectors at the end are a draw, or go to the longer holder. */
+  tiebreak: 'draw' | 'time';
+};
+
+export type GameTech = {
+  uid: string;
+  callsign: string;
+  lat: number | null;
+  lng: number | null;
+  heading: number | null;
+  updatedAt: number | null;
+};
+
+/** A side as the game sees it (score board), with its commander for techs. */
+export type GameSide = { id: string; name: string; color: string; tickets?: number };
+
+export type GamePlayer = {
+  uid: string;
+  sideId: string;
+  teamId: string | null;
+  callsign: string;
+  pts: Record<string, number>;
+  deaths: number;
+  cell: string | null;
+  cellAt: number | null;
 };
 
 export type Member = {
@@ -73,6 +117,8 @@ export type Member = {
   range?: number | null;
   /** Map label instead of callsign and role (side view: the squad's name on its commander). */
   mapLabel?: string;
+  /** A game tech (organizer): drawn as an orange diamond. */
+  tech?: boolean;
 };
 
 export type OrderKind = 'order-move' | 'order-attack' | 'order-defend';
@@ -94,6 +140,9 @@ export type MarkerKind =
   | 'area-enemy'
   | 'area-bound'
   | 'photo'
+  | 'flag'
+  | 'sector'
+  | 'ball'
   | AdminKind
   | OrderKind;
 
@@ -135,6 +184,15 @@ export type TacMarker = {
   photoData?: string;
   /** Photo marker: compass direction the camera faced. */
   heading?: number | null;
+  /** Game flag / territory sector: side holding it and the capture history. */
+  owner?: string | null;
+  /** Territory sector: a capture under way (side, minutes of advantage so far). */
+  cap?: { s: string; n: number } | null;
+  log?: { s: string; t: number }[];
+  /** Football ball (`owner` = its side, `points` = its arrow): how far it has rolled. */
+  ball?: Ball | null;
+  /** Placed by a game tech for the whole game (not a squad marker). */
+  gameId?: string;
 };
 
 export type OverlayFormat = 'kml' | 'kmz' | 'gpx' | 'geojson';

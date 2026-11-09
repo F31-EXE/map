@@ -39,6 +39,8 @@ type SideState = {
   setSquadColor: (teamId: string, color: string | null) => Promise<void>;
   createSide: (name: string) => Promise<void>;
   resign: () => Promise<void>;
+  /** Become this side's commander locally (after taking over a side a game tech made). */
+  adoptSide: (sideId: string) => Promise<void>;
   dropSquad: (teamId: string) => Promise<void>;
 
   /** Side my own squad is attached to (shown to its members). */
@@ -140,14 +142,8 @@ export function SideProvider({ children }: { children: ReactNode }) {
       setMySquadSide(null);
       return;
     }
-    let live = true;
-    sides
-      .getSide(mySideId)
-      .then((s) => live && setMySquadSide(s))
-      .catch(() => {});
-    return () => {
-      live = false;
-    };
+    // Live: the side may join or leave a game while we play.
+    return sides.subscribeSide(mySideId, setMySquadSide, () => {});
   }, [mySideId]);
 
   const isSideCommander = Boolean(side && uid && side.ownerId === uid);
@@ -248,6 +244,11 @@ export function SideProvider({ children }: { children: ReactNode }) {
     },
     [requireUid]
   );
+
+  const adoptSide = useCallback(async (id: string) => {
+    setSideId(id);
+    await saveJson(KEYS.sideId, id);
+  }, []);
 
   const resign = useCallback(async () => {
     setSideId(null);
@@ -357,6 +358,7 @@ export function SideProvider({ children }: { children: ReactNode }) {
       setSquadColor,
       createSide,
       resign,
+      adoptSide,
       dropSquad,
       mySquadSide,
       attachMySquad,
@@ -378,6 +380,7 @@ export function SideProvider({ children }: { children: ReactNode }) {
       setSquadColor,
       createSide,
       resign,
+      adoptSide,
       dropSquad,
       mySquadSide,
       attachMySquad,

@@ -8,14 +8,20 @@ import { WAVE_PRESETS_MIN } from '../lib/waves';
 import type { LatLng, MarkerKind } from '../lib/types';
 import type { MarkerScope } from '../state/session';
 import type { OrderTarget } from '../state/side';
-import { Button, Eyebrow, Icon, Sheet, tap } from './components';
+import { Button, Eyebrow, Icon, Sheet, tap, type IconName } from './components';
 import { HOT, ZoneSettings } from './ZonePanel';
 import { C, F, R } from './theme';
+
+const TERRITORY_SIZES = [100, 150, 200, 300];
+
+/** Game modes a game tech places from here (into the game, not the squad). */
+export const GAME_KINDS: MarkerKind[] = ['hotzone', 'flag', 'sector'];
 
 export function AddMarkerModal({
   at,
   inTeam,
   canCommand,
+  isTech,
   orderTargets,
   onCancel,
   onSave,
@@ -24,6 +30,8 @@ export function AddMarkerModal({
   inTeam: boolean;
   /** Shows the orders row (move / attack / defend). */
   canCommand: boolean;
+  /** Game tech: shows the game modes (control zone, flag, territories). */
+  isTech: boolean;
   /** Who an order can go to; more than one shows a picker (side commander). */
   orderTargets: { id: OrderTarget; label: string; color?: string }[];
   onCancel: () => void;
@@ -33,7 +41,9 @@ export function AddMarkerModal({
     scope: MarkerScope,
     target: OrderTarget,
     waveMin: number | null,
-    zone: HotZone | null
+    zone: HotZone | null,
+    /** Territories: side of one of the nine squares, m. */
+    territorySize: number
   ) => Promise<void>;
 }) {
   const [kind, setKind] = useState<MarkerKind>('enemy');
@@ -45,6 +55,7 @@ export function AddMarkerModal({
   const [waveMin, setWaveMin] = useState<number | null>(null);
   // Control zone settings (commanders, `hotzone` marker).
   const [zone, setZone] = useState<HotZone>(() => newZone());
+  const [territorySize, setTerritorySize] = useState(150);
 
   useEffect(() => {
     if (at) {
@@ -62,8 +73,8 @@ export function AddMarkerModal({
   const order = isOrder(kind);
   // Orders always go out; plain markers without a team are personal.
   const isZone = kind === 'hotzone';
-  const canZone = canCommand && inTeam;
-  const effectiveScope: MarkerScope = order || isZone ? 'team' : !inTeam ? 'personal' : scope;
+  const isGame = GAME_KINDS.includes(kind);
+  const effectiveScope: MarkerScope = order || isGame ? 'team' : !inTeam ? 'personal' : scope;
 
   const canWave = canCommand && inTeam && effectiveScope === 'team' && (kind === 'respawn' || kind === 'deadzone');
 
@@ -72,7 +83,7 @@ export function AddMarkerModal({
     try {
       // The schedule starts when the zone is placed.
       const z = isZone ? { ...zone, start: Date.now() } : null;
-      await onSave(kind, label, effectiveScope, target, canWave ? waveMin : null, z);
+      await onSave(kind, label, effectiveScope, target, canWave ? waveMin : null, z, territorySize);
     } finally {
       setBusy(false);
     }
@@ -206,22 +217,52 @@ export function AddMarkerModal({
         </View>
       </View>
 
-      {canZone && (
+      {isTech && (
         <View style={{ gap: 8 }}>
-          <Eyebrow>Режим игры</Eyebrow>
-          <Pressable
+          <Eyebrow>Игра · для всех сторон</Eyebrow>
+          <GameTile
+            on={isZone}
+            color={HOT}
+            icon="fire"
+            title="Зона контроля с хотзоной"
+            sub="Большой круг здесь, внутри него переезжает горячий круг"
             onPress={() => pick('hotzone')}
-            style={[styles.zoneTile, isZone && { borderColor: HOT, backgroundColor: HOT + '1F' }]}
-          >
-            <View style={[styles.kindIcon, { borderColor: HOT, backgroundColor: isZone ? HOT : 'transparent' }]}>
-              <Icon name="fire" size={20} color={isZone ? C.accentInk : HOT} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={[styles.zoneTitle, isZone && { color: C.text }]}>Зона контроля с хотзоной</Text>
-              <Text style={styles.zoneSub}>Большой круг здесь, внутри него переезжает горячий круг</Text>
-            </View>
-          </Pressable>
+          />
           {isZone && <ZoneSettings zone={zone} onChange={setZone} />}
+          <GameTile
+            on={kind === 'flag'}
+            color={MARKER_KINDS.flag.color}
+            icon="flag"
+            title="Флаг"
+            sub="Боец рядом нажимает «Захватить»; очки за минуты удержания"
+            onPress={() => pick('flag')}
+          />
+          <GameTile
+            on={kind === 'sector'}
+            color="#FFC83D"
+            icon="hexagon-outline"
+            title="Захват территорий · 9 зон"
+            sub="Квадрат 3×3 с центром здесь; захват — перевес бойцов 3 минуты"
+            onPress={() => pick('sector')}
+          />
+          {kind === 'sector' && (
+            <View style={styles.waveRow}>
+              {TERRITORY_SIZES.map((m) => (
+                <Pressable
+                  key={m}
+                  onPress={() => {
+                    tap();
+                    setTerritorySize(m);
+                  }}
+                  style={[styles.waveChip, m === territorySize && styles.waveChipOn]}
+                >
+                  <Text style={[styles.waveText, m === territorySize && { color: C.accentInk }]}>
+                    {m} м · поле {m * 3} м
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+          )}
         </View>
       )}
 
@@ -248,7 +289,7 @@ export function AddMarkerModal({
         </View>
       )}
 
-      {inTeam && !order && !isZone && (
+      {inTeam && !order && !isGame && (
         <View style={styles.segment}>
           {(['team', 'personal'] as const).map((sc) => {
             const selected = effectiveScope === sc;
@@ -289,7 +330,7 @@ export function AddMarkerModal({
       <View style={styles.row}>
         <Button title="Отмена" kind="secondary" onPress={onCancel} style={{ flex: 1 }} />
         <Button
-          title={order ? 'Отдать приказ' : isZone ? 'Начать' : 'Поставить'}
+          title={order ? 'Отдать приказ' : kind === 'sector' ? 'Разметить' : isGame ? 'Поставить для игры' : 'Поставить'}
           icon={active.icon}
           onPress={save}
           busy={busy}
@@ -297,6 +338,34 @@ export function AddMarkerModal({
         />
       </View>
     </Sheet>
+  );
+}
+
+function GameTile({
+  on,
+  color,
+  icon,
+  title,
+  sub,
+  onPress,
+}: {
+  on: boolean;
+  color: string;
+  icon: IconName;
+  title: string;
+  sub: string;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable onPress={onPress} style={[styles.zoneTile, on && { borderColor: color, backgroundColor: color + '1F' }]}>
+      <View style={[styles.kindIcon, { borderColor: color, backgroundColor: on ? color : 'transparent' }]}>
+        <Icon name={icon} size={20} color={on ? C.accentInk : color} />
+      </View>
+      <View style={{ flex: 1 }}>
+        <Text style={[styles.zoneTitle, on && { color: C.text }]}>{title}</Text>
+        <Text style={styles.zoneSub}>{sub}</Text>
+      </View>
+    </Pressable>
   );
 }
 

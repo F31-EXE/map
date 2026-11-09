@@ -1,6 +1,6 @@
 import * as Haptics from 'expo-haptics';
 import { router } from 'expo-router';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Alert, Platform, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -17,7 +17,7 @@ import { ROLES } from '../../lib/roles';
 import { STATUSES } from '../../lib/status';
 import { KEYS, loadJson, saveJson } from '../../lib/storage';
 import type { Bounds } from '../../lib/tiles';
-import type { LatLng, MarkerKind, SelfPosition, TacMarker } from '../../lib/types';
+import type { GameSide, LatLng, MarkerKind, SelfPosition, TacMarker } from '../../lib/types';
 import {
   BASE_LAYERS,
   STALE_MS,
@@ -38,13 +38,14 @@ import { OfflineSheet } from '../../ui/OfflineSheet';
 import { RegionPrompt } from '../../ui/RegionPrompt';
 import { GridSheet } from '../../ui/GridSheet';
 import { NavPanel } from '../../ui/NavPanel';
+import { HoldPanel } from '../../ui/HoldPanel';
 import { PhotoView } from '../../ui/PhotoView';
 import { takePhoto } from '../../services/photo';
 import { fireText, MortarPanel, MortarSheet } from '../../ui/MortarPanel';
 import { WavePanel } from '../../ui/WavePanel';
-import { ScoreRow } from '../../ui/GameCard';
+import { GameScore } from '../../ui/GameScore';
 import { HOT, phaseText, selfInZone, useNow, ZonePanel } from '../../ui/ZonePanel';
-import type { GameState } from '../../state/session';
+import { useGame } from '../../state/game';
 import { Avatar, Button, Glass, GlassButton, Icon, RoleIcon, Sheet, tap, type IconName } from '../../ui/components';
 import { InfoSheet, type Stat } from '../../ui/InfoSheet';
 import { C, eyebrow, F, R } from '../../ui/theme';
@@ -141,13 +142,14 @@ function KindBadge({ kind }: { kind: MarkerKind }) {
 function ZoneChip({
   marker,
   self,
-  game,
+  score,
   style,
   onPress,
 }: {
   marker: TacMarker;
   self: SelfPosition | null;
-  game: GameState;
+  /** Game score under the zone status (big games). */
+  score?: ReactNode;
   style: object;
   onPress: () => void;
 }) {
@@ -176,11 +178,7 @@ function ZoneChip({
           <Text style={[styles.zoneChipSub, alert && { color: C.warn }]} numberOfLines={1}>
             {phaseText(st, now)}
           </Text>
-          {game.zoneId === marker.id && (
-            <View style={{ marginTop: 5 }}>
-              <ScoreRow game={game} compact />
-            </View>
-          )}
+          {score && <View style={{ marginTop: 5 }}>{score}</View>}
         </View>
       </Glass>
     </Pressable>
@@ -206,6 +204,13 @@ export default function MapScreen() {
   const insets = { top: safe.top, bottom: 0, left: landscape ? 0 : safe.left, right: safe.right };
   const session = useSession();
   const side = useSide();
+  const game = useGame();
+  // Squad / side markers and people, plus the big game's (game modes, game techs).
+  const allMarkers = useMemo(() => (game.markers.length ? [...side.mapMarkers, ...game.markers] : side.mapMarkers), [side.mapMarkers, game.markers]);
+  const allMembers = useMemo(
+    () => (game.mapMembers.length ? [...side.mapMembers, ...game.mapMembers] : side.mapMembers),
+    [side.mapMembers, game.mapMembers]
+  );
   const { overlays, focusRequest, requestFocus, viewRequest, requestView, areas, download } = useOverlays();
   const { position, status, heading } = useSelfPosition();
   const mapRef = useRef<TacticalMapHandle>(null);
@@ -269,10 +274,10 @@ export default function MapScreen() {
   const zoneAlertTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const alertZones = useMemo<Area[]>(
     () =>
-      side.mapMarkers
+      allMarkers
         .filter((m) => isArea(m.kind) && (m.points?.length ?? 0) >= 3)
         .map((m) => ({ id: m.id, kind: m.kind as AreaKind, label: m.label, points: m.points! })),
-    [side.mapMarkers]
+    [allMarkers]
   );
   useEffect(() => {
     if (!position) return;
@@ -325,11 +330,15 @@ export default function MapScreen() {
     saveJson(KEYS.baseLayer, id);
   };
 
-  // Publish own position to the team (throttled inside the session).
+  // Publish own position to the team (throttled inside the session), and as a game tech
+  // to the whole game.
   const { reportPosition } = session;
+  const { reportPosition: reportTech } = game;
   useEffect(() => {
-    if (position) reportPosition(position);
-  }, [position, reportPosition]);
+    if (!position) return;
+    reportPosition(position);
+    reportTech(position);
+  }, [position, reportPosition, reportTech]);
 
   // Jump to the first GPS fix once, unless an imported map is being focused.
   useEffect(() => {
@@ -367,6 +376,7 @@ export default function MapScreen() {
   const isMovable = useCallback(
     (m: TacMarker) =>
       !m.groupId &&
+      !m.gameId &&
       m.kind !== 'arrow' &&
       (m.personal || (m.createdBy === uid && (!m.teamId || m.teamId === teamId))),
     [uid, teamId]
@@ -374,8 +384,8 @@ export default function MapScreen() {
   const onMarkerDragStart = useCallback(() => {
     if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy).catch(() => {});
   }, []);
-  const markersRef = useRef(side.mapMarkers);
-  markersRef.current = side.mapMarkers;
+  const markersRef = useRef(allMarkers);
+  markersRef.current = allMarkers;
   const onMarkerMoved = useCallback(
     (id: string, p: LatLng) => {
       const m = markersRef.current.find((x) => x.id === id);
@@ -392,12 +402,17 @@ export default function MapScreen() {
     scope: MarkerScope,
     target: OrderTarget,
     waveMin: number | null,
-    zone: HotZone | null
+    zone: HotZone | null,
+    territorySize: number
   ) => {
     if (!addAt) return;
     try {
       const at = { label, lat: addAt.lat, lng: addAt.lng };
-      if (isOrder(kind)) await side.placeOrder({ kind, ...at }, target);
+      // Game modes go to the game, for every side.
+      if (kind === 'hotzone' && zone) await game.addZone(addAt, zone, label);
+      else if (kind === 'flag') await game.addFlag(addAt, label);
+      else if (kind === 'sector') await game.addTerritory(addAt, territorySize);
+      else if (isOrder(kind)) await side.placeOrder({ kind, ...at }, target);
       else {
         // The first group leaves when the respawn is set up.
         const wave = waveMin ? { every: waveMin * 60_000, start: Date.now() } : undefined;
@@ -417,12 +432,13 @@ export default function MapScreen() {
   const inTeam = Boolean(session.teamId && session.uid);
   const now = Date.now();
   const pillTop = insets.top + 10;
-  const visibleMembers = side.mapMembers
+  const visibleMembers = allMembers
     .filter((m) => m.id !== session.uid && m.lat != null && m.lng != null)
     .map((m) => ({ lat: m.lat!, lng: m.lng! }));
 
   // Votes apply to my own squad's shared markers.
-  const canVote = (m: TacMarker) => inTeam && !m.personal && (!m.teamId || m.teamId === session.teamId);
+  const canVote = (m: TacMarker) =>
+    inTeam && !m.personal && !m.gameId && (!m.teamId || m.teamId === session.teamId);
 
   const toolbarButtons = 7 + (visibleMembers.length > 0 ? 1 : 0);
   const toolbarWidth = toolbarButtons * 50 + 8;
@@ -434,7 +450,7 @@ export default function MapScreen() {
 
   // Side commander without a squad of their own: the pill shows the side instead.
   const sideOnly = side.isSideCommander && !inTeam;
-  const online = side.mapMembers.filter(
+  const online = allMembers.filter(
     (m) => m.id !== session.uid && m.updatedAt && now - m.updatedAt < STALE_MS
   ).length;
 
@@ -449,12 +465,12 @@ export default function MapScreen() {
   ];
 
   const selectedMarker =
-    selection?.type === 'marker' ? side.mapMarkers.find((m) => m.id === selection.id) : undefined;
+    selection?.type === 'marker' ? allMarkers.find((m) => m.id === selection.id) : undefined;
   const selectedMember =
-    selection?.type === 'member' ? side.mapMembers.find((m) => m.id === selection.id) : undefined;
+    selection?.type === 'member' ? allMembers.find((m) => m.id === selection.id) : undefined;
 
   // The control zone in play: the newest one, if several.
-  const zoneMarker = side.mapMarkers
+  const zoneMarker = allMarkers
     .filter((m) => m.zone)
     .reduce<TacMarker | undefined>((a, m) => (!a || m.createdAt > a.createdAt ? m : a), undefined);
 
@@ -464,10 +480,10 @@ export default function MapScreen() {
   const navTo = (() => {
     if (!nav) return null;
     if (nav.type === 'marker') {
-      const m = side.mapMarkers.find((x) => x.id === nav.id);
+      const m = allMarkers.find((x) => x.id === nav.id);
       return m ? { lat: m.lat, lng: m.lng, name: m.label || MARKER_KINDS[m.kind].title } : null;
     }
-    const m = side.mapMembers.find((x) => x.id === nav.id);
+    const m = allMembers.find((x) => x.id === nav.id);
     return m && m.lat != null && m.lng != null ? { lat: m.lat, lng: m.lng, name: m.callsign } : null;
   })();
   const navDistance = navTo && position ? distanceMeters(position, navTo) : null;
@@ -504,7 +520,7 @@ export default function MapScreen() {
   // Range circles around every other mortar crew in view; mine (at my firing position)
   // only while the calculator is open, so closing it clears my circle and line of fire.
   const mortarMap = useMemo(() => {
-    const guns = side.mapMembers
+    const guns = allMembers
       .filter((m) => m.role === 'mortar' && m.id !== session.uid && m.lat != null && m.lng != null)
       .map((m) => ({
         id: m.id,
@@ -518,7 +534,7 @@ export default function MapScreen() {
     return { guns, aim: calculator && gunAt ? { ...gunAt, r: mortar.config.range } : null };
     // gunAt is rebuilt every render; its coordinates are what matter.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [side.mapMembers, session.uid, session.teamColor, mortar.config.range, calculator, gunAt?.lat, gunAt?.lng]);
+  }, [allMembers, session.uid, session.teamColor, mortar.config.range, calculator, gunAt?.lat, gunAt?.lng]);
 
   const banner =
     status === 'denied'
@@ -543,6 +559,7 @@ export default function MapScreen() {
         self={position}
         selfRole={session.role}
         selfColor={session.teamColor}
+        selfTech={game.isTech}
         grid={session.gridMode}
         gridOrigin={session.gridOrigin}
         headingUp={headingUp}
@@ -553,11 +570,11 @@ export default function MapScreen() {
         onHeadingUpChanged={setHeadingUp}
         topInset={landscape ? insets.top + 60 : pillTop + 58}
         follow={follow}
-        members={side.mapMembers}
+        members={allMembers}
         selfId={session.uid}
         teamColor={session.teamColor}
         ownerId={session.team?.ownerId ?? null}
-        markers={side.mapMarkers}
+        markers={allMarkers}
         overlays={overlays}
         focusOverlay={focusRequest}
         onFocusHandled={onFocusHandled}
@@ -572,7 +589,7 @@ export default function MapScreen() {
         onFollowChanged={setFollow}
         onOverlayError={onOverlayError}
         bottomInset={hudTop == null ? undefined : height - hudTop + 6}
-        drawing={drawing && { ...drawing, area: drawing.kind === 'arrow' ? null : drawing.kind }}
+        drawing={drawing && { ...drawing, area: drawing.kind === 'arrow' || drawing.kind === 'ball' ? null : drawing.kind }}
         mortar={mortarMap}
         onDrawChanged={(points) => setDrawing((d) => (d ? { ...d, points } : d))}
       />
@@ -757,7 +774,7 @@ export default function MapScreen() {
         <ZoneChip
           marker={zoneMarker}
           self={position}
-          game={session.game}
+          score={zoneMarker.gameId ? <GameScore compact /> : null}
           style={
             landscape
               ? { top: insets.top + 60, left: 12 + insets.left }
@@ -766,11 +783,33 @@ export default function MapScreen() {
           onPress={() => setSelection({ type: 'marker', id: zoneMarker.id })}
         />
       )}
+      {/* Big game without a control zone: the match clock and score on their own. */}
+      {game.game && !(zoneMarker?.gameId) && !drawing && (
+        <Pressable
+          onPress={() => router.push('/game')}
+          style={[
+            styles.zoneChipWrap,
+            landscape
+              ? { top: insets.top + 60, left: 12 + insets.left }
+              : { top: pillTop + 64 + (banner ? 56 : 0), left: 12 + insets.left },
+          ]}
+        >
+          <Glass radius={R.md} style={[styles.zoneChip, { maxWidth: 260 }]}>
+            <View style={{ gap: 2, flexShrink: 1 }}>
+              <Text style={styles.zoneChipTitle} numberOfLines={1}>
+                {game.game.name}
+              </Text>
+              <GameScore compact />
+            </View>
+          </Glass>
+        </Pressable>
+      )}
 
       {drawing && (
         <DrawBar
           drawing={drawing}
           inTeam={inTeam}
+          sides={game.isTech ? game.sides : []}
           bottom={insets.bottom + 12}
           left={12 + insets.left}
           right={12 + insets.right}
@@ -779,7 +818,10 @@ export default function MapScreen() {
           onDone={async () => {
             const pts = drawing.points;
             try {
-              if (drawing.kind === 'arrow') {
+              if (drawing.kind === 'ball') {
+                if (!drawing.sideId) throw new Error('Выберите сторону, чей это мяч');
+                await game.addBall(drawing.sideId, pts);
+              } else if (drawing.kind === 'arrow') {
                 await session.addMarker(
                   {
                     kind: 'arrow',
@@ -1023,6 +1065,7 @@ export default function MapScreen() {
         at={addAt}
         inTeam={inTeam}
         canCommand={session.canCommand || side.isSideCommander}
+        isTech={game.isTech}
         orderTargets={orderTargets}
         onCancel={() => setAddAt(null)}
         onSave={saveMarker}
@@ -1081,10 +1124,21 @@ export default function MapScreen() {
           <ZonePanel
             marker={selectedMarker}
             self={position}
-            canEdit={session.canCommand && (!selectedMarker.teamId || selectedMarker.teamId === session.teamId)}
-            onSet={(z) => session.setMarkerZone(selectedMarker, z)}
-            score={selectedMarker.id === session.game.zoneId ? <ScoreRow game={session.game} /> : null}
+            canEdit={
+              selectedMarker.gameId
+                ? game.isTech
+                : session.canCommand && (!selectedMarker.teamId || selectedMarker.teamId === session.teamId)
+            }
+            onSet={(z) =>
+              selectedMarker.gameId
+                ? game.setZone(selectedMarker, z).catch((e: Error) => Alert.alert('Ошибка', e.message))
+                : session.setMarkerZone(selectedMarker, z)
+            }
+            score={selectedMarker.gameId ? <GameScore /> : null}
           />
+        )}
+        {selectedMarker && (selectedMarker.kind === 'flag' || selectedMarker.kind === 'sector' || selectedMarker.kind === 'ball') && selectedMarker.gameId && (
+          <HoldPanel marker={selectedMarker} self={position} />
         )}
         {selectedMarker && canVote(selectedMarker) && (
           <VoteRow
@@ -1099,7 +1153,20 @@ export default function MapScreen() {
             }
           />
         )}
-        {selectedMarker && side.canDelete(selectedMarker) && (
+        {selectedMarker?.gameId && game.isTech && (
+          <Button
+            title="Убрать из игры"
+            kind="danger"
+            icon="trash-can-outline"
+            onPress={() =>
+              game
+                .deleteMarker(selectedMarker)
+                .then(() => setSelection(null))
+                .catch((e: Error) => Alert.alert('Не удалось удалить', e.message))
+            }
+          />
+        )}
+        {selectedMarker && !selectedMarker.gameId && side.canDelete(selectedMarker) && (
           <Button
             title={isOrder(selectedMarker.kind) ? 'Отменить приказ' : 'Удалить метку'}
             kind="danger"
@@ -1194,7 +1261,14 @@ export default function MapScreen() {
   );
 }
 
-type Drawing = { kind: 'arrow' | AreaKind; color: string; points: LatLng[]; scope: MarkerScope };
+type Drawing = {
+  kind: 'arrow' | AreaKind | 'ball';
+  color: string;
+  points: LatLng[];
+  scope: MarkerScope;
+  /** Football: whose ball this arrow is for. */
+  sideId?: string;
+};
 
 const ARROW_COLORS = ['#FFC83D', '#FF4D4D', '#3D9BFF', '#4ADE80', '#F5F5F5'];
 
@@ -1209,6 +1283,7 @@ const DRAW_KINDS: { kind: Drawing['kind']; label: string }[] = [
 function DrawBar({
   drawing,
   inTeam,
+  sides,
   bottom,
   left,
   right,
@@ -1218,6 +1293,8 @@ function DrawBar({
 }: {
   drawing: Drawing;
   inTeam: boolean;
+  /** Game tech: the game's sides, for football ball arrows. */
+  sides: GameSide[];
   bottom: number;
   left: number;
   right: number;
@@ -1226,11 +1303,13 @@ function DrawBar({
   onDone: () => void;
 }) {
   const n = drawing.points.length;
-  const area = drawing.kind !== 'arrow';
+  const ball = drawing.kind === 'ball';
+  const area = drawing.kind !== 'arrow' && !ball;
+  const kinds = sides.length ? [...DRAW_KINDS, { kind: 'ball' as const, label: 'Мяч' }] : DRAW_KINDS;
   return (
     <Glass radius={R.lg} style={[styles.drawBar, { bottom, left, right }]}>
       <View style={styles.drawRow}>
-        {DRAW_KINDS.map((k) => {
+        {kinds.map((k) => {
           const on = k.kind === drawing.kind;
           return (
             <Pressable
@@ -1240,7 +1319,13 @@ function DrawBar({
                 onChange({
                   ...drawing,
                   kind: k.kind,
-                  color: k.kind === 'arrow' ? ARROW_COLORS[0] : MARKER_KINDS[k.kind].color,
+                  color:
+                    k.kind === 'ball'
+                      ? (sides[0]?.color ?? '#F2F2F2')
+                      : k.kind === 'arrow'
+                        ? ARROW_COLORS[0]
+                        : MARKER_KINDS[k.kind].color,
+                  sideId: k.kind === 'ball' ? sides[0]?.id : undefined,
                 });
               }}
               style={[styles.drawKind, on && styles.drawKindOn]}
@@ -1251,10 +1336,14 @@ function DrawBar({
         })}
       </View>
       <View style={styles.drawHeader}>
-        <Icon name={area ? MARKER_KINDS[drawing.kind as AreaKind].icon : 'draw'} size={20} color={drawing.color} />
+        <Icon
+          name={area ? MARKER_KINDS[drawing.kind as AreaKind].icon : ball ? 'soccer' : 'draw'}
+          size={20}
+          color={drawing.color}
+        />
         <View style={{ flex: 1 }}>
           <Text style={styles.drawTitle}>
-            {area ? MARKER_KINDS[drawing.kind as AreaKind].title : 'Стрелка'} · {n}{' '}
+            {area ? MARKER_KINDS[drawing.kind as AreaKind].title : ball ? 'Путь мяча' : 'Стрелка'} · {n}{' '}
             {n === 1 ? 'точка' : n >= 2 && n <= 4 ? 'точки' : 'точек'}
           </Text>
           <Text style={styles.drawHint} numberOfLines={1}>
@@ -1262,7 +1351,9 @@ function DrawBar({
               ? drawing.kind === 'area-bound'
                 ? 'Обойдите углы полигона: выход за край — вибрация'
                 : 'Обведите зону по углам: вход в неё — вибрация'
-              : 'Нажимайте по карте от начала к острию'}
+              : ball
+                ? 'От старта мяча к базе соперника'
+                : 'Нажимайте по карте от начала к острию'}
           </Text>
         </View>
         <Pressable
@@ -1279,7 +1370,22 @@ function DrawBar({
         </Pressable>
       </View>
       <View style={styles.drawRow}>
+        {ball &&
+          sides.map((sd) => (
+            <Pressable
+              key={sd.id}
+              onPress={() => {
+                tap();
+                onChange({ ...drawing, color: sd.color, sideId: sd.id });
+              }}
+              style={[styles.drawScope, sd.id === drawing.sideId && { borderColor: sd.color, borderWidth: 2 }]}
+            >
+              <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: sd.color }} />
+              <Text style={styles.drawScopeText}>Мяч: {sd.name}</Text>
+            </Pressable>
+          ))}
         {!area &&
+          !ball &&
           ARROW_COLORS.map((c) => (
           <Pressable
             key={c}
@@ -1291,7 +1397,7 @@ function DrawBar({
             style={[styles.drawColor, { backgroundColor: c }, c === drawing.color && styles.drawColorActive]}
           />
           ))}
-        {inTeam && (
+        {inTeam && !ball && (
           <Pressable
             onPress={() => {
               tap();

@@ -4,7 +4,7 @@ import { Alert, StyleSheet, Text, View } from 'react-native';
 
 import { normalizeCode, type Invite } from '../lib/invite';
 import { useSession } from '../state/session';
-import { useSide } from '../state/side';
+import { useGame } from '../state/game';
 import { Button, Card, Eyebrow, Icon } from '../ui/components';
 import { C, F } from '../ui/theme';
 
@@ -15,7 +15,7 @@ import { C, F } from '../ui/theme';
 export default function JoinScreen() {
   const params = useLocalSearchParams<{ team?: string; side?: string }>();
   const session = useSession();
-  const { acceptInvite } = useSide();
+  const { acceptInvite } = useGame();
   const [busy, setBusy] = useState(false);
 
   const invite: Invite | null = params.team

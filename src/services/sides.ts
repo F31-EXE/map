@@ -59,6 +59,17 @@ export async function detachTeam(teamId: string): Promise<void> {
   await updateDoc(doc(firestore(), 'teams', teamId), { sideId: null, sideCode: null });
 }
 
+function toSide(id: string, d: Record<string, any>): Side {
+  return {
+    id,
+    name: d.name,
+    code: d.code,
+    ownerId: d.ownerId,
+    gameId: typeof d.gameId === 'string' ? d.gameId : null,
+    claim: typeof d.claim === 'string' ? d.claim : null,
+  };
+}
+
 export function subscribeSide(
   sideId: string,
   onSide: (s: Side | null) => void,
@@ -68,7 +79,7 @@ export function subscribeSide(
     doc(firestore(), 'sides', sideId),
     (s) => {
       const d = s.data();
-      onSide(d ? { id: s.id, name: d.name, code: d.code, ownerId: d.ownerId } : null);
+      onSide(d ? toSide(s.id, d) : null);
     },
     onError
   );
@@ -77,7 +88,7 @@ export function subscribeSide(
 export async function getSide(sideId: string): Promise<Side | null> {
   const s = await getDoc(doc(firestore(), 'sides', sideId));
   const d = s.data();
-  return d ? { id: s.id, name: d.name, code: d.code, ownerId: d.ownerId } : null;
+  return d ? toSide(s.id, d) : null;
 }
 
 export function subscribeSideTeams(

@@ -662,3 +662,102 @@ describe('team game', () => {
     await assertFails(updateDoc(doc(as('carol'), 'teams', TEAM, 'members', 'bob'), { range: 150 }));
   });
 });
+
+describe('big games: techs, sides, players, game markers', () => {
+  const GAME = 'game1';
+  const SIDE = 'side1';
+  const TECH_CODE = 'TECH42';
+  const SIDE_CODE = 'SIDE42';
+  // tom creates the game; sam commands a side; alice's squad (bob in it) plays for it.
+  beforeEach(async () => {
+    const db = as('tom');
+    const b = writeBatch(db);
+    b.set(doc(db, 'games', GAME), { name: 'Сталкер', ownerId: 'tom', techCode: TECH_CODE, sideCode: SIDE_CODE });
+    b.set(doc(db, 'gameCodes', TECH_CODE), { gameId: GAME, kind: 'tech' });
+    b.set(doc(db, 'gameCodes', SIDE_CODE), { gameId: GAME, kind: 'side' });
+    b.set(doc(db, 'games', GAME, 'techs', 'tom'), { callsign: 'Орг' });
+    await b.commit();
+    await setDoc(doc(as('sam'), 'sides', SIDE), { name: 'Синие', code: 'S1', ownerId: 'sam' });
+    await createTeam(as('alice'), 'alice');
+    await join(as('bob'), 'bob');
+    await updateDoc(doc(as('alice'), 'teams', TEAM), { sideId: SIDE, sideCode: 'S1' }).catch(() => {});
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await updateDoc(doc(ctx.firestore(), 'teams', TEAM), { sideId: SIDE, sideCode: 'S1' });
+    });
+  });
+  const attachSide = (by = 'sam', code = SIDE_CODE) => updateDoc(doc(as(by), 'sides', SIDE), { gameId: GAME, gameCode: code });
+  const register = (uid: string, teamId: string | null) =>
+    setDoc(doc(as(uid), 'games', GAME, 'players', uid), { sideId: SIDE, teamId, callsign: uid, pts: {}, deaths: 0 });
+
+  test('more techs join with the tech code; the creator removes them', async () => {
+    await assertFails(setDoc(doc(as('tim'), 'games', GAME, 'techs', 'tim'), { callsign: 'x', code: 'WRONG1' }));
+    await assertSucceeds(setDoc(doc(as('tim'), 'games', GAME, 'techs', 'tim'), { callsign: 'Тим', code: TECH_CODE }));
+    // A second tech has the same rights, e.g. renaming the game.
+    await assertSucceeds(updateDoc(doc(as('tim'), 'games', GAME), { name: 'Сталкер 2' }));
+    await assertFails(updateDoc(doc(as('bob'), 'games', GAME), { name: 'x' }));
+    await assertSucceeds(deleteDoc(doc(as('tom'), 'games', GAME, 'techs', 'tim')));
+  });
+  test('a side joins with the side code; its fighters and commander register', async () => {
+    await assertFails(attachSide('sam', 'NOPE11'));
+    await assertFails(attachSide('bob'));
+    await assertSucceeds(attachSide());
+    await assertSucceeds(register('bob', TEAM));
+    await assertSucceeds(register('sam', null));
+    // Not in that squad / not the commander.
+    await assertFails(register('carol', TEAM));
+    await assertFails(register('mallory', null));
+  });
+  test('techs see every squad of the game; others do not', async () => {
+    await attachSide();
+    await assertSucceeds(getDoc(doc(as('tom'), 'teams', TEAM, 'members', 'bob')));
+    await assertSucceeds(getDocs(query(collection(as('tom'), 'teams'), where('sideId', '==', SIDE))));
+    await assertSucceeds(getDocs(query(collection(as('tom'), 'sides'), where('gameId', '==', GAME))));
+    await assertFails(getDoc(doc(as('mallory'), 'teams', TEAM, 'members', 'bob')));
+  });
+  test('techs place game markers; players capture flags and sectors for their own side only', async () => {
+    await attachSide();
+    await register('bob', TEAM);
+    const flag = doc(as('tom'), 'games', GAME, 'markers', 'f1');
+    await assertSucceeds(setDoc(flag, { kind: 'flag', label: 'A', lat: 55, lng: 37, owner: null, log: [] }));
+    await assertFails(setDoc(doc(as('bob'), 'games', GAME, 'markers', 'f2'), { kind: 'flag', label: 'B', lat: 55, lng: 37 }));
+    const bobFlag = doc(as('bob'), 'games', GAME, 'markers', 'f1');
+    await assertSucceeds(updateDoc(bobFlag, { owner: SIDE, log: [{ s: SIDE, t: 1 }] }));
+    await assertFails(updateDoc(bobFlag, { owner: 'other', log: [{ s: SIDE, t: 1 }, { s: 'other', t: 2 }] }));
+    await assertFails(updateDoc(bobFlag, { label: 'мой' }));
+    await assertSucceeds(getDoc(doc(as('bob'), 'games', GAME, 'markers', 'f1')));
+    await assertFails(getDoc(doc(as('mallory'), 'games', GAME, 'markers', 'f1')));
+  });
+  test('players keep their own score; techs adjust tickets', async () => {
+    await attachSide();
+    await register('bob', TEAM);
+    const me = doc(as('bob'), 'games', GAME, 'players', 'bob');
+    await assertSucceeds(updateDoc(me, { deaths: 1, 'pts.z1': 2 }));
+    await assertFails(updateDoc(me, { sideId: 'other' }));
+    await assertFails(updateDoc(doc(as('bob'), 'games', GAME, 'players', 'sam'), { deaths: 5 }));
+    await assertSucceeds(setDoc(doc(as('tom'), 'games', GAME, 'sides', SIDE), { name: 'Синие', color: '#3D9BFF', tickets: 100 }));
+    await assertFails(setDoc(doc(as('bob'), 'games', GAME, 'sides', SIDE), { name: 'Синие', color: '#3D9BFF', tickets: 999 }));
+    await assertSucceeds(updateDoc(doc(as('tom'), 'games', GAME), { tickets: 150 }));
+  });
+  test('techs run the match clock; fighters report their sector; sectors only change by the techs', async () => {
+    await attachSide();
+    await register('bob', TEAM);
+    await assertSucceeds(updateDoc(doc(as('tom'), 'games', GAME), { match: { start: Date.now(), minutes: 30 } }));
+    await assertFails(updateDoc(doc(as('bob'), 'games', GAME), { match: { start: 0, minutes: 30 } }));
+    await assertFails(updateDoc(doc(as('tom'), 'games', GAME), { match: { start: 0, minutes: 0 } }));
+    await assertSucceeds(updateDoc(doc(as('tom'), 'games', GAME), { tiebreak: 'time' }));
+    await assertFails(updateDoc(doc(as('tom'), 'games', GAME), { tiebreak: 'coin' }));
+    await assertSucceeds(updateDoc(doc(as('bob'), 'games', GAME, 'players', 'bob'), { cell: 's5', cellAt: 3 }));
+    await setDoc(doc(as('tom'), 'games', GAME, 'markers', 's5'), { kind: 'sector', label: '5', lat: 55, lng: 37, owner: null, log: [] });
+    await assertFails(updateDoc(doc(as('bob'), 'games', GAME, 'markers', 's5'), { owner: SIDE, log: [{ s: SIDE, t: 1 }] }));
+    await assertSucceeds(updateDoc(doc(as('tom'), 'games', GAME, 'markers', 's5'), { owner: SIDE, log: [{ s: SIDE, t: 1 }] }));
+  });
+  test('a tech makes a side; its commander takes it over with the claim code', async () => {
+    await assertSucceeds(
+      setDoc(doc(as('tom'), 'sides', 'side2'), { name: 'Красные', code: 'S2', ownerId: 'tom', gameId: GAME, gameCode: SIDE_CODE, claim: 'CLAIM7' })
+    );
+    await assertFails(updateDoc(doc(as('sam'), 'sides', 'side2'), { ownerId: 'sam', claim: null, claimedWith: 'WRONG' }));
+    await assertSucceeds(updateDoc(doc(as('sam'), 'sides', 'side2'), { ownerId: 'sam', claim: null, claimedWith: 'CLAIM7' }));
+    // Claimed once: nobody else can take it.
+    await assertFails(updateDoc(doc(as('carol'), 'sides', 'side2'), { ownerId: 'carol', claim: null, claimedWith: 'CLAIM7' }));
+  });
+});

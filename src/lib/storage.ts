@@ -42,6 +42,10 @@ export const KEYS = {
   trail: 'tacmap.trail',
   /** Squad maps this phone removed: not downloaded again automatically. */
   sharedMapsDismissed: 'tacmap.sharedMapsDismissed',
+  /** Big game this phone is a game tech in. */
+  techGame: 'tacmap.techGame',
+  /** Game tech's map: every fighter, or commanders only. */
+  techShowAll: 'tacmap.techShowAll',
 } as const;
 
 export async function loadJson<T>(key: string, fallback: T): Promise<T> {

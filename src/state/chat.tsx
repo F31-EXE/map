@@ -2,7 +2,6 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 
 import { loadJson, saveJson } from '../lib/storage';
 import { newMessageId, relayMessage, sendMessage, subscribeMessages, type ChatMessage } from '../services/chat';
-import { visibleTo } from '../lib/game';
 import { useSession } from './session';
 
 type Chat = {
@@ -24,8 +23,7 @@ export function useChat(): Chat {
 const readKey = (teamId: string) => `tacmap.chatRead.${teamId}`;
 
 export function ChatProvider({ children }: { children: ReactNode }) {
-  const { teamId, uid, callsign, mesh, game } = useSession();
-  const viewer = useMemo(() => ({ gameOn: game.on, isMaster: game.isMaster, faction: game.myFaction }), [game.on, game.isMaster, game.myFaction]);
+  const { teamId, uid, callsign, mesh } = useSession();
   const [serverMessages, setMessages] = useState<ChatMessage[]>([]);
 
   // Messages heard over Bluetooth that the server doesn't have (yet).
@@ -46,11 +44,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     if (!extra.length) return serverMessages;
     return [...serverMessages, ...extra].sort((a, b) => a.createdAt - b.createdAt);
   }, [serverMessages, mesh.chats]);
-  // Team game: a player reads their own team's messages and the game master's.
-  const messages = useMemo(
-    () => (viewer.gameOn ? allMessages.filter((m) => visibleTo(viewer, m.faction)) : allMessages),
-    [allMessages, viewer]
-  );
+  const messages = allMessages;
 
   // Gateway: once this phone has internet, upload what it heard for those who don't.
   // Waits a little first, so the sender's own upload usually wins.
@@ -102,14 +96,14 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       if (!text.trim()) return;
       const id = newMessageId(uid);
       const name = callsign || 'Боец';
-      const faction = game.on && !game.isMaster ? game.myFaction : null;
+      const faction = null;
       // Nearby phones get it over Bluetooth right away, with the same id.
       mesh.sendChat({ id, uid, callsign: name.slice(0, 24), text: text.trim().slice(0, 500), faction });
       // Don't wait for the server: offline, Firestore keeps the write queued (shown as
       // pending) and sends it when the connection returns.
       sendMessage(teamId, uid, name, text, id, faction).catch(() => {});
     },
-    [teamId, uid, callsign, mesh, game.on, game.isMaster, game.myFaction]
+    [teamId, uid, callsign, mesh]
   );
 
   const value = useMemo(() => ({ messages, unread, markRead, send }), [messages, unread, markRead, send]);

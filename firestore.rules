@@ -13,7 +13,16 @@ rules_version = '2';
 //   teams/{teamId}/recordings/{id}  -> { name, startedAt, endedAt, startedBy }; tracks/{uid} -> { points }
 //   sides/{sideId}                   -> { name, code, ownerId, createdAt }   several squads under one side commander
 //   sideCodes/{code}                 -> { sideId }
+//   sides/{sideId}                   + { gameId, gameCode } when the side plays in a game; + { claim } when a game
+//                                      tech made it for a commander to take over
 // A squad joins a side when its leader writes { sideId, sideCode } into the team doc.
+//   games/{gameId}                   -> { name, ownerId, techCode, sideCode, createdAt, tickets? }   a big game
+//   gameCodes/{code}                 -> { gameId, kind: 'tech' | 'side' }
+//   games/{g}/techs/{uid}            -> { callsign, code, lat?, lng?, updatedAt }   game techs (organizers), equal rights
+//   games/{g}/sides/{sideId}         -> { name, color, tickets }   the side as the game sees it (score board)
+//   games/{g}/players/{uid}          -> { sideId, teamId, callsign, pts, deaths }   self-registered, chain checked
+//   games/{g}/markers/{id}           -> game markers placed by techs (control zones, flags, zones…)
+// A side joins a game when its commander writes { gameId, gameCode } into the side doc.
 service cloud.firestore {
   match /databases/{database}/documents {
     function signedIn() {
@@ -46,6 +55,32 @@ service cloud.firestore {
     function isSideCommanderOf(teamId) {
       let t = get(teamPath(teamId)).data;
       return isSideOwner(t.get('sideId', null));
+    }
+    function gamePath(gameId) {
+      return /databases/$(database)/documents/games/$(gameId);
+    }
+    // Game techs (organizers): each has a doc under the game; all have the same rights.
+    function isTech(gameId) {
+      return signedIn() && gameId is string
+        && exists(/databases/$(database)/documents/games/$(gameId)/techs/$(request.auth.uid));
+    }
+    function isPlayer(gameId) {
+      return signedIn() && gameId is string
+        && exists(/databases/$(database)/documents/games/$(gameId)/players/$(request.auth.uid));
+    }
+    function inGame(gameId) {
+      return isTech(gameId) || isPlayer(gameId);
+    }
+    // A tech of the game this side plays in.
+    function isTechOfSide(sideId) {
+      return sideId is string && isTech(get(sidePath(sideId)).data.get('gameId', null));
+    }
+    function isTechOfTeam(teamId) {
+      return isTechOfSide(get(teamPath(teamId)).data.get('sideId', null));
+    }
+    // Everyone above the squad: its side commander and the game's techs.
+    function oversees(teamId) {
+      return isSideCommanderOf(teamId) || isTechOfTeam(teamId);
     }
     // 4 side commander, 3 squad creator, 2 member with command rights, 1 fighter.
     // Mirrors src/lib/ranks.ts.
@@ -128,22 +163,145 @@ service cloud.firestore {
     match /sides/{sideId} {
       // Squad leaders read the side's name after attaching; ids are unguessable.
       allow get: if signedIn();
+      // Game techs list the sides of their game.
+      allow list: if isTech(resource.data.get('gameId', null));
+      allow create: if signedIn()
+        && request.resource.data.ownerId == request.auth.uid
+        && request.resource.data.name is string
+        && request.resource.data.name.size() <= 40
+        // A tech makes sides right inside the game (with a claim code for its commander).
+        && (request.resource.data.get('gameId', null) == null
+          || (isTech(request.resource.data.gameId)
+            && request.resource.data.gameCode == get(gamePath(request.resource.data.gameId)).data.sideCode));
+      allow update: if signedIn() && (
+        // The commander renames the side, or joins it to a game with the game's side code / leaves.
+        (resource.data.ownerId == request.auth.uid
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'gameId', 'gameCode', 'claim'])
+          && request.resource.data.name.size() <= 40
+          && (request.resource.data.get('gameId', null) == null
+            || request.resource.data.get('gameCode', null) == get(gamePath(request.resource.data.gameId)).data.sideCode))
+        // Taking command of a side a tech made: knowing its claim code.
+        || (resource.data.get('claim', null) != null
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['ownerId', 'claim', 'claimedWith'])
+          && request.resource.data.ownerId == request.auth.uid
+          && request.resource.data.claimedWith == resource.data.claim
+          && request.resource.data.claim == null)
+        // A tech drops a side from the game.
+        || (isTech(resource.data.get('gameId', null))
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['gameId', 'gameCode'])
+          && request.resource.data.gameId == null)
+      );
+      allow delete: if false;
+    }
+
+    match /gameCodes/{code} {
+      allow get: if signedIn();
+      allow create: if signedIn()
+        && getAfter(gamePath(request.resource.data.gameId)).data.ownerId == request.auth.uid
+        && (getAfter(gamePath(request.resource.data.gameId)).data.techCode == code
+          || getAfter(gamePath(request.resource.data.gameId)).data.sideCode == code);
+      allow update, delete: if false;
+    }
+
+    match /games/{gameId} {
+      // Commanders read the game's name after joining; ids are unguessable.
+      allow get: if signedIn();
       allow list: if false;
       allow create: if signedIn()
         && request.resource.data.ownerId == request.auth.uid
         && request.resource.data.name is string
-        && request.resource.data.name.size() <= 40;
-      allow update: if signedIn()
-        && resource.data.ownerId == request.auth.uid
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name'])
-        && request.resource.data.name.size() <= 40;
+        && request.resource.data.name.size() <= 60
+        && request.resource.data.techCode is string
+        && request.resource.data.sideCode is string;
+      allow update: if isTech(gameId)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'tickets', 'match', 'tiebreak'])
+        && request.resource.data.name.size() <= 60
+        && request.resource.data.get('tiebreak', 'draw') in ['draw', 'time']
+        // The match clock: started by a tech, the same countdown on every phone.
+        && (request.resource.data.get('match', null) == null
+          || (request.resource.data.match.keys().hasOnly(['start', 'minutes', 'stoppedAt'])
+            && request.resource.data.match.start is number
+            && request.resource.data.match.minutes is int
+            && request.resource.data.match.minutes >= 1 && request.resource.data.match.minutes <= 1440))
+        && (request.resource.data.get('tickets', null) == null
+          || (request.resource.data.tickets is int && request.resource.data.tickets >= 0 && request.resource.data.tickets <= 100000));
       allow delete: if false;
+
+      // Techs: the creator, and whoever knows the tech code. Same rights for all.
+      match /techs/{uid} {
+        allow read: if inGame(gameId);
+        allow create: if signedIn() && uid == request.auth.uid
+          && request.resource.data.callsign is string && request.resource.data.callsign.size() <= 24
+          // getAfter: the creator adds themselves in the same batch that creates the game.
+          && (getAfter(gamePath(gameId)).data.ownerId == uid
+            || request.resource.data.code == getAfter(gamePath(gameId)).data.techCode);
+        allow update: if signedIn() && uid == request.auth.uid
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['callsign', 'lat', 'lng', 'heading', 'updatedAt'])
+          && request.resource.data.callsign.size() <= 24;
+        // Leave, or be removed by the game's creator.
+        allow delete: if signedIn() && (uid == request.auth.uid || get(gamePath(gameId)).data.ownerId == request.auth.uid);
+      }
+
+      // The game's view of each side: name, color, ticket adjustments. Techs and the
+      // side's own commander write it.
+      match /sides/{sideId} {
+        allow read: if inGame(gameId);
+        allow create, update: if (isTech(gameId)
+            || (signedIn() && get(sidePath(sideId)).data.ownerId == request.auth.uid
+              && getAfter(sidePath(sideId)).data.get('gameId', null) == gameId))
+          && request.resource.data.name is string && request.resource.data.name.size() <= 40
+          && validColor(request.resource.data.color)
+          && (!('tickets' in request.resource.data) || request.resource.data.tickets is int);
+        allow delete: if isTech(gameId);
+      }
+
+      // Players register themselves; the chain fighter → squad → side → game is checked.
+      match /players/{uid} {
+        allow read: if inGame(gameId);
+        allow create: if signedIn() && uid == request.auth.uid
+          && request.resource.data.callsign is string && request.resource.data.callsign.size() <= 24
+          && request.resource.data.sideId is string
+          && get(sidePath(request.resource.data.sideId)).data.get('gameId', null) == gameId
+          && (
+            // A fighter of a squad attached to that side.
+            (request.resource.data.teamId is string
+              && exists(memberPath(request.resource.data.teamId, uid))
+              && get(teamPath(request.resource.data.teamId)).data.get('sideId', null) == request.resource.data.sideId)
+            // The side's commander.
+            || (request.resource.data.teamId == null
+              && get(sidePath(request.resource.data.sideId)).data.ownerId == uid)
+          )
+          && (!('pts' in request.resource.data) || request.resource.data.pts is map)
+          && (!('deaths' in request.resource.data) || request.resource.data.deaths is int);
+        // Own score: points per control zone, deaths for tickets; and the territory
+        // sector the fighter stood in during the last match minute (the tech counts them).
+        allow update: if signedIn() && uid == request.auth.uid
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['callsign', 'pts', 'deaths', 'cell', 'cellAt'])
+          && request.resource.data.pts is map && request.resource.data.pts.size() <= 50
+          && request.resource.data.deaths is int;
+        allow delete: if signedIn() && (uid == request.auth.uid || isTech(gameId));
+      }
+
+      // Game markers: techs place control zones, flags, territory sectors and zones;
+      // players capture flags. Sectors change hands only by the techs' count.
+      match /markers/{markerId} {
+        allow read: if inGame(gameId);
+        allow create, delete: if isTech(gameId);
+        allow update: if isTech(gameId)
+          || (isPlayer(gameId)
+            && resource.data.kind == 'flag'
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['owner', 'log'])
+            && request.resource.data.owner == get(/databases/$(database)/documents/games/$(gameId)/players/$(request.auth.uid)).data.sideId
+            && request.resource.data.log.size() == resource.data.get('log', []).size() + 1
+            && request.resource.data.log[request.resource.data.log.size() - 1].s == request.resource.data.owner);
+      }
     }
 
     match /teams/{teamId} {
-      allow get: if isMember(teamId) || isSideOwner(resource.data.get('sideId', null));
-      // The side commander lists squads with where('sideId', '==', mySide).
-      allow list: if isSideOwner(resource.data.get('sideId', null));
+      allow get: if isMember(teamId) || isSideOwner(resource.data.get('sideId', null))
+        || isTechOfSide(resource.data.get('sideId', null));
+      // The side commander (and the game's techs) list squads with where('sideId', '==', side).
+      allow list: if isSideOwner(resource.data.get('sideId', null)) || isTechOfSide(resource.data.get('sideId', null));
       allow create: if signedIn()
         && request.resource.data.ownerId == request.auth.uid
         && request.resource.data.name is string
@@ -175,7 +333,7 @@ service cloud.firestore {
       allow delete: if false;
 
       match /members/{uid} {
-        allow read: if isMember(teamId) || isSideCommanderOf(teamId);
+        allow read: if isMember(teamId) || oversees(teamId);
         // Joining requires knowing the team's code; nobody grants themselves command rights.
         allow create: if signedIn()
           && uid == request.auth.uid
@@ -206,7 +364,7 @@ service cloud.firestore {
       }
 
       match /markers/{markerId} {
-        allow read: if isMember(teamId) || isSideCommanderOf(teamId);
+        allow read: if isMember(teamId) || oversees(teamId);
         allow create: if request.resource.data.kind is string
           && request.resource.data.lat is number
           && request.resource.data.lng is number

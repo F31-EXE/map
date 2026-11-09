@@ -14,7 +14,7 @@ import * as recordings from '../../services/recordings';
 import { useSession } from '../../state/session';
 import { useSide } from '../../state/side';
 import { confirmDestructive } from '../../ui/confirm';
-import { FactionPicker, GameCard } from '../../ui/GameCard';
+import { GameLinkCard } from '../../ui/GameLinkCard';
 import { QrCode } from '../../ui/QrCode';
 import { Avatar, Badge, Button, Card, Eyebrow, Icon, KeyboardScroll, RoleIcon, Sheet, tap } from '../../ui/components';
 import { RolePicker } from '../../ui/RolePicker';
@@ -60,12 +60,9 @@ export default function TeamScreen() {
   const managed = s.members.find((m) => m.id === managing) ?? null;
   const canManageAny = s.members.some((m) => m.id !== s.uid && side.myRank > memberRank(m));
 
-  const factionOf = (m: Member) => (s.game.on && m.faction != null && s.game.factions[m.faction] ? m.faction : 99);
   const sortedMembers = [...s.members].sort((a, b) => {
     if (a.id === s.uid) return -1;
     if (b.id === s.uid) return 1;
-    // Team game: grouped by team, unassigned last.
-    if (factionOf(a) !== factionOf(b)) return factionOf(a) - factionOf(b);
     return ROLE_ORDER.indexOf(a.role) - ROLE_ORDER.indexOf(b.role) || a.callsign.localeCompare(b.callsign);
   });
 
@@ -162,10 +159,7 @@ export default function TeamScreen() {
             <StatusPicker value={s.status} onPick={(st) => run('status', () => s.setStatus(st))} />
           </Card>
 
-          <GameCard
-            game={s.game}
-            members={s.members.filter((m) => m.id !== s.team?.ownerId)}
-            onCount={(n) => run('factions', () => s.setFactionCount(n))} />
+          <GameLinkCard />
 
           {/* Roster */}
           <View style={{ gap: 10 }}>
@@ -182,7 +176,6 @@ export default function TeamScreen() {
                   me={m.id === s.uid}
                   owner={m.id === s.team?.ownerId}
                   color={m.color ?? color}
-                  team={s.game.on && m.faction != null ? s.game.factions[m.faction]?.name : undefined}
                   avatar={m.id === s.uid ? s.avatar : s.avatars[m.id]}
                   fresh={m.lat != null && m.updatedAt != null && now - m.updatedAt < STALE_MS}
                   onPress={() => setManaging(m.id)}
@@ -192,7 +185,7 @@ export default function TeamScreen() {
             {canManageAny && (
               <Text style={[styles.sub, { paddingHorizontal: 4 }]}>
                 Нажмите на бойца, чтобы сменить роль или статус{s.isOwner ? ', выдать право приказов' : ''}
-                {s.game.isMaster ? ' или команду' : ''}.
+.
               </Text>
             )}
           </View>
@@ -201,15 +194,6 @@ export default function TeamScreen() {
             <MemberSheet
               m={managed}
               color={managed.color ?? color}
-              factionPicker={
-                s.game.isMaster && managed.id !== s.team?.ownerId ? (
-                  <FactionPicker
-                    game={s.game}
-                    value={managed.faction}
-                    onPick={(f) => run('faction', () => s.setMemberFaction(managed.id, f))}
-                  />
-                ) : null
-              }
               me={managed.id === s.uid}
               avatar={managed.id === s.uid ? s.avatar : s.avatars[managed.id]}
               canEdit={managed.id === s.uid || side.myRank > memberRank(managed)}
@@ -493,7 +477,6 @@ function MemberRow({
   me,
   owner,
   color,
-  team,
   avatar,
   fresh,
   onPress,
@@ -503,7 +486,6 @@ function MemberRow({
   me: boolean;
   owner: boolean;
   color: string;
-  team?: string;
   avatar: string | null | undefined;
   fresh: boolean;
   onPress: () => void;
@@ -533,7 +515,7 @@ function MemberRow({
           {commands && <Icon name="star" size={15} color={C.warn} />}
         </View>
         <Text style={styles.sub} numberOfLines={1}>
-          {team ? `${team} · ` : ''}
+
           {ROLES[m.role].title} ·{' '}
           {m.lat == null
             ? 'позиция скрыта'
@@ -560,11 +542,9 @@ function MemberSheet({
   onStatus,
   onToggleCommand,
   onKick,
-  factionPicker,
 }: {
   m: Member;
   color: string;
-  factionPicker?: ReactNode;
   me: boolean;
   avatar: string | null | undefined;
   canEdit: boolean;
@@ -587,12 +567,6 @@ function MemberSheet({
         </View>
         <RoleIcon role={m.role} size={44} color={color} framed />
       </View>
-      {factionPicker && (
-        <>
-          <Eyebrow>Команда в игре</Eyebrow>
-          {factionPicker}
-        </>
-      )}
       {canEdit ? (
         <>
           <Eyebrow>Статус</Eyebrow>

@@ -5,6 +5,9 @@ import {
   mdiAutorenew,
   mdiArrowTopRightThick,
   mdiCamera,
+  mdiFlag,
+  mdiHexagonOutline,
+  mdiSoccer,
   mdiFire,
   mdiFlagVariant,
   mdiMapMarkerRadius,
@@ -44,7 +47,10 @@ type KindDef = {
     | 'fire'
     | 'alert-octagon'
     | 'vector-square'
-    | 'camera';
+    | 'camera'
+    | 'flag'
+    | 'hexagon-outline'
+    | 'soccer';
   /** Same icon as an SVG path, for markers drawn inside the map WebView. */
   path: string;
   color: string;
@@ -69,6 +75,10 @@ export const MARKER_KINDS: Record<MarkerKind, KindDef> = {
   'area-enemy': { title: 'Зона противника', icon: 'alert-octagon', path: mdiAlertOctagon, color: '#FF4D4D' },
   'area-bound': { title: 'Граница полигона', icon: 'vector-square', path: mdiVectorSquare, color: '#FFC83D' },
   photo: { title: 'Фото', icon: 'camera', path: mdiCamera, color: '#5CC8FF' },
+  // Game modes (placed by game techs).
+  flag: { title: 'Флаг', icon: 'flag', path: mdiFlag, color: '#F2F2F2' },
+  sector: { title: 'Сектор', icon: 'hexagon-outline', path: mdiHexagonOutline, color: '#C3CCC6' },
+  ball: { title: 'Мяч', icon: 'soccer', path: mdiSoccer, color: '#F2F2F2' },
   'order-move': { title: 'Двигаться сюда', icon: 'run-fast', path: mdiRunFast, color: '#B4E34A' },
   'order-attack': { title: 'Атаковать', icon: 'sword-cross', path: mdiSwordCross, color: '#FF4D4D' },
   'order-defend': { title: 'Оборонять', icon: 'shield-half-full', path: mdiShieldHalfFull, color: '#3D9BFF' },

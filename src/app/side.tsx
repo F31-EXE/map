@@ -11,6 +11,7 @@ import { useSession } from '../state/session';
 import { useSide, type Squad } from '../state/side';
 import { Button, Card, Eyebrow, Icon, KeyboardScroll, tap } from '../ui/components';
 import { confirmDestructive } from '../ui/confirm';
+import { GameLinkCard } from '../ui/GameLinkCard';
 import { QrCode } from '../ui/QrCode';
 import { C, F, R } from '../ui/theme';
 
@@ -116,6 +117,8 @@ export default function SideScreen() {
           />
         </View>
       </Card>
+
+      <GameLinkCard />
 
       <Card style={styles.switchRow}>
         <View style={[styles.switchIcon, side.showAll && { backgroundColor: C.accentSoft }]}>

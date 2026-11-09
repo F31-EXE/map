@@ -2,6 +2,7 @@ import { useCallback, useEffect, useImperativeHandle, useRef, useState, type Ref
 
 import { formatClock } from '../lib/geo';
 import { isArea } from '../lib/geofence';
+import { BALL_RADIUS, TECH_COLOR } from '../lib/gameModes';
 import { isAdminKind, isOrder, MARKER_KINDS } from '../lib/markerKinds';
 import { ROLES, type RoleId } from '../lib/roles';
 import type { Bounds } from '../lib/tiles';
@@ -44,6 +45,8 @@ type Props = {
   /** Own role and color for the self marker. */
   selfRole?: RoleId;
   selfColor?: string;
+  /** I'm a game tech: the self marker is an orange diamond. */
+  selfTech?: boolean;
   follow: boolean;
   /** Grid overlay: UTM squares or the 500 m snail grid. */
   grid?: GridMode;
@@ -163,12 +166,17 @@ export function TacticalMap(props: Props) {
 
   useEffect(() => {
     if (!ready) return;
-    const { self, selfRole, selfColor } = props;
+    const { self, selfRole, selfColor, selfTech } = props;
     send({
       type: 'setSelf',
-      payload: self && { ...self, rolePath: selfRole ? ROLES[selfRole].path : null, color: selfColor ?? null },
+      payload: self && {
+        ...self,
+        rolePath: selfRole && !selfTech ? ROLES[selfRole].path : null,
+        color: selfTech ? TECH_COLOR : (selfColor ?? null),
+        tech: Boolean(selfTech),
+      },
     });
-  }, [ready, generation, props.self, props.selfRole, props.selfColor, send]);
+  }, [ready, generation, props.self, props.selfRole, props.selfColor, props.selfTech, send]);
 
   const { grid, gridOrigin, headingUp } = props;
   const originLat = gridOrigin?.lat;
@@ -212,10 +220,11 @@ export function TacticalMap(props: Props) {
         lat: m.lat,
         lng: m.lng,
         callsign: m.mapLabel ?? m.callsign,
-        color: m.color ?? props.teamColor,
+        color: m.tech ? TECH_COLOR : (m.color ?? props.teamColor),
         rolePath: ROLES[m.role].path,
-        roleTitle: m.mapLabel ? null : ROLES[m.role].title,
-        commander: m.leader ?? (m.canCommand || m.id === props.ownerId),
+        roleTitle: m.tech ? 'Игротех' : m.mapLabel ? null : ROLES[m.role].title,
+        commander: !m.tech && (m.leader ?? (m.canCommand || m.id === props.ownerId)),
+        tech: Boolean(m.tech),
         heading: m.heading,
         status: m.status,
         stale: !m.updatedAt || now - m.updatedAt > STALE_MS,
@@ -236,15 +245,19 @@ export function TacticalMap(props: Props) {
         path: k.path,
         color: m.color ?? k.color,
         points: m.points,
-        area: isArea(m.kind),
+        area: isArea(m.kind) || m.kind === 'sector',
         kind: m.kind,
-        title: m.label || k.title,
+        title: m.kind === 'sector' ? sectorTitle(m) : m.label || k.title,
         dir: m.kind === 'photo' && m.heading != null ? m.heading : null,
         order: isOrder(m.kind),
         admin: isAdminKind(m.kind) || m.kind === 'hotzone',
         movable: Boolean(isMovable?.(m)),
         wave: m.wave ?? null,
         zone: m.zone ?? null,
+        ball:
+          m.kind === 'ball'
+            ? { lat: m.lat, lng: m.lng, r: BALL_RADIUS, push: m.ball?.push ?? 0, goal: Boolean(m.ball?.goal) }
+            : null,
         personal: Boolean(m.personal),
         time: formatClock(m.createdAt),
       };
@@ -389,4 +402,10 @@ export function TacticalMap(props: Props) {
   );
 
   return <MapFrame ref={frameRef} onMessage={onMessage} />;
+}
+
+/** Territory label on the map: number, plus a capture in progress. */
+function sectorTitle(m: TacMarker): string {
+  const cap = m.cap ? ` · захват ${m.cap.n}/3` : '';
+  return `${m.label ?? ''}${cap}`;
 }

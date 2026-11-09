@@ -14,6 +14,7 @@ import { KEYS, saveJson } from '../lib/storage';
 import { OverlaysProvider } from '../state/overlays';
 import { SessionProvider } from '../state/session';
 import { ChatProvider } from '../state/chat';
+import { GameProvider } from '../state/game';
 import { SideProvider } from '../state/side';
 import { C, F } from '../ui/theme';
 import { NightFilter } from '../ui/NightFilter';
@@ -45,30 +46,33 @@ export default function RootLayout() {
   return (
     <SessionProvider>
       <SideProvider>
-        <ChatProvider>
-          <OverlaysProvider>
-            <StatusBar style="light" />
-            <Stack
-              screenOptions={{
-                headerStyle: { backgroundColor: C.bg },
-                headerShadowVisible: false,
-                headerTintColor: C.text,
-                headerTitleStyle: { fontFamily: F.mono, fontSize: 15 },
-                headerBackButtonDisplayMode: 'minimal',
-                contentStyle: { backgroundColor: C.bg },
-              }}
-            >
-              <Stack.Screen name="(tabs)" options={{ headerShown: false, title: 'Карта' }} />
-              <Stack.Screen name="maps" options={{ title: 'Карты полигона' }} />
-              <Stack.Screen name="side" options={{ title: 'Командование стороной' }} />
-              <Stack.Screen name="scan" options={{ title: 'Сканировать QR', presentation: 'modal' }} />
-              <Stack.Screen name="join" options={{ title: 'Приглашение' }} />
-              <Stack.Screen name="polygon" options={{ title: 'Игра из календаря' }} />
-              <Stack.Screen name="replay" options={{ title: 'Записи игр' }} />
-            </Stack>
-            <NightFilter />
-          </OverlaysProvider>
-        </ChatProvider>
+        <GameProvider>
+          <ChatProvider>
+            <OverlaysProvider>
+              <StatusBar style="light" />
+              <Stack
+                screenOptions={{
+                  headerStyle: { backgroundColor: C.bg },
+                  headerShadowVisible: false,
+                  headerTintColor: C.text,
+                  headerTitleStyle: { fontFamily: F.mono, fontSize: 15 },
+                  headerBackButtonDisplayMode: 'minimal',
+                  contentStyle: { backgroundColor: C.bg },
+                }}
+              >
+                <Stack.Screen name="(tabs)" options={{ headerShown: false, title: 'Карта' }} />
+                <Stack.Screen name="maps" options={{ title: 'Карты полигона' }} />
+                <Stack.Screen name="side" options={{ title: 'Командование стороной' }} />
+                <Stack.Screen name="game" options={{ title: 'Большая игра' }} />
+                <Stack.Screen name="scan" options={{ title: 'Сканировать QR', presentation: 'modal' }} />
+                <Stack.Screen name="join" options={{ title: 'Приглашение' }} />
+                <Stack.Screen name="polygon" options={{ title: 'Игра из календаря' }} />
+                <Stack.Screen name="replay" options={{ title: 'Записи игр' }} />
+              </Stack>
+              <NightFilter />
+            </OverlaysProvider>
+          </ChatProvider>
+        </GameProvider>
       </SideProvider>
     </SessionProvider>
   );

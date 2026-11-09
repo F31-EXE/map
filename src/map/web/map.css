@@ -534,3 +534,52 @@ body,
 .lod-dot .tac-dir {
   display: none;
 }
+
+/* ---------- game techs: orange diamonds ---------- */
+.self-pin.tech,
+.member-icon.tech .member-pin {
+  border-radius: 4px;
+  transform: rotate(45deg) scale(0.86);
+}
+.lod-mid .member-icon.tech .member-pin {
+  transform: rotate(45deg) scale(0.7);
+}
+.lod-dot .member-icon.tech .member-pin {
+  transform: rotate(45deg) scale(0.42);
+}
+.tech-core {
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  background: #04100a;
+}
+.lod-dot .tech-core {
+  visibility: hidden;
+}
+
+/* ---------- football ---------- */
+.ball-pin {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: 3px solid #fff;
+  background: #f2f2f2;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 0 0 1.5px #0b0f0c, 0 3px 8px rgba(0, 0, 0, 0.6);
+}
+.ball-pin svg {
+  width: 22px;
+  height: 22px;
+}
+.ball-icon.goal .ball-pin {
+  box-shadow: 0 0 0 1.5px #0b0f0c, 0 0 16px 4px #ffc83d;
+}
+.ball-icon .chip {
+  top: 34px;
+}
