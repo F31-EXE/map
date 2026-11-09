@@ -308,6 +308,10 @@ export default function MapScreen() {
   const [mortarOn, setMortarOn] = useState(false);
   const [mortarSheet, setMortarSheet] = useState(false);
   const calculator = mortarOn && mortar.isMortar;
+  // Role changed away from mortar crew: the calculator closes and stays closed.
+  useEffect(() => {
+    if (!mortar.isMortar) setMortarOn(false);
+  }, [mortar.isMortar]);
   const gunAt: LatLng | null = mortar.fixed ?? (position ? { lat: position.lat, lng: position.lng } : null);
   const centeredOnce = useRef(false);
 
