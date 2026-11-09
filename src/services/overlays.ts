@@ -80,6 +80,35 @@ export async function importOverlayFromUrl(url: string, name: string, format: Ov
   return meta;
 }
 
+/** The raw bytes of an imported map file (to share it with the squad). */
+export async function readOverlayBytes(meta: OverlayMeta): Promise<Uint8Array> {
+  const file = new File(overlaysDir(), meta.fileName);
+  if (!file.exists) throw new Error(`Файл карты «${meta.name}» не найден`);
+  return file.bytes();
+}
+
+/** Saves a map file received from the squad, checks it opens, returns its entry. */
+export async function saveOverlayBytes(
+  name: string,
+  format: OverlayFormat,
+  bytes: Uint8Array,
+  sharedId: string
+): Promise<OverlayMeta> {
+  const id = newId();
+  const fileName = `${id}.${format}`;
+  const dest = new File(overlaysDir(), fileName);
+  dest.create({ overwrite: true });
+  dest.write(bytes);
+  const meta: OverlayMeta = { id, name, format, fileName, visible: true, addedAt: Date.now(), sharedId };
+  try {
+    await loadOverlayPayload(meta);
+  } catch (e) {
+    if (dest.exists) dest.delete();
+    throw e;
+  }
+  return meta;
+}
+
 export function deleteOverlayFile(meta: OverlayMeta): void {
   const f = new File(overlaysDir(), meta.fileName);
   if (f.exists) f.delete();

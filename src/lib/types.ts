@@ -90,6 +90,10 @@ export type MarkerKind =
   | 'note'
   | 'arrow'
   | 'hotzone'
+  | 'area-dead'
+  | 'area-enemy'
+  | 'area-bound'
+  | 'photo'
   | AdminKind
   | OrderKind;
 
@@ -125,6 +129,12 @@ export type TacMarker = {
   zone?: HotZone | null;
   /** Team game: placed by a player of this team, shown only to that team. */
   faction?: number | null;
+  /** Photo marker: id of the picture in the squad's photos (team markers). */
+  photoId?: string;
+  /** Photo marker kept on this phone only: the picture itself (data URI). */
+  photoData?: string;
+  /** Photo marker: compass direction the camera faced. */
+  heading?: number | null;
 };
 
 export type OverlayFormat = 'kml' | 'kmz' | 'gpx' | 'geojson';
@@ -137,4 +147,6 @@ export type OverlayMeta = {
   fileName: string;
   visible: boolean;
   addedAt: number;
+  /** Squad map this file was shared as or received from (teams/{id}/maps). */
+  sharedId?: string;
 };

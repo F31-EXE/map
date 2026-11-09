@@ -7,7 +7,8 @@ import type { OverlayFormat } from '../lib/types';
 import { fetchUpcomingGames } from '../services/calendar';
 import { TILE_LAYERS } from '../lib/tiles';
 import { useOverlays } from '../state/overlays';
-import { confirmDestructive } from '../ui/confirm';
+import { useSession } from '../state/session';
+import { confirmAction, confirmDestructive } from '../ui/confirm';
 import { Badge, Eyebrow, Icon, tap, type IconName } from '../ui/components';
 import { C, F, R } from '../ui/theme';
 
@@ -19,8 +20,36 @@ const FORMAT_ICON: Record<OverlayFormat, IconName> = {
 };
 
 export default function MapsScreen() {
-  const { overlays, importOverlay, removeOverlay, setVisible, requestFocus, areas, download, removeArea } = useOverlays();
+  const {
+    overlays,
+    importOverlay,
+    removeOverlay,
+    setVisible,
+    requestFocus,
+    areas,
+    download,
+    removeArea,
+    sharedMaps,
+    shareOverlay,
+    unshareMap,
+    fetchShared,
+  } = useOverlays();
+  const session = useSession();
+  const inTeam = Boolean(session.teamId && session.uid);
   const [busy, setBusy] = useState(false);
+  const [sending, setSending] = useState<string | null>(null);
+
+  const share = (id: string, name: string) =>
+    confirmAction('Отправить карту отряду?', `«${name}» появится у всех бойцов отряда.`, 'Отправить', async () => {
+      setSending(id);
+      try {
+        await shareOverlay(id);
+      } catch (e) {
+        Alert.alert('Не удалось отправить', (e as Error).message);
+      } finally {
+        setSending(null);
+      }
+    });
   // Ближайшие игры из календаря THE GRIM TEAM, у которых есть карта или координаты
   const [games, setGames] = useState<CalendarGame[]>([]);
   useEffect(() => {
@@ -91,6 +120,58 @@ export default function MapsScreen() {
                   <Icon name="chevron-right" size={22} color={C.dim} />
                 </Pressable>
               ))}
+            </View>
+          )}
+          {inTeam && sharedMaps.length > 0 && (
+            <View style={{ gap: 10 }}>
+              <Eyebrow style={{ paddingHorizontal: 4 }}>Карты отряда · {sharedMaps.length}</Eyebrow>
+              {sharedMaps.map((m) => {
+                const local = overlays.some((o) => o.sharedId === m.id);
+                const mine = m.createdBy === session.uid;
+                return (
+                  <View key={m.id} style={styles.item}>
+                    <View style={[styles.itemIcon, local && { backgroundColor: C.accentSoft }]}>
+                      <Icon name="account-group" size={22} color={local ? C.accent : C.dim} />
+                    </View>
+                    <View style={{ flex: 1, gap: 4 }}>
+                      <Text style={styles.name} numberOfLines={1}>
+                        {m.name}
+                      </Text>
+                      <Text style={styles.meta} numberOfLines={1}>
+                        {m.createdByName} · {Math.max(1, Math.round(m.size / 1024))} КБ ·{' '}
+                        {local ? 'на телефоне' : 'не скачана'}
+                      </Text>
+                    </View>
+                    {!local && (
+                      <Pressable
+                        hitSlop={8}
+                        style={styles.delete}
+                        accessibilityLabel="Скачать карту"
+                        onPress={() => fetchShared(m).catch((e: Error) => Alert.alert('Не скачалась', e.message))}
+                      >
+                        <Icon name="cloud-download-outline" size={20} color={C.accent} />
+                      </Pressable>
+                    )}
+                    {(mine || session.canCommand) && (
+                      <Pressable
+                        hitSlop={8}
+                        style={styles.delete}
+                        accessibilityLabel="Убрать у отряда"
+                        onPress={() =>
+                          confirmDestructive(
+                            'Убрать карту у отряда?',
+                            `«${m.name}» больше не будет приходить бойцам. У кого она уже скачана, останется.`,
+                            'Убрать',
+                            () => unshareMap(m).catch((e: Error) => Alert.alert('Не получилось', e.message))
+                          )
+                        }
+                      >
+                        <Icon name="account-remove-outline" size={20} color={C.dim} />
+                      </Pressable>
+                    )}
+                  </View>
+                );
+              })}
             </View>
           )}
           {overlays.length > 0 && <Eyebrow style={{ paddingHorizontal: 4 }}>Загруженные · {overlays.length}</Eyebrow>}
@@ -164,9 +245,25 @@ export default function MapsScreen() {
             </Text>
             <View style={styles.metaRow}>
               <Badge text={item.format.toUpperCase()} />
+              {item.sharedId && <Badge text="ОТРЯД" color={C.accent} />}
               <Text style={styles.meta}>{new Date(item.addedAt).toLocaleDateString('ru-RU')}</Text>
             </View>
           </View>
+          {inTeam && !item.sharedId && (
+            <Pressable
+              hitSlop={8}
+              style={styles.delete}
+              accessibilityLabel="Отправить отряду"
+              disabled={sending != null}
+              onPress={() => share(item.id, item.name)}
+            >
+              {sending === item.id ? (
+                <ActivityIndicator color={C.accent} />
+              ) : (
+                <Icon name="share-variant-outline" size={20} color={C.accent} />
+              )}
+            </Pressable>
+          )}
           <Switch
             value={item.visible}
             onValueChange={(v) => setVisible(item.id, v)}

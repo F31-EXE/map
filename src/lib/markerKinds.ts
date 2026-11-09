@@ -1,8 +1,10 @@
 import {
   mdiAccountTie,
   mdiAlert,
+  mdiAlertOctagon,
   mdiAutorenew,
   mdiArrowTopRightThick,
+  mdiCamera,
   mdiFire,
   mdiFlagVariant,
   mdiMapMarkerRadius,
@@ -15,6 +17,7 @@ import {
   mdiSkullCrossbones,
   mdiSwordCross,
   mdiTarget,
+  mdiVectorSquare,
 } from '@mdi/js';
 
 import type { AdminKind, MarkerKind, OrderKind } from './types';
@@ -38,7 +41,10 @@ type KindDef = {
     | 'skull-crossbones'
     | 'parking'
     | 'account-tie'
-    | 'fire';
+    | 'fire'
+    | 'alert-octagon'
+    | 'vector-square'
+    | 'camera';
   /** Same icon as an SVG path, for markers drawn inside the map WebView. */
   path: string;
   color: string;
@@ -58,6 +64,11 @@ export const MARKER_KINDS: Record<MarkerKind, KindDef> = {
   parking: { title: 'Парковка', icon: 'parking', path: mdiParking, color: '#7FA7FF' },
   hotzone: { title: 'Зона контроля', icon: 'fire', path: mdiFire, color: '#FF5A1F' },
   admin: { title: 'Администрация', icon: 'account-tie', path: mdiAccountTie, color: '#F2F2F2' },
+  // Drawn zones that buzz: walking into a dead zone or enemy zone, out of the field.
+  'area-dead': { title: 'Зона мертвяка', icon: 'skull-crossbones', path: mdiSkullCrossbones, color: '#C3CCC6' },
+  'area-enemy': { title: 'Зона противника', icon: 'alert-octagon', path: mdiAlertOctagon, color: '#FF4D4D' },
+  'area-bound': { title: 'Граница полигона', icon: 'vector-square', path: mdiVectorSquare, color: '#FFC83D' },
+  photo: { title: 'Фото', icon: 'camera', path: mdiCamera, color: '#5CC8FF' },
   'order-move': { title: 'Двигаться сюда', icon: 'run-fast', path: mdiRunFast, color: '#B4E34A' },
   'order-attack': { title: 'Атаковать', icon: 'sword-cross', path: mdiSwordCross, color: '#FF4D4D' },
   'order-defend': { title: 'Оборонять', icon: 'shield-half-full', path: mdiShieldHalfFull, color: '#3D9BFF' },

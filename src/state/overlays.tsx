@@ -1,9 +1,15 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 
+import { Platform } from 'react-native';
+
+import { KEYS, loadJson, saveJson } from '../lib/storage';
 import type { LatLng, OverlayFormat, OverlayMeta } from '../lib/types';
 import type { Bounds } from '../lib/tiles';
 import * as offline from '../services/offlineMaps';
 import * as svc from '../services/overlays';
+import * as shared from '../services/sharedMaps';
+
+import { useSession } from './session';
 
 type Overlays = {
   overlays: OverlayMeta[];
@@ -26,6 +32,15 @@ type Overlays = {
   downloadArea: (layer: string, name: string, b: Bounds, minZoom: number, maxZoom: number) => Promise<void>;
   cancelDownload: () => void;
   removeArea: (id: string) => Promise<void>;
+
+  /** Maps shared with the squad; new ones are downloaded and added automatically. */
+  sharedMaps: shared.SharedMap[];
+  /** Sends an imported map to everyone in the squad. */
+  shareOverlay: (id: string) => Promise<void>;
+  /** Takes a squad map away from everyone (author or a superior). */
+  unshareMap: (m: shared.SharedMap) => Promise<void>;
+  /** Downloads a squad map again (after it was removed on this phone). */
+  fetchShared: (m: shared.SharedMap) => Promise<void>;
 };
 
 const Ctx = createContext<Overlays | null>(null);
@@ -51,7 +66,21 @@ export function OverlaysProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     svc.listOverlays().then(setOverlays);
     offline.listAreas().then(setAreas);
+    loadJson<string[]>(KEYS.sharedMapsDismissed, []).then(setDismissed);
   }, []);
+
+  // Squad maps: listen, and bring new ones onto this phone.
+  const { teamId, uid, callsign } = useSession();
+  const [sharedMaps, setSharedMaps] = useState<shared.SharedMap[]>([]);
+  const [dismissed, setDismissed] = useState<string[]>([]);
+  useEffect(() => {
+    setSharedMaps([]);
+    if (!teamId || !uid) return;
+    return shared.subscribeSharedMaps(teamId, setSharedMaps, () => {});
+  }, [teamId, uid]);
+  const overlaysRef = useRef(overlays);
+  overlaysRef.current = overlays;
+  const fetching = useRef(new Set<string>());
 
   const commitAreas = useCallback(async (next: offline.OfflineArea[]) => {
     setAreas(next);
@@ -137,8 +166,63 @@ export function OverlaysProvider({ children }: { children: ReactNode }) {
       const meta = overlays.find((o) => o.id === id);
       if (meta) svc.deleteOverlayFile(meta);
       await commit(overlays.filter((o) => o.id !== id));
+      // A squad map removed here stays removed here (others keep it).
+      if (meta?.sharedId) {
+        const next = [...dismissed, meta.sharedId];
+        setDismissed(next);
+        await saveJson(KEYS.sharedMapsDismissed, next);
+      }
     },
-    [overlays, commit]
+    [overlays, commit, dismissed]
+  );
+
+  const fetchShared = useCallback(
+    async (m: shared.SharedMap) => {
+      if (!teamId || fetching.current.has(m.id)) return;
+      fetching.current.add(m.id);
+      try {
+        const bytes = await shared.fetchSharedMap(teamId, m);
+        const meta = await svc.saveOverlayBytes(m.name, m.format, bytes, m.id);
+        await commit([...overlaysRef.current.filter((o) => o.sharedId !== m.id), meta]);
+        if (dismissed.includes(m.id)) {
+          const next = dismissed.filter((x) => x !== m.id);
+          setDismissed(next);
+          await saveJson(KEYS.sharedMapsDismissed, next);
+        }
+      } finally {
+        fetching.current.delete(m.id);
+      }
+    },
+    [teamId, commit, dismissed]
+  );
+
+  useEffect(() => {
+    // The web version keeps no files.
+    if (Platform.OS === 'web') return;
+    for (const m of sharedMaps) {
+      if (dismissed.includes(m.id) || overlaysRef.current.some((o) => o.sharedId === m.id)) continue;
+      fetchShared(m).catch(() => {});
+    }
+  }, [sharedMaps, dismissed, fetchShared]);
+
+  const shareOverlay = useCallback(
+    async (id: string) => {
+      const meta = overlays.find((o) => o.id === id);
+      if (!meta) throw new Error('Карта не найдена');
+      if (!teamId || !uid) throw new Error('Сначала вступите в отряд');
+      const bytes = await svc.readOverlayBytes(meta);
+      const sharedId = await shared.shareMap(teamId, { uid, callsign: callsign || 'Боец' }, meta, bytes);
+      await commit(overlaysRef.current.map((o) => (o.id === id ? { ...o, sharedId } : o)));
+    },
+    [overlays, teamId, uid, callsign, commit]
+  );
+
+  const unshareMap = useCallback(
+    async (m: shared.SharedMap) => {
+      if (!teamId) return;
+      await shared.unshareMap(teamId, m);
+    },
+    [teamId]
   );
 
   const setVisible = useCallback(
@@ -164,8 +248,12 @@ export function OverlaysProvider({ children }: { children: ReactNode }) {
       downloadArea,
       cancelDownload,
       removeArea,
+      sharedMaps,
+      shareOverlay,
+      unshareMap,
+      fetchShared,
     }),
-    [overlays, importOverlay, importOverlayFromUrl, removeOverlay, setVisible, focusRequest, viewRequest, areas, download, downloadArea, cancelDownload, removeArea]
+    [overlays, importOverlay, importOverlayFromUrl, removeOverlay, setVisible, focusRequest, viewRequest, areas, download, downloadArea, cancelDownload, removeArea, sharedMaps, shareOverlay, unshareMap, fetchShared]
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

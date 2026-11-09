@@ -5,12 +5,15 @@ import {
   doc,
   getDoc,
   getDocFromServer,
+  getDocs,
   increment,
   onSnapshot,
+  query,
   serverTimestamp,
   setDoc,
   Timestamp,
   updateDoc,
+  where,
   writeBatch,
   type Unsubscribe,
 } from 'firebase/firestore';
@@ -118,6 +121,31 @@ export async function updateMemberByCommander(
   patch: { role?: RoleId; status?: MemberStatus }
 ): Promise<void> {
   await updateDoc(doc(firestore(), 'teams', teamId, 'members', memberId), patch);
+}
+
+/** A photo for a photo marker: a compressed JPEG data URI in its own doc. */
+export async function savePhoto(teamId: string, photoId: string, uid: string, data: string): Promise<void> {
+  await setDoc(doc(firestore(), 'teams', teamId, 'photos', photoId), {
+    data,
+    createdBy: uid,
+    createdAt: serverTimestamp(),
+  });
+}
+
+export async function loadPhoto(teamId: string, photoId: string): Promise<string | null> {
+  const d = await getDoc(doc(firestore(), 'teams', teamId, 'photos', photoId));
+  const v = d.data();
+  return typeof v?.data === 'string' ? v.data : null;
+}
+
+export async function deletePhoto(teamId: string, photoId: string): Promise<void> {
+  await deleteDoc(doc(firestore(), 'teams', teamId, 'photos', photoId));
+}
+
+/** "Delete my data": every photo this player took in the squad. */
+export async function deleteMyPhotos(teamId: string, uid: string): Promise<void> {
+  const s = await getDocs(query(collection(firestore(), 'teams', teamId, 'photos'), where('createdBy', '==', uid)));
+  await Promise.all(s.docs.map((d) => deleteDoc(d.ref)));
 }
 
 /** Commanders set where square А1 of the snail grid starts (NW corner); null resets. */
@@ -283,6 +311,8 @@ export function subscribeTeamMarkers(
             wave: validWave(v.wave) ? { every: v.wave.every, start: v.wave.start } : null,
             zone: validZone(v.zone) ? pickZone(v.zone) : null,
             faction: Number.isInteger(v.faction) ? v.faction : null,
+            photoId: typeof v.photoId === 'string' ? v.photoId : undefined,
+            heading: typeof v.heading === 'number' ? v.heading : null,
           };
         })
       );
@@ -334,10 +364,13 @@ export function newMarkerId(teamId: string): string {
 
 export async function addTeamMarker(
   teamId: string,
-  m: Pick<TacMarker, 'kind' | 'label' | 'lat' | 'lng' | 'createdBy' | 'createdByName' | 'points' | 'color' | 'wave' | 'zone' | 'faction'>,
+  m: Pick<
+    TacMarker,
+    'kind' | 'label' | 'lat' | 'lng' | 'createdBy' | 'createdByName' | 'points' | 'color' | 'wave' | 'zone' | 'faction' | 'photoId' | 'heading'
+  >,
   id = newMarkerId(teamId)
 ): Promise<void> {
-  const { points, color, wave, zone, faction, ...rest } = m;
+  const { points, color, wave, zone, faction, photoId, heading, ...rest } = m;
   await setDoc(doc(firestore(), 'teams', teamId, 'markers', id), {
     ...rest,
     ...(points ? { points } : {}),
@@ -345,6 +378,8 @@ export async function addTeamMarker(
     ...(wave ? { wave } : {}),
     ...(zone ? { zone } : {}),
     ...(faction != null ? { faction } : {}),
+    ...(photoId ? { photoId } : {}),
+    ...(heading != null ? { heading } : {}),
     createdAt: serverTimestamp(),
   });
 }
@@ -365,6 +400,8 @@ export async function relayTeamMarker(teamId: string, relayedBy: string, m: TacM
     ...(m.points ? { points: m.points } : {}),
     ...(m.color ? { color: m.color } : {}),
     ...(m.faction != null ? { faction: m.faction } : {}),
+    ...(m.photoId ? { photoId: m.photoId } : {}),
+    ...(m.heading != null ? { heading: m.heading } : {}),
     createdAt: Timestamp.fromMillis(m.createdAt),
     relayedBy,
   });

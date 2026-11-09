@@ -16,6 +16,7 @@ import { SessionProvider } from '../state/session';
 import { ChatProvider } from '../state/chat';
 import { SideProvider } from '../state/side';
 import { C, F } from '../ui/theme';
+import { NightFilter } from '../ui/NightFilter';
 import { installWebAlert } from '../ui/webAlert';
 
 installErrorRecorder();
@@ -65,6 +66,7 @@ export default function RootLayout() {
               <Stack.Screen name="polygon" options={{ title: 'Игра из календаря' }} />
               <Stack.Screen name="replay" options={{ title: 'Записи игр' }} />
             </Stack>
+            <NightFilter />
           </OverlaysProvider>
         </ChatProvider>
       </SideProvider>

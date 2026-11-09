@@ -35,6 +35,13 @@ export const KEYS = {
   radio: 'tacmap.radio',
   /** Snail grid origin when not in a squad (in a squad it's on the team doc). */
   gridOrigin: 'tacmap.gridOrigin',
+  /** Night mode: red, dimmed screen. */
+  night: 'tacmap.night',
+  /** Own trail: minutes shown (0 = off) and the crumbs of the last hour. */
+  trailMinutes: 'tacmap.trailMinutes',
+  trail: 'tacmap.trail',
+  /** Squad maps this phone removed: not downloaded again automatically. */
+  sharedMapsDismissed: 'tacmap.sharedMapsDismissed',
 } as const;
 
 export async function loadJson<T>(key: string, fallback: T): Promise<T> {

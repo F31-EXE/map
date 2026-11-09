@@ -20,11 +20,13 @@ import {
   type ViewProps,
   type ViewStyle,
 } from 'react-native';
+
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
 
 import { roleFrame, ROLES, type RoleId } from '../lib/roles';
 
+import { NightFilter } from './NightFilter';
 import { C, eyebrow, F, R, shadow } from './theme';
 
 export type IconName = ComponentProps<typeof MaterialCommunityIcons>['name'];
@@ -308,6 +310,7 @@ export function Sheet({
           >
             <View style={styles.sideHead}>{closeButton}</View>
             {body}
+            <NightFilter />
           </View>
         </KeyboardAvoidingView>
       </Modal>
@@ -334,6 +337,7 @@ export function Sheet({
             <View style={styles.sheetClose}>{closeButton}</View>
           </View>
           {body}
+          <NightFilter />
         </View>
       </KeyboardAvoidingView>
     </Modal>

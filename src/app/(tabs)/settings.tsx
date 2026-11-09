@@ -6,6 +6,9 @@ import { Alert, Linking, Pressable, Share, StyleSheet, Switch, Text, TextInput, 
 import { pickAvatar } from '../../services/avatar';
 import { BACKGROUND_SUPPORTED } from '../../services/backgroundLocation';
 import { clearLastError, lastError } from '../../services/crashGuard';
+import { TRAIL_CHOICES } from '../../lib/trail';
+import { setNight, useNight } from '../../state/night';
+import { setTrailMinutes, useTrailMinutes } from '../../state/trail';
 import { useSession } from '../../state/session';
 import { Avatar, Button, Card, Eyebrow, Icon, KeyboardScroll, tap, type IconName } from '../../ui/components';
 import { confirmDestructive } from '../../ui/confirm';
@@ -17,6 +20,8 @@ const PRIVACY_URL = 'https://f31-exe.github.io/map/privacy.html';
 
 export default function SettingsScreen() {
   const s = useSession();
+  const night = useNight();
+  const trailMinutes = useTrailMinutes();
   const [crash, setCrash] = useState<string | null>(null);
   useEffect(() => {
     lastError().then(setCrash);
@@ -162,6 +167,42 @@ export default function SettingsScreen() {
           }
           value={s.keepAwake}
           onChange={(v) => run(() => s.setKeepAwake(v))}
+        />
+        <View style={styles.divider} />
+        <View style={styles.row}>
+          <View style={[styles.rowIcon, trailMinutes > 0 && { backgroundColor: C.accentSoft, borderColor: C.lineStrong }]}>
+            <Icon name="shoe-print" size={22} color={trailMinutes > 0 ? C.accent : C.dim} />
+          </View>
+          <View style={{ flex: 1, gap: 8 }}>
+            <View>
+              <Text style={styles.rowTitle}>Свой след</Text>
+              <Text style={styles.sub}>Пунктир там, где вы прошли, чтобы вернуться тем же путём</Text>
+            </View>
+            <View style={styles.chips}>
+              {TRAIL_CHOICES.map((m) => (
+                <Pressable
+                  key={m}
+                  onPress={() => {
+                    tap();
+                    setTrailMinutes(m);
+                  }}
+                  style={[styles.chip, trailMinutes === m && styles.chipOn]}
+                >
+                  <Text style={[styles.chipText, trailMinutes === m && { color: C.accentInk }]}>
+                    {m ? `${m} мин` : 'Выкл'}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+          </View>
+        </View>
+        <View style={styles.divider} />
+        <SettingRow
+          icon="weather-night"
+          title="Ночной режим"
+          sub="Тёмно-красный экран: не слепит и не светит в темноте"
+          value={night}
+          onChange={setNight}
         />
         <View style={styles.divider} />
         <View style={styles.row}>

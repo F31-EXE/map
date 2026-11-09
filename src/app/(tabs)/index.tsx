@@ -6,7 +6,10 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useSelfPosition } from '../../hooks/useSelfPosition';
 import { bearingDegrees, distanceMeters, formatClock, formatCoords, formatDistance, timeAgo } from '../../lib/geo';
+import { centroid, isArea, ZoneWatcher, type Area, type AreaKind } from '../../lib/geofence';
 import { turnText } from '../../lib/heading';
+import { ARRIVE_M, etaSeconds, formatEta, SpeedTracker } from '../../lib/nav';
+import { recentTrail } from '../../lib/trail';
 import { hotState, type HotZone } from '../../lib/hotzone';
 import { isOrder, MARKER_KINDS, voteThreshold } from '../../lib/markerKinds';
 import { correct, DEFAULT_RANGE, solve } from '../../lib/mortar';
@@ -27,11 +30,16 @@ import { markerErrorText } from '../../services/teams';
 import { useOverlays } from '../../state/overlays';
 import { useSession, type MarkerScope } from '../../state/session';
 import { useSide, type OrderTarget } from '../../state/side';
+import { setNight, useNight } from '../../state/night';
+import { useTrail, useTrailMinutes } from '../../state/trail';
 import { useMortar } from '../../state/useMortar';
 import { AddMarkerModal } from '../../ui/AddMarkerModal';
 import { OfflineSheet } from '../../ui/OfflineSheet';
 import { RegionPrompt } from '../../ui/RegionPrompt';
 import { GridSheet } from '../../ui/GridSheet';
+import { NavPanel } from '../../ui/NavPanel';
+import { PhotoView } from '../../ui/PhotoView';
+import { takePhoto } from '../../services/photo';
 import { fireText, MortarPanel, MortarSheet } from '../../ui/MortarPanel';
 import { WavePanel } from '../../ui/WavePanel';
 import { ScoreRow } from '../../ui/GameCard';
@@ -210,6 +218,14 @@ export default function MapScreen() {
   // Map rotation: bearing as turned by hand, or following the compass.
   const [bearing, setBearing] = useState(0);
   const [headingUp, setHeadingUp] = useState(false);
+  const night = useNight();
+  // Own breadcrumb trail of the last minutes (setting), kept by this phone only.
+  const trailMinutes = useTrailMinutes();
+  const crumbs = useTrail(position);
+  const trailPoints = useMemo(
+    () => recentTrail(crumbs, trailMinutes, Date.now()).map((c) => [c.lat, c.lng] as [number, number]),
+    [crumbs, trailMinutes]
+  );
   const center = view;
   const [offlineSheet, setOfflineSheet] = useState(false);
   // Downloaded areas, for the map page to read tiles from disk.
@@ -239,6 +255,54 @@ export default function MapScreen() {
   const [hudTop, setHudTop] = useState<number | null>(null);
   const drawingRef = useRef(false);
   drawingRef.current = drawing != null;
+  // "Lead me there": a marker or a teammate to walk to.
+  const [nav, setNav] = useState<{ type: 'marker' | 'member'; id: string } | null>(null);
+  const [arrived, setArrived] = useState(false);
+  const speed = useRef(new SpeedTracker());
+  useEffect(() => {
+    if (position) speed.current.push(position, Date.now());
+  }, [position]);
+
+  // Zones that warn: walking into a dead zone or enemy zone, or out of the field.
+  const zoneWatcher = useRef(new ZoneWatcher());
+  const [zoneAlert, setZoneAlert] = useState<string | null>(null);
+  const zoneAlertTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const alertZones = useMemo<Area[]>(
+    () =>
+      side.mapMarkers
+        .filter((m) => isArea(m.kind) && (m.points?.length ?? 0) >= 3)
+        .map((m) => ({ id: m.id, kind: m.kind as AreaKind, label: m.label, points: m.points! })),
+    [side.mapMarkers]
+  );
+  useEffect(() => {
+    if (!position) return;
+    const alerts = zoneWatcher.current.update(position, alertZones);
+    if (!alerts.length) return;
+    const a = alerts[alerts.length - 1];
+    const name = a.area.label ? ` «${a.area.label}»` : '';
+    const text =
+      a.type === 'backInBound'
+        ? 'Вы снова на полигоне'
+        : a.type === 'leaveBound'
+          ? `Вы вышли за границу полигона${name}!`
+          : a.area.kind === 'area-dead'
+            ? `Вы в зоне мертвяка${name}`
+            : `Вы в зоне противника${name}!`;
+    setZoneAlert(text);
+    if (Platform.OS !== 'web') {
+      const kind = a.type === 'backInBound' ? Haptics.NotificationFeedbackType.Success : Haptics.NotificationFeedbackType.Warning;
+      Haptics.notificationAsync(kind).catch(() => {});
+      // A second buzz for warnings: easy to miss one in the middle of a game.
+      if (a.type !== 'backInBound') setTimeout(() => Haptics.notificationAsync(kind).catch(() => {}), 700);
+    }
+    // A timer of its own: this effect re-runs on every GPS fix.
+    if (zoneAlertTimer.current) clearTimeout(zoneAlertTimer.current);
+    zoneAlertTimer.current = setTimeout(() => setZoneAlert(null), 10_000);
+  }, [position, alertZones]);
+  useEffect(() => () => {
+    if (zoneAlertTimer.current) clearTimeout(zoneAlertTimer.current);
+  }, []);
+
   // Mortar calculator: fire data from the firing position to the crosshair.
   const mortar = useMortar();
   const [mortarOn, setMortarOn] = useState(false);
@@ -356,13 +420,13 @@ export default function MapScreen() {
   // Votes apply to my own squad's shared markers.
   const canVote = (m: TacMarker) => inTeam && !m.personal && (!m.teamId || m.teamId === session.teamId);
 
-  const toolbarButtons = 6 + (visibleMembers.length > 0 ? 1 : 0);
+  const toolbarButtons = 7 + (visibleMembers.length > 0 ? 1 : 0);
   const toolbarWidth = toolbarButtons * 50 + 8;
 
   // Landscape top row: [team pill][toolbar].
   const pillW = Math.min(420, width - insets.left - insets.right - 24 - toolbarWidth - 10);
   // Landscape bottom row: [HUD][FAB][locate][status] — buttons are 64 + 52 + 52 plus gaps.
-  const actionsW = 64 + 52 + (inTeam ? 52 + 14 : 0) + (mortar.isMortar ? 52 + 14 : 0) + 14;
+  const actionsW = 64 + 52 + 52 + 14 + (inTeam ? 52 + 14 : 0) + (mortar.isMortar ? 52 + 14 : 0) + 14;
 
   // Side commander without a squad of their own: the pill shows the side instead.
   const sideOnly = side.isSideCommander && !inTeam;
@@ -392,6 +456,47 @@ export default function MapScreen() {
 
   const solution = calculator && gunAt && center ? solve(gunAt, center, mortar.config) : null;
 
+  // Where "lead me there" points, followed live (a teammate keeps moving).
+  const navTo = (() => {
+    if (!nav) return null;
+    if (nav.type === 'marker') {
+      const m = side.mapMarkers.find((x) => x.id === nav.id);
+      return m ? { lat: m.lat, lng: m.lng, name: m.label || MARKER_KINDS[m.kind].title } : null;
+    }
+    const m = side.mapMembers.find((x) => x.id === nav.id);
+    return m && m.lat != null && m.lng != null ? { lat: m.lat, lng: m.lng, name: m.callsign } : null;
+  })();
+  const navDistance = navTo && position ? distanceMeters(position, navTo) : null;
+  const navLat = navTo?.lat;
+  const navLng = navTo?.lng;
+  const navPoint = useMemo(
+    () => (navLat != null && navLng != null ? { lat: navLat, lng: navLng } : null),
+    [navLat, navLng]
+  );
+  // Target gone (marker deleted, teammate left): stop.
+  const navLost = nav != null && navTo == null;
+  useEffect(() => {
+    if (navLost) setNav(null);
+  }, [navLost]);
+  useEffect(() => {
+    if (navDistance == null) return;
+    if (!arrived && navDistance <= ARRIVE_M) {
+      setArrived(true);
+      if (Platform.OS !== 'web') {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+        setTimeout(() => Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {}), 600);
+      }
+    } else if (arrived && navDistance > ARRIVE_M * 2) {
+      setArrived(false);
+    }
+  }, [navDistance, arrived]);
+  const startNav = (target: { type: 'marker' | 'member'; id: string }) => {
+    setMortarOn(false);
+    setArrived(false);
+    setNav(target);
+    setSelection(null);
+  };
+
   // Range circles around every other mortar crew in view; mine (at my firing position)
   // only while the calculator is open, so closing it clears my circle and line of fire.
   const mortarMap = useMemo(() => {
@@ -414,7 +519,9 @@ export default function MapScreen() {
   const banner =
     status === 'denied'
       ? 'Нет доступа к геолокации — разрешите его в настройках телефона'
-      : inTeam && session.teamError
+      : zoneAlert
+        ? zoneAlert
+        : inTeam && session.teamError
         ? session.teamError
         : null;
 
@@ -435,6 +542,9 @@ export default function MapScreen() {
         grid={session.gridMode}
         gridOrigin={session.gridOrigin}
         headingUp={headingUp}
+        night={night}
+        navTarget={navPoint}
+        trail={trailPoints}
         onBearingChanged={setBearing}
         onHeadingUpChanged={setHeadingUp}
         topInset={landscape ? insets.top + 60 : pillTop + 58}
@@ -458,7 +568,7 @@ export default function MapScreen() {
         onFollowChanged={setFollow}
         onOverlayError={onOverlayError}
         bottomInset={hudTop == null ? undefined : height - hudTop + 6}
-        drawing={drawing}
+        drawing={drawing && { ...drawing, area: drawing.kind === 'arrow' ? null : drawing.kind }}
         mortar={mortarMap}
         onDrawChanged={(points) => setDrawing((d) => (d ? { ...d, points } : d))}
       />
@@ -598,11 +708,18 @@ export default function MapScreen() {
           </Pressable>
           <View style={[styles.toolbarSep, landscape && styles.toolbarSepRow]} />
           <ToolbarButton
+            icon="weather-night"
+            label={night ? 'Выключить ночной режим' : 'Ночной режим'}
+            active={night}
+            onPress={() => setNight(!night)}
+          />
+          <View style={[styles.toolbarSep, landscape && styles.toolbarSepRow]} />
+          <ToolbarButton
             icon="draw"
             label="Нарисовать стрелку"
             onPress={() => {
               setFollow(false);
-              setDrawing({ color: ARROW_COLORS[0], points: [], scope: 'team' });
+              setDrawing({ kind: 'arrow', color: ARROW_COLORS[0], points: [], scope: 'team' });
             }}
           />
           {visibleMembers.length > 0 && (
@@ -658,20 +775,28 @@ export default function MapScreen() {
           onDone={async () => {
             const pts = drawing.points;
             try {
-              await session.addMarker(
-                {
-                  kind: 'arrow',
-                  label: '',
-                  lat: pts[pts.length - 1].lat,
-                  lng: pts[pts.length - 1].lng,
-                  points: pts,
-                  color: drawing.color,
-                },
-                inTeam ? drawing.scope : 'personal'
-              );
+              if (drawing.kind === 'arrow') {
+                await session.addMarker(
+                  {
+                    kind: 'arrow',
+                    label: '',
+                    lat: pts[pts.length - 1].lat,
+                    lng: pts[pts.length - 1].lng,
+                    points: pts,
+                    color: drawing.color,
+                  },
+                  inTeam ? drawing.scope : 'personal'
+                );
+              } else {
+                const c = centroid(pts);
+                await session.addMarker(
+                  { kind: drawing.kind, label: '', lat: c.lat, lng: c.lng, points: pts },
+                  inTeam ? drawing.scope : 'personal'
+                );
+              }
               setDrawing(null);
             } catch (e) {
-              Alert.alert('Не удалось сохранить стрелку', (e as Error).message);
+              Alert.alert('Не удалось сохранить', (e as Error).message);
             }
           }}
         />
@@ -685,12 +810,13 @@ export default function MapScreen() {
           styles.actions,
           {
             bottom:
-              calculator && !landscape && hudTop != null
+              (calculator || nav) && !landscape && hudTop != null
                 ? height - hudTop + 12
                 : insets.bottom + (landscape ? 12 : 108),
             right: 12 + insets.right,
           },
-          landscape && { flexDirection: 'row-reverse' },
+          // A tall bottom panel leaves no room for a column under the toolbar: a row then.
+          (landscape || calculator || nav) && { flexDirection: 'row-reverse' },
         ]}
       >
         {inTeam && (
@@ -714,11 +840,35 @@ export default function MapScreen() {
             size={52}
             active={calculator}
             onPress={() => {
-              if (!calculator) setFollow(false);
+              if (!calculator) {
+                setFollow(false);
+                setNav(null);
+              }
               setMortarOn(!calculator);
             }}
           />
         )}
+        <GlassButton
+          icon="camera"
+          label="Фото с привязкой"
+          size={52}
+          onPress={async () => {
+            if (!position) {
+              Alert.alert('Нет GPS', 'Фото привязывается к вашей позиции — дождитесь координат');
+              return;
+            }
+            // Where I stand and look when pressing, not after the camera closes.
+            const at = { lat: position.lat, lng: position.lng, heading };
+            try {
+              const data = await takePhoto();
+              if (!data) return;
+              await session.addPhotoMarker({ ...at, data, label: '' }, inTeam ? 'team' : 'personal');
+              if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+            } catch (e) {
+              Alert.alert('Фото не получилось', (e as Error).message);
+            }
+          }}
+        />
         <GlassButton
           icon={follow ? 'crosshairs-gps' : 'crosshairs'}
           label="Моё местоположение"
@@ -745,7 +895,30 @@ export default function MapScreen() {
         </Pressable>
       </View>
 
-      {calculator && !drawing && (
+      {nav && navTo && !drawing && (
+        <View
+          onLayout={(e) => setHudTop(e.nativeEvent.layout.y)}
+          style={[
+            styles.mortarWrap,
+            { bottom: insets.bottom + 12, left: 12 + insets.left, right: 12 + insets.right },
+            landscape && { right: undefined, width: Math.min(460, width / 2 - 12 - insets.left - 30) },
+          ]}
+        >
+          <NavPanel
+            name={navTo.name}
+            distance={navDistance ?? 0}
+            bearing={position ? bearingDegrees(position, navTo) : 0}
+            heading={heading}
+            mapBearing={bearing}
+            eta={navDistance != null ? formatEta(etaSeconds(navDistance, speed.current.speed())) : '—'}
+            arrived={arrived}
+            compact={landscape}
+            onClose={() => setNav(null)}
+          />
+        </View>
+      )}
+
+      {calculator && !nav && !drawing && (
         <View
           onLayout={(e) => setHudTop(e.nativeEvent.layout.y)}
           style={[
@@ -777,7 +950,7 @@ export default function MapScreen() {
         radius={R.lg}
         onLayout={(e) => setHudTop(e.nativeEvent.layout.y)}
         style={[
-          (drawing || calculator) && { display: 'none' },
+          (drawing || calculator || nav) && { display: 'none' },
           styles.hud,
           { bottom: insets.bottom + 12, left: 12 + insets.left, right: 12 + insets.right },
           landscape && styles.hudCompact,
@@ -869,6 +1042,16 @@ export default function MapScreen() {
             : []
         }
       >
+        {selectedMarker?.kind === 'photo' && (
+          <PhotoView marker={selectedMarker} teamId={selectedMarker.teamId ?? session.teamId} />
+        )}
+        {selectedMarker && !selectedMarker.points && position && (
+          <Button
+            title="Вести сюда"
+            icon="navigation-variant"
+            onPress={() => startNav({ type: 'marker', id: selectedMarker.id })}
+          />
+        )}
         {selectedMarker && mortar.isMortar && selectedMarker.kind !== 'arrow' && (
           <Button
             title="Навести миномёт"
@@ -876,6 +1059,7 @@ export default function MapScreen() {
             kind="secondary"
             onPress={() => {
               setFollow(false);
+              setNav(null);
               setMortarOn(true);
               mapRef.current?.setView({ lat: selectedMarker.lat, lng: selectedMarker.lng });
               setSelection(null);
@@ -964,7 +1148,15 @@ export default function MapScreen() {
             ? vectorStats(position, { lat: selectedMember.lat, lng: selectedMember.lng }, heading)
             : []
         }
-      />
+      >
+        {selectedMember && selectedMember.lat != null && position && selectedMember.id !== session.uid && (
+          <Button
+            title="Вести к бойцу"
+            icon="navigation-variant"
+            onPress={() => startNav({ type: 'member', id: selectedMember.id })}
+          />
+        )}
+      </InfoSheet>
 
       {/* Base layer picker */}
       <Sheet visible={layerPicker} onClose={() => setLayerPicker(false)}>
@@ -998,9 +1190,16 @@ export default function MapScreen() {
   );
 }
 
-type Drawing = { color: string; points: LatLng[]; scope: MarkerScope };
+type Drawing = { kind: 'arrow' | AreaKind; color: string; points: LatLng[]; scope: MarkerScope };
 
 const ARROW_COLORS = ['#FFC83D', '#FF4D4D', '#3D9BFF', '#4ADE80', '#F5F5F5'];
+
+const DRAW_KINDS: { kind: Drawing['kind']; label: string }[] = [
+  { kind: 'arrow', label: 'Стрелка' },
+  { kind: 'area-dead', label: 'Мертвяк' },
+  { kind: 'area-enemy', label: 'Противник' },
+  { kind: 'area-bound', label: 'Граница' },
+];
 
 /** Controls shown while drawing an arrow: color, audience, undo, cancel, done. */
 function DrawBar({
@@ -1023,14 +1222,43 @@ function DrawBar({
   onDone: () => void;
 }) {
   const n = drawing.points.length;
+  const area = drawing.kind !== 'arrow';
   return (
     <Glass radius={R.lg} style={[styles.drawBar, { bottom, left, right }]}>
+      <View style={styles.drawRow}>
+        {DRAW_KINDS.map((k) => {
+          const on = k.kind === drawing.kind;
+          return (
+            <Pressable
+              key={k.kind}
+              onPress={() => {
+                tap();
+                onChange({
+                  ...drawing,
+                  kind: k.kind,
+                  color: k.kind === 'arrow' ? ARROW_COLORS[0] : MARKER_KINDS[k.kind].color,
+                });
+              }}
+              style={[styles.drawKind, on && styles.drawKindOn]}
+            >
+              <Text style={[styles.drawScopeText, on && { color: C.accentInk }]}>{k.label}</Text>
+            </Pressable>
+          );
+        })}
+      </View>
       <View style={styles.drawHeader}>
-        <Icon name="draw" size={20} color={drawing.color} />
+        <Icon name={area ? MARKER_KINDS[drawing.kind as AreaKind].icon : 'draw'} size={20} color={drawing.color} />
         <View style={{ flex: 1 }}>
-          <Text style={styles.drawTitle}>Стрелка · {n} {n === 1 ? 'точка' : n >= 2 && n <= 4 ? 'точки' : 'точек'}</Text>
+          <Text style={styles.drawTitle}>
+            {area ? MARKER_KINDS[drawing.kind as AreaKind].title : 'Стрелка'} · {n}{' '}
+            {n === 1 ? 'точка' : n >= 2 && n <= 4 ? 'точки' : 'точек'}
+          </Text>
           <Text style={styles.drawHint} numberOfLines={1}>
-            Нажимайте по карте от начала к острию
+            {area
+              ? drawing.kind === 'area-bound'
+                ? 'Обойдите углы полигона: выход за край — вибрация'
+                : 'Обведите зону по углам: вход в неё — вибрация'
+              : 'Нажимайте по карте от начала к острию'}
           </Text>
         </View>
         <Pressable
@@ -1047,7 +1275,8 @@ function DrawBar({
         </Pressable>
       </View>
       <View style={styles.drawRow}>
-        {ARROW_COLORS.map((c) => (
+        {!area &&
+          ARROW_COLORS.map((c) => (
           <Pressable
             key={c}
             accessibilityLabel={`Цвет стрелки ${c}`}
@@ -1057,7 +1286,7 @@ function DrawBar({
             }}
             style={[styles.drawColor, { backgroundColor: c }, c === drawing.color && styles.drawColorActive]}
           />
-        ))}
+          ))}
         {inTeam && (
           <Pressable
             onPress={() => {
@@ -1076,7 +1305,7 @@ function DrawBar({
         <Button
           title="Готово"
           icon="check"
-          disabled={n < 2}
+          disabled={n < (area ? 3 : 2)}
           onPress={onDone}
           style={{ flex: 1.4, minHeight: 44 }}
         />
@@ -1266,6 +1495,16 @@ const styles = StyleSheet.create({
     backgroundColor: C.elevated,
   },
   drawScopeText: { color: C.text, fontSize: 13, fontFamily: F.semibold },
+  drawKind: {
+    paddingHorizontal: 10,
+    height: 30,
+    borderRadius: R.sm,
+    borderWidth: 1,
+    borderColor: C.lineStrong,
+    backgroundColor: C.elevated,
+    justifyContent: 'center',
+  },
+  drawKindOn: { backgroundColor: C.accent, borderColor: C.accent },
   roleBadge: {
     position: 'absolute',
     right: -4,

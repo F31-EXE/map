@@ -14,6 +14,7 @@ import {
   getDocs,
   increment,
   query,
+  serverTimestamp,
   setDoc,
   updateDoc,
   where,
@@ -437,6 +438,69 @@ describe('status, assigned roles and pinned messages', () => {
     await assertFails(updateDoc(team('carol'), { grid: { lat: 56.83, lng: 60.61 } }));
     await assertFails(updateDoc(team('alice'), { grid: { lat: 156, lng: 60.61 } }));
     await assertFails(updateDoc(team('alice'), { grid: { lat: 56.83, lng: 60.61, x: 1 } }));
+  });
+});
+
+describe('photos of photo markers', () => {
+  beforeEach(async () => {
+    await createTeam(as('alice'), 'alice');
+    await join(as('bob'), 'bob');
+    await join(as('carol'), 'carol');
+  });
+  const photo = (by: string, id: string, createdBy = by, data = 'data:image/jpeg;base64,AAAA') =>
+    setDoc(doc(as(by), 'teams', TEAM, 'photos', id), { data, createdBy, createdAt: serverTimestamp() });
+
+  test('members add their own photos, read the squad\'s; outsiders see nothing', async () => {
+    await assertSucceeds(photo('bob', 'p1'));
+    await assertSucceeds(getDoc(doc(as('carol'), 'teams', TEAM, 'photos', 'p1')));
+    await assertFails(getDoc(doc(as('mallory'), 'teams', TEAM, 'photos', 'p1')));
+    await assertFails(photo('carol', 'p2', 'bob'));
+    await assertFails(photo('bob', 'p3', 'bob', 'data:text/html;base64,AAAA'));
+    await assertFails(photo('bob', 'p4', 'bob', 'data:image/jpeg;base64,' + 'A'.repeat(400000)));
+  });
+  test('the author or a superior deletes a photo', async () => {
+    await photo('bob', 'p1');
+    await assertFails(deleteDoc(doc(as('carol'), 'teams', TEAM, 'photos', 'p1')));
+    await assertSucceeds(deleteDoc(doc(as('alice'), 'teams', TEAM, 'photos', 'p1')));
+    await photo('carol', 'p2');
+    await assertSucceeds(deleteDoc(doc(as('carol'), 'teams', TEAM, 'photos', 'p2')));
+  });
+});
+
+describe('maps shared with the squad', () => {
+  beforeEach(async () => {
+    await createTeam(as('alice'), 'alice');
+    await join(as('bob'), 'bob');
+    await join(as('carol'), 'carol');
+  });
+  const meta = (by: string, createdBy = by, extra: Record<string, unknown> = {}) =>
+    setDoc(doc(as(by), 'teams', TEAM, 'maps', 'm1'), {
+      name: 'Полигон',
+      format: 'kmz',
+      size: 10,
+      parts: 1,
+      createdBy,
+      createdByName: 'x',
+      createdAt: serverTimestamp(),
+      ...extra,
+    });
+  const part = (by: string, createdBy = by) =>
+    setDoc(doc(as(by), 'teams', TEAM, 'maps', 'm1', 'parts', '00'), { i: 0, data: 'AAAA', createdBy });
+
+  test('members share maps as themselves; the squad reads them, outsiders do not', async () => {
+    await assertSucceeds(part('bob'));
+    await assertSucceeds(meta('bob'));
+    await assertSucceeds(getDoc(doc(as('carol'), 'teams', TEAM, 'maps', 'm1', 'parts', '00')));
+    await assertFails(getDoc(doc(as('mallory'), 'teams', TEAM, 'maps', 'm1')));
+    await assertFails(setDoc(doc(as('carol'), 'teams', TEAM, 'maps', 'm2'), { name: 'x', format: 'exe', parts: 1, createdBy: 'carol' }));
+    await assertFails(setDoc(doc(as('carol'), 'teams', TEAM, 'maps', 'm3'), { name: 'x', format: 'kmz', parts: 11, createdBy: 'carol' }));
+  });
+  test('the author or a superior takes a map away', async () => {
+    await part('bob');
+    await meta('bob');
+    await assertFails(deleteDoc(doc(as('carol'), 'teams', TEAM, 'maps', 'm1')));
+    await assertSucceeds(deleteDoc(doc(as('alice'), 'teams', TEAM, 'maps', 'm1')));
+    await assertSucceeds(deleteDoc(doc(as('bob'), 'teams', TEAM, 'maps', 'm1', 'parts', '00')));
   });
 });
 

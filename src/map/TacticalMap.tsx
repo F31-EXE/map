@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useImperativeHandle, useRef, useState, type Ref } from 'react';
 
 import { formatClock } from '../lib/geo';
+import { isArea } from '../lib/geofence';
 import { isAdminKind, isOrder, MARKER_KINDS } from '../lib/markerKinds';
 import { ROLES, type RoleId } from '../lib/roles';
 import type { Bounds } from '../lib/tiles';
@@ -50,6 +51,12 @@ type Props = {
   gridOrigin?: LatLng | null;
   /** Turn the map with the compass so what's ahead is at the top. */
   headingUp?: boolean;
+  /** Night mode: dim red map. */
+  night?: boolean;
+  /** "Lead me there": a line from me to this point. */
+  navTarget?: LatLng | null;
+  /** Own breadcrumb trail, oldest first. */
+  trail?: [number, number][] | null;
   /** Map bearing in degrees (0 = north up), as the user turns it. */
   onBearingChanged?: (bearing: number) => void;
   /** Heading-up switched itself off (the user turned the map by hand). */
@@ -98,7 +105,7 @@ type Props = {
   /** Pixels at the top covered by native panels (grid labels go below). */
   topInset?: number;
   /** Arrow drawing mode: taps add points (reported via onDrawChanged). */
-  drawing?: { color: string; points: LatLng[] } | null;
+  drawing?: { color: string; points: LatLng[]; area?: string | null } | null;
   onDrawChanged?: (points: LatLng[]) => void;
 };
 
@@ -176,6 +183,17 @@ export function TacticalMap(props: Props) {
     if (ready) send({ type: 'setHeadingUp', payload: { on: Boolean(headingUp) } });
   }, [ready, generation, headingUp, send]);
 
+  const { night, navTarget, trail } = props;
+  useEffect(() => {
+    if (ready) send({ type: 'setTrail', payload: { points: trail ?? [] } });
+  }, [ready, generation, trail, send]);
+  useEffect(() => {
+    if (ready) send({ type: 'setNav', payload: navTarget ?? null });
+  }, [ready, generation, navTarget, send]);
+  useEffect(() => {
+    if (ready) send({ type: 'setNight', payload: { on: Boolean(night) } });
+  }, [ready, generation, night, send]);
+
   const { offline } = props;
   useEffect(() => {
     if (ready) send({ type: 'setOffline', payload: offline ?? null });
@@ -218,6 +236,10 @@ export function TacticalMap(props: Props) {
         path: k.path,
         color: m.color ?? k.color,
         points: m.points,
+        area: isArea(m.kind),
+        kind: m.kind,
+        title: m.label || k.title,
+        dir: m.kind === 'photo' && m.heading != null ? m.heading : null,
         order: isOrder(m.kind),
         admin: isAdminKind(m.kind) || m.kind === 'hotzone',
         movable: Boolean(isMovable?.(m)),
@@ -248,7 +270,10 @@ export function TacticalMap(props: Props) {
   const drawing = props.drawing;
   useEffect(() => {
     if (!ready) return;
-    send({ type: 'setDraw', payload: drawing ? { on: true, color: drawing.color, points: drawing.points } : null });
+    send({
+      type: 'setDraw',
+      payload: drawing ? { on: true, color: drawing.color, points: drawing.points, area: drawing.area ?? null } : null,
+    });
   }, [ready, generation, drawing, send]);
 
   const { onOverlayError } = props;

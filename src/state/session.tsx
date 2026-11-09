@@ -46,6 +46,7 @@ import { startBackgroundLocation, stopBackgroundLocation } from '../services/bac
 import { checkSafeMode } from '../services/crashGuard';
 import { deleteMyMessages } from '../services/chat';
 import * as recordings from '../services/recordings';
+import { deleteMyMaps } from '../services/sharedMaps';
 import * as teams from '../services/teams';
 
 import { useMesh, type Mesh } from './useMesh';
@@ -121,6 +122,11 @@ type Session = {
   /** Commanders: pin a chat message for the squad (null unpins). */
   pinMessage: (m: { id: string; text: string; callsign: string; uid: string; createdAt: number } | null) => Promise<void>;
 
+  /** Photo marker at a spot; the picture is a compressed JPEG data URI. */
+  addPhotoMarker: (
+    p: { lat: number; lng: number; heading: number | null; data: string; label: string },
+    scope: MarkerScope
+  ) => Promise<void>;
   /** Team markers (when in a team) plus this device's personal ones. */
   markers: TacMarker[];
   addMarker: (m: Pick<TacMarker, 'kind' | 'label' | 'lat' | 'lng' | 'points' | 'color' | 'wave' | 'zone'>, scope: MarkerScope) => Promise<void>;
@@ -747,7 +753,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const { sendMark, sendVote } = mesh;
 
   const addMarker = useCallback(
-    async (m: Pick<TacMarker, 'kind' | 'label' | 'lat' | 'lng' | 'points' | 'color' | 'wave' | 'zone'>, scope: MarkerScope) => {
+    async (
+      m: Pick<TacMarker, 'kind' | 'label' | 'lat' | 'lng' | 'points' | 'color' | 'wave' | 'zone' | 'photoId' | 'heading'>,
+      scope: MarkerScope
+    ) => {
       const base = {
         ...m,
         label: m.label.trim().slice(0, 40),
@@ -775,9 +784,38 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       else if (teamId) {
         sendMark(m, true);
         fireAndReport(teams.deleteTeamMarker(teamId, m.id), 'Метка не удалилась на сервере');
+        if (m.photoId) teams.deletePhoto(teamId, m.photoId).catch(() => {});
       }
     },
     [teamId, personalMarkers, savePersonal, sendMark, fireAndReport]
+  );
+
+  // Photo marker: the picture goes to its own doc (too big for markers and the mesh),
+  // the marker points at it; on this phone only, the picture stays inside the marker.
+  const addPhotoMarker = useCallback(
+    async (p: { lat: number; lng: number; heading: number | null; data: string; label: string }, scope: MarkerScope) => {
+      const base = { kind: 'photo' as const, label: p.label, lat: p.lat, lng: p.lng, heading: p.heading };
+      if (scope === 'team' && teamId && uid) {
+        const photoId = newId();
+        fireAndReport(teams.savePhoto(teamId, photoId, uid, p.data), 'Фото не сохранилось на сервере');
+        await addMarker({ ...base, photoId }, scope);
+      } else {
+        await savePersonal([
+          ...personalMarkers,
+          {
+            ...base,
+            label: p.label.trim().slice(0, 40),
+            photoData: p.data,
+            id: newId(),
+            createdBy: 'local',
+            createdByName: callsign || 'Я',
+            createdAt: Date.now(),
+            personal: true,
+          },
+        ]);
+      }
+    },
+    [teamId, uid, addMarker, fireAndReport, savePersonal, personalMarkers, callsign]
   );
 
   const moveMarker = useCallback(
@@ -855,6 +893,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
           deleteMyMessages(teamId, uid),
           recordings.deleteMyTracks(teamId, uid),
           teams.setAvatar(teamId, uid, null),
+          teams.deleteMyPhotos(teamId, uid),
+          deleteMyMaps(teamId, uid),
         ])
       );
       await withTimeout(teams.leaveTeam(teamId, uid));
@@ -874,6 +914,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       KEYS.gridOrigin,
       KEYS.keepAwake,
       KEYS.orderSound,
+      KEYS.night,
+      KEYS.trailMinutes,
     ]);
     const all = await AsyncStorage.getAllKeys();
     await AsyncStorage.multiRemove(all.filter((k) => !keep.has(k)));
@@ -1073,6 +1115,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       pinMessage,
       markers,
       addMarker,
+      addPhotoMarker,
       deleteMarker,
       moveMarker,
       voteMarker,
@@ -1130,6 +1173,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       pinMessage,
       markers,
       addMarker,
+      addPhotoMarker,
       deleteMarker,
       moveMarker,
       voteMarker,

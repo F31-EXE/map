@@ -235,8 +235,65 @@
       selfAccuracy.setRadius(p.accuracy || 0);
     }
     setHeading(p.heading);
+    drawNav();
     if (headingUp && p.heading != null) turnMap(360 - p.heading);
     if (follow) map.panTo(ll, { animate: true });
+  }
+
+  // Own trail (breadcrumbs): where I walked in the last minutes.
+  var trailLine = null;
+  function setTrail(p) {
+    var pts = (p && p.points) || [];
+    if (pts.length < 2) {
+      if (trailLine) map.removeLayer(trailLine);
+      trailLine = null;
+      return;
+    }
+    if (zooming) return;
+    if (trailLine) trailLine.setLatLngs(pts);
+    else {
+      trailLine = L.polyline(pts, {
+        color: '#8EF07A',
+        weight: 3,
+        opacity: 0.75,
+        dashArray: '1 7',
+        lineCap: 'round',
+        interactive: false,
+      }).addTo(map);
+    }
+  }
+
+  // "Lead me there": a dashed line from me to the target and a ring around it.
+  var navLayer = L.layerGroup().addTo(map);
+  var navTarget = null;
+  var navLines = null;
+
+  function drawNav() {
+    if (!navTarget || !selfMarker) {
+      navLayer.clearLayers();
+      navLines = null;
+      return;
+    }
+    if (zooming) return;
+    var line = [selfMarker.getLatLng(), navTarget];
+    if (!navLines) {
+      navLines = [
+        L.polyline(line, { color: '#0B0F0C', weight: 6, opacity: 0.5, interactive: false }).addTo(navLayer),
+        L.polyline(line, { color: '#4ADE80', weight: 3, dashArray: '10 8', interactive: false }).addTo(navLayer),
+      ];
+      L.circleMarker(navTarget, { radius: 14, color: '#4ADE80', weight: 3, fill: false, interactive: false }).addTo(navLayer);
+      return;
+    }
+    navLines.forEach(function (l) {
+      l.setLatLngs(line);
+    });
+  }
+
+  function setNav(p) {
+    navTarget = p && isFinite(p.lat) && isFinite(p.lng) ? L.latLng(p.lat, p.lng) : null;
+    navLayer.clearLayers();
+    navLines = null;
+    drawNav();
   }
 
   // Map bearing: north-up, turned by hand (two fingers), or following the compass
@@ -261,6 +318,10 @@
       post('headingUpChanged', { on: false });
     }
     setHeading(selfHeading);
+    var dirs = map.getContainer().querySelectorAll('.tac-dir');
+    for (var i = 0; i < dirs.length; i++) {
+      dirs[i].style.transform = 'rotate(' + (Number(dirs[i].getAttribute('data-dir')) + bearing()) + 'deg)';
+    }
     Object.keys(memberMarkers).forEach(function (id) {
       var mk = memberMarkers[id];
       applyMemberHeading(mk, mk._heading);
@@ -485,6 +546,7 @@
   map.on('zoomend', function () {
     zooming = false;
     renderMortar();
+    drawNav();
     var now = Date.now();
     Object.keys(zoneShapes).forEach(function (id) {
       drawZone(zoneShapes[id], now, true);
@@ -678,6 +740,11 @@
     return L.divIcon({
       className: 'tac-icon' + (m.order ? ' order' : '') + (m.admin ? ' admin' : '') + (m.personal ? ' personal' : '') + (m.movable ? ' movable' : ''),
       html:
+        // Photo markers: a wedge toward where the camera looked.
+        (m.dir != null
+          ? '<div class="tac-dir" data-dir="' + Number(m.dir) + '" style="transform:rotate(' + (Number(m.dir) + bearing()) + 'deg)">' +
+            '<div class="tac-dir-tip" style="border-bottom-color:' + c + '"></div></div>'
+          : '') +
         '<div class="tac-pin" style="--c:' + c + ';border-color:' + c + ';box-shadow:0 0 0 4px ' + c + '33, 0 4px 14px rgba(0,0,0,.6)">' +
         '<svg viewBox="0 0 24 24"><path d="' + escapeHtml(m.path) + '" fill="' + c + '"/></svg></div>' +
         (m.order ? '<div class="order-ring" style="border-color:' + c + '"></div>' : '') +
@@ -741,15 +808,53 @@
     return g;
   }
 
+  // Zones (dead zone, enemy zone, field boundary): filled outlines with their title.
+  function buildArea(m, opts) {
+    var pts = m.points.map(function (p) { return [p.lat, p.lng]; });
+    var g = L.featureGroup();
+    var bound = m.kind === 'area-bound';
+    var draft = opts && opts.draft;
+    if (pts.length < 3) {
+      // Still being drawn: the outline so far.
+      L.polyline(pts, { color: m.color, weight: 3, dashArray: '6 6', interactive: false }).addTo(g);
+      pts.forEach(function (p) {
+        L.circleMarker(p, { radius: 4, color: '#0B0F0C', weight: 2, fillColor: m.color, fillOpacity: 1, interactive: false }).addTo(g);
+      });
+      return g;
+    }
+    L.polygon(pts, {
+      color: m.color,
+      weight: bound ? 4 : 2.5,
+      opacity: 0.95,
+      dashArray: bound || draft ? '12 8' : null,
+      fillColor: m.color,
+      fillOpacity: bound ? 0 : 0.16,
+      // A bare outline would only take taps on its thin line; the label takes them.
+      interactive: false,
+    }).addTo(g);
+    if (!draft) {
+      var c = pts.reduce(function (s, p) { return [s[0] + p[0] / pts.length, s[1] + p[1] / pts.length]; }, [0, 0]);
+      L.marker(c, {
+        keyboard: false,
+        icon: L.divIcon({
+          className: 'area-label',
+          html: '<span style="border-color:' + escapeHtml(m.color) + ';color:' + escapeHtml(m.color) + '">' + escapeHtml(m.title) + '</span>',
+          iconSize: [0, 0],
+        }),
+      }).addTo(g);
+    }
+    return g;
+  }
+
   function setArrows(list) {
     var seen = {};
     list.forEach(function (m) {
       seen[m.id] = true;
-      var key = JSON.stringify([m.points, m.color, m.personal]);
+      var key = JSON.stringify([m.points, m.color, m.personal, m.area, m.title]);
       var cur = arrowShapes[m.id];
       if (cur && cur._tacKey === key) return;
       if (cur) arrowsLayer.removeLayer(cur);
-      var g = buildArrow(m);
+      var g = m.area ? buildArea(m) : buildArrow(m);
       g._tacKey = key;
       g.on('click', function () {
         post('markerTap', { id: m.id });
@@ -771,12 +876,16 @@
   function renderDraft() {
     draftLayer.clearLayers();
     if (drawing && drawing.points.length) {
-      buildArrow({ points: drawing.points, color: drawing.color }, { draft: true }).addTo(draftLayer);
+      if (drawing.area) {
+        buildArea({ points: drawing.points, color: drawing.color, kind: drawing.area }, { draft: true }).addTo(draftLayer);
+      } else {
+        buildArrow({ points: drawing.points, color: drawing.color }, { draft: true }).addTo(draftLayer);
+      }
     }
   }
 
   function setDraw(p) {
-    drawing = p && p.on ? { color: p.color, points: p.points || [] } : null;
+    drawing = p && p.on ? { color: p.color, points: p.points || [], area: p.area || null } : null;
     map.getContainer().classList.toggle('drawing', !!drawing);
     renderDraft();
   }
@@ -846,7 +955,7 @@
       function (m) {
         var mk = L.marker([m.lat, m.lng], { icon: tacIcon(m) });
         mk._tacId = m.id;
-        mk._tacKey = JSON.stringify([m.path, m.color, m.label, m.order, m.personal, m.time, m.movable, m.wave]);
+        mk._tacKey = JSON.stringify([m.path, m.color, m.label, m.order, m.personal, m.time, m.movable, m.wave, m.dir]);
         mk.on('click', function () {
           // The release after dragging a marker is not a tap.
           if (Date.now() < suppressTapUntil) return;
@@ -859,7 +968,7 @@
       },
       function (mk, m) {
         if (mk !== dragged) mk.setLatLng([m.lat, m.lng]);
-        var key = JSON.stringify([m.path, m.color, m.label, m.order, m.personal, m.time, m.movable, m.wave]);
+        var key = JSON.stringify([m.path, m.color, m.label, m.order, m.personal, m.time, m.movable, m.wave, m.dir]);
         if (key !== mk._tacKey) {
           mk._tacKey = key;
           mk.setIcon(tacIcon(m));
@@ -1682,6 +1791,12 @@
       } finally {
         turningByCode = false;
       }
+    },
+    // Night mode: the whole map in dim reds (the app adds its own red filter on top).
+    setNav: setNav,
+    setTrail: setTrail,
+    setNight: function (p) {
+      map.getContainer().classList.toggle('night', !!(p && p.on));
     },
     setHeadingUp: function (p) {
       headingUp = !!(p && p.on);

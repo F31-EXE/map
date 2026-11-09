@@ -55,6 +55,9 @@ export type MeshMark = {
   wave?: Wave | null;
   zone?: HotZone | null;
   faction?: number | null;
+  /** Photo marker: the picture loads from the server once online. */
+  photoId?: string;
+  heading?: number | null;
   deleted?: boolean;
 };
 
@@ -147,6 +150,8 @@ export function toMeshMark(m: TacMarker, deleted = false): MeshMark {
     ...(m.wave !== undefined ? { wave: m.wave } : {}),
     ...(m.zone !== undefined ? { zone: m.zone } : {}),
     ...(m.faction != null ? { faction: m.faction } : {}),
+    ...(m.photoId ? { photoId: m.photoId } : {}),
+    ...(m.heading != null ? { heading: m.heading } : {}),
     ...(deleted ? { deleted: true } : {}),
   };
 }
@@ -279,6 +284,8 @@ export function mergeMeshMarkers(
       wave: b.wave ?? null,
       zone: b.zone ?? null,
       faction: Number.isInteger(b.faction) ? b.faction : null,
+      photoId: typeof b.photoId === 'string' ? b.photoId : undefined,
+      heading: typeof b.heading === 'number' ? b.heading : null,
       teamId,
       staleVotes: [],
       doneVotes: [],
