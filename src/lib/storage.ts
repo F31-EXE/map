@@ -31,6 +31,8 @@ export const KEYS = {
   mortar: 'tacmap.mortar',
   /** Fixed mortar firing position, or null to fire from the GPS position. */
   mortarPos: 'tacmap.mortarPos',
+  /** Meshtastic radio picked in settings ({ id, name }), reconnected on start. */
+  radio: 'tacmap.radio',
 } as const;
 
 export async function loadJson<T>(key: string, fallback: T): Promise<T> {

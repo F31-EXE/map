@@ -511,6 +511,18 @@ export default function MapScreen() {
                 </Text>
               </View>
             </View>
+            {session.mesh.radio.device && inTeam && (
+              <View style={[styles.meshChip, session.mesh.radio.squadReady && styles.meshChipOn]}>
+                <Icon
+                  name="radio-handheld"
+                  size={13}
+                  color={session.mesh.radio.squadReady ? C.info : session.mesh.radio.state === 'off' ? C.danger : C.faint}
+                />
+                <Text style={[styles.meshText, session.mesh.radio.squadReady && { color: C.info }]}>
+                  {session.mesh.radioPeers}
+                </Text>
+              </View>
+            )}
             {session.mesh.enabled && session.mesh.available && inTeam && (
               <View style={[styles.meshChip, session.mesh.peers > 0 && styles.meshChipOn]}>
                 <Icon name="bluetooth" size={13} color={session.mesh.peers > 0 ? C.info : C.faint} />

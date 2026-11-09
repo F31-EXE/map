@@ -3,6 +3,8 @@ import { PermissionsAndroid, Platform } from 'react-native';
 
 import { GrimMesh } from '../../modules/grim-mesh';
 import { distanceMeters } from '../lib/geo';
+import { decodeEnvelope, encodeEnvelope, fragment, RadioOutbox, Reassembler } from '../lib/lora';
+import { PORT, SQUAD_CHANNEL, type MtPacket } from '../lib/meshtastic';
 import {
   chatEnvelope,
   endpointName,
@@ -27,12 +29,24 @@ import { KEYS, loadJson, saveJson } from '../lib/storage';
 import { checkSafeMode } from '../services/crashGuard';
 import type { MemberStatus, SelfPosition, TacMarker } from '../lib/types';
 
+import { useRadio, type Radio } from './useRadio';
+
 /** Own position goes out at most this often, or when moved this far. */
 const POS_MIN_MS = 4_000;
 const POS_HEARTBEAT_MS = 20_000;
 const POS_MIN_MOVE_M = 3;
 /** Found but not connected: try again this often. */
 const REDIAL_MS = 15_000;
+/**
+ * Over the radio (LoRa airtime is scarce): own position when moved this far but at
+ * most this often, and at least this often while standing still.
+ */
+const RADIO_POS_MIN_MS = 30_000;
+const RADIO_POS_MIN_MOVE_M = 15;
+const RADIO_POS_HEARTBEAT_MS = 120_000;
+/** Positions heard from nearby phones are put on the air at most this often per fighter. */
+const RADIO_RELAY_POS_MS = 180_000;
+const RADIO_TICK_MS = 500;
 
 export type Mesh = {
   /** The native module is in this build (Android). */
@@ -54,6 +68,10 @@ export type Mesh = {
   sendMark: (m: TacMarker, deleted?: boolean) => void;
   sendVote: (v: MeshVote) => void;
   reportSelf: (p: SelfPosition) => void;
+  /** Meshtastic radio link (LoRa), alongside the phone-to-phone mesh. */
+  radio: Radio;
+  /** Squadmates heard over the radio in the last 10 minutes. */
+  radioPeers: number;
 };
 
 async function requestPermissions(): Promise<boolean> {
@@ -92,6 +110,21 @@ export function useMesh(me: {
   const meRef = useRef(me);
   meRef.current = me;
   const lastSelf = useRef<{ at: number; p: SelfPosition } | null>(null);
+  /** Nearby endpoints linked right now (shared with the radio side for relaying). */
+  const nearbyPeers = useRef(new Set<string>());
+  const nearbyOnRef = useRef(false);
+
+  // Radio side: fragments in, packets out at the pace the air allows.
+  const reassembler = useRef(new Reassembler());
+  const outbox = useRef(new RadioOutbox());
+  const radioRelayed = useRef(new Map<string, number>());
+  const radioHeard = useRef(new Map<string, number>());
+  const lastRadioSelf = useRef<{ at: number; p: SelfPosition; status: MemberStatus } | null>(null);
+  const onRadioPacket = useRef<(p: MtPacket) => void>(() => {});
+  const radio = useRadio(teamId, (p) => onRadioPacket.current(p));
+  const radioOn = Boolean(radio.squadReady && teamId && uid);
+  const radioOnRef = useRef(false);
+  radioOnRef.current = radioOn;
 
   useEffect(() => {
     (async () => {
@@ -116,19 +149,72 @@ export function useMesh(me: {
   }, []);
 
   const broadcast = useCallback((list: Envelope[], to: string[] = []) => {
-    if (!GrimMesh || !list.length) return;
+    if (!GrimMesh || !list.length || !nearbyOnRef.current) return;
     for (const packet of pack(list)) GrimMesh.send(to, packet).catch(() => {});
   }, []);
 
-  const running = Boolean(enabled && available && teamId && uid);
+  /** Queues envelopes for the air; `own` ones always, relayed positions sparingly. */
+  const toRadio = useCallback(
+    (list: Envelope[], own: boolean) => {
+      if (!radioOnRef.current || !teamId) return;
+      const now = Date.now();
+      for (const e of list) {
+        if (!own && e.kind === 'pos') {
+          const last = radioRelayed.current.get(e.body.uid) ?? 0;
+          if (now - last < RADIO_RELAY_POS_MS) continue;
+          radioRelayed.current.set(e.body.uid, now);
+        }
+        const frames = fragment(encodeEnvelope(e, teamId), Math.floor(Math.random() * 0xffff));
+        if (frames) outbox.current.push(e, frames);
+      }
+    },
+    [teamId]
+  );
+
+  const nearbyOn = Boolean(enabled && available && teamId && uid);
+  nearbyOnRef.current = nearbyOn;
+  const running = nearbyOn || radioOn;
+
+  // Radio in: reassemble, decode, keep what's new and pass it on to nearby phones.
+  onRadioPacket.current = (p: MtPacket) => {
+    if (!teamId || !uid || p.channel !== SQUAD_CHANNEL || p.portnum !== PORT.private) return;
+    const now = Date.now();
+    const whole = reassembler.current.push(p.from, p.payload, now);
+    const env = whole && decodeEnvelope(whole, teamId);
+    if (!env) return;
+    const sender = env.kind === 'mark' ? env.body.createdBy : env.body.uid;
+    if (sender !== uid) radioHeard.current.set(sender, now);
+    const knownMark = env.kind === 'mark' && store.marks.has(env.body.id);
+    if (!store.accept(env, now)) return;
+    if (env.kind === 'mark' && !env.body.deleted && !knownMark && env.body.createdBy !== uid) {
+      meRef.current.onNewMark?.(env.body);
+    }
+    setVersion((v) => v + 1);
+    if (nearbyPeers.current.size) broadcast([forwarded(env)], [...nearbyPeers.current]);
+  };
+
+  // Radio out: one packet at a time.
+  const { send: radioSend } = radio;
+  useEffect(() => {
+    if (!radioOn) {
+      outbox.current.clear();
+      return;
+    }
+    const t = setInterval(() => {
+      const frame = outbox.current.next(Date.now());
+      if (frame) radioSend(PORT.private, frame).catch(() => {});
+    }, RADIO_TICK_MS);
+    return () => clearInterval(t);
+  }, [radioOn, radioSend]);
 
   useEffect(() => {
-    if (!running || !GrimMesh || !teamId || !uid) return;
+    if (!nearbyOn || !GrimMesh || !teamId || !uid) return;
     const mesh = GrimMesh;
     const myName = endpointName(teamId, uid, meRef.current.callsign || 'Боец');
     const tag = `${squadTag(teamId)}|`;
     const found = new Map<string, { name: string; since: number }>();
-    const connected = new Set<string>();
+    const connected = nearbyPeers.current;
+    connected.clear();
     let alive = true;
 
     const subs = [
@@ -159,9 +245,10 @@ export function useMesh(me: {
           }
         }
         setVersion((v) => v + 1);
-        // Pass the news on to everyone else.
+        // Pass the news on to everyone else, and to the radio net.
         const others = [...connected].filter((id) => id !== e.from);
         if (others.length) broadcast(fresh.map(forwarded), others);
+        toRadio(fresh, false);
       }),
       mesh.addListener('onError', (e) => {
         if (alive) setError(`${e.where}: ${e.message}`);
@@ -194,9 +281,10 @@ export function useMesh(me: {
       clearInterval(timer);
       subs.forEach((s) => s.remove());
       mesh.stop().catch(() => {});
+      connected.clear();
       setPeers(0);
     };
-  }, [running, teamId, uid, store, broadcast]);
+  }, [nearbyOn, teamId, uid, store, broadcast, toRadio]);
 
   const sendSelf = useCallback(
     (p: SelfPosition, now: number) => {
@@ -218,9 +306,21 @@ export function useMesh(me: {
         },
         now
       );
-      if (store.accept(env, now)) broadcast([env]);
+      if (!store.accept(env, now)) return;
+      broadcast([env]);
+      // The air gets far fewer updates: on a real move, a status change, or a heartbeat.
+      const lr = lastRadioSelf.current;
+      const due =
+        !lr ||
+        lr.status !== m.status ||
+        now - lr.at >= RADIO_POS_HEARTBEAT_MS ||
+        (now - lr.at >= RADIO_POS_MIN_MS && distanceMeters(lr.p, p) >= RADIO_POS_MIN_MOVE_M);
+      if (due && radioOnRef.current) {
+        lastRadioSelf.current = { at: now, p, status: m.status };
+        toRadio([env], true);
+      }
     },
-    [store, broadcast]
+    [store, broadcast, toRadio]
   );
 
   const reportSelf = useCallback(
@@ -251,9 +351,10 @@ export function useMesh(me: {
       if (store.accept(env, now)) {
         setVersion((v) => v + 1);
         broadcast([env]);
+        toRadio([env], true);
       }
     },
-    [running, teamId, store, broadcast]
+    [running, teamId, store, broadcast, toRadio]
   );
 
   const sendMark = useCallback(
@@ -264,9 +365,10 @@ export function useMesh(me: {
       if (store.accept(env, now)) {
         setVersion((v) => v + 1);
         broadcast([env]);
+        toRadio([env], true);
       }
     },
-    [running, teamId, store, broadcast]
+    [running, teamId, store, broadcast, toRadio]
   );
 
   const sendVote = useCallback(
@@ -277,9 +379,10 @@ export function useMesh(me: {
       if (store.accept(env, now)) {
         setVersion((x) => x + 1);
         broadcast([env]);
+        toRadio([env], true);
       }
     },
-    [running, teamId, store, broadcast]
+    [running, teamId, store, broadcast, toRadio]
   );
 
   const marks = useMemo(
@@ -305,7 +408,17 @@ export function useMesh(me: {
     [running, store, version]
   );
 
+  const radioPeers = useMemo(() => {
+    const now = Date.now();
+    let n = 0;
+    for (const at of radioHeard.current.values()) if (now - at < 10 * 60_000) n++;
+    return n;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [version]);
+
   return {
+    radio,
+    radioPeers,
     available,
     enabled,
     setEnabled,

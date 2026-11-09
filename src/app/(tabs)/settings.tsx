@@ -9,6 +9,7 @@ import { clearLastError, lastError } from '../../services/crashGuard';
 import { useSession } from '../../state/session';
 import { Avatar, Button, Card, Eyebrow, Icon, KeyboardScroll, tap, type IconName } from '../../ui/components';
 import { confirmDestructive } from '../../ui/confirm';
+import { RadioCard } from '../../ui/RadioCard';
 import { RolePicker } from '../../ui/RolePicker';
 import { C, F, R } from '../../ui/theme';
 
@@ -171,6 +172,8 @@ export default function SettingsScreen() {
           onChange={(v) => run(() => s.setShowGrid(v))}
         />
       </Card>
+
+      <RadioCard radio={s.mesh.radio} inTeam={Boolean(s.teamId)} peers={s.mesh.radioPeers} />
 
       <Card style={{ gap: 0, paddingVertical: 6 }}>
         <LinkRow icon="map-plus" title="Карты полигона" sub="Импорт KMZ, KML, GPX, GeoJSON" onPress={() => router.push('/maps')} />

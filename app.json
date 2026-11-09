@@ -2,7 +2,7 @@
   "expo": {
     "name": "GrimMap",
     "slug": "tacmap",
-    "version": "1.12.0",
+    "version": "1.13.0",
     "orientation": "default",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
@@ -14,7 +14,7 @@
         "NSMotionUsageDescription": "Компас для направления взгляда на карте.",
         "ITSAppUsesNonExemptEncryption": false
       },
-      "buildNumber": "8"
+      "buildNumber": "9"
     },
     "android": {
       "adaptiveIcon": {
@@ -34,7 +34,7 @@
         "POST_NOTIFICATIONS",
         "RECEIVE_BOOT_COMPLETED"
       ],
-      "versionCode": 29,
+      "versionCode": 30,
       "blockedPermissions": [
         "android.permission.SYSTEM_ALERT_WINDOW",
         "android.permission.READ_EXTERNAL_STORAGE",
@@ -72,6 +72,17 @@
           "cameraPermission": "Нужно, чтобы сканировать QR-коды отрядов и сторон.",
           "microphonePermission": false,
           "recordAudioAndroid": false
+        }
+      ],
+      [
+        "react-native-ble-plx",
+        {
+          "isBackgroundEnabled": false,
+          "neverForLocation": false,
+          "modes": [
+            "central"
+          ],
+          "bluetoothAlwaysPermission": "Нужно для связи с LoRa-рацией Meshtastic: позиции и чат отряда без интернета."
         }
       ],
       [
