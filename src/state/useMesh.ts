@@ -3,7 +3,7 @@ import { PermissionsAndroid, Platform } from 'react-native';
 
 import { GrimMesh } from '../../modules/grim-mesh';
 import { distanceMeters } from '../lib/geo';
-import { decodeEnvelope, encodeEnvelope, fragment, RadioOutbox, Reassembler } from '../lib/lora';
+import { decodeEnvelope, encodeEnvelope, fragment, RadioOutbox, radioPosIntervals, Reassembler } from '../lib/lora';
 import { PORT, SQUAD_CHANNEL, type MtPacket } from '../lib/meshtastic';
 import {
   chatEnvelope,
@@ -38,14 +38,12 @@ const POS_MIN_MOVE_M = 3;
 /** Found but not connected: try again this often. */
 const REDIAL_MS = 15_000;
 /**
- * Over the radio (LoRa airtime is scarce): own position when moved this far but at
- * most this often, and at least this often while standing still.
+ * Over the radio (LoRa airtime is scarce): own position when moved this far; how often
+ * depends on how many squad radios share the air (`radioPosIntervals` in lora.ts).
  */
-const RADIO_POS_MIN_MS = 30_000;
 const RADIO_POS_MIN_MOVE_M = 15;
-const RADIO_POS_HEARTBEAT_MS = 120_000;
-/** Positions heard from nearby phones are put on the air at most this often per fighter. */
-const RADIO_RELAY_POS_MS = 180_000;
+/** Squad radios heard this recently count toward the air's load. */
+const RADIO_PEER_WINDOW_MS = 10 * 60_000;
 const RADIO_TICK_MS = 500;
 
 export type Mesh = {
@@ -153,6 +151,14 @@ export function useMesh(me: {
     for (const packet of pack(list)) GrimMesh.send(to, packet).catch(() => {});
   }, []);
 
+  /** Pace of positions on the air for the radio net as it is now (me included). */
+  const radioPace = useCallback(() => {
+    const now = Date.now();
+    let n = 1;
+    for (const at of radioHeard.current.values()) if (now - at < RADIO_PEER_WINDOW_MS) n++;
+    return radioPosIntervals(n);
+  }, []);
+
   /** Queues envelopes for the air; `own` ones always, relayed positions sparingly. */
   const toRadio = useCallback(
     (list: Envelope[], own: boolean) => {
@@ -161,14 +167,14 @@ export function useMesh(me: {
       for (const e of list) {
         if (!own && e.kind === 'pos') {
           const last = radioRelayed.current.get(e.body.uid) ?? 0;
-          if (now - last < RADIO_RELAY_POS_MS) continue;
+          if (now - last < radioPace().relayMs) continue;
           radioRelayed.current.set(e.body.uid, now);
         }
         const frames = fragment(encodeEnvelope(e, teamId), Math.floor(Math.random() * 0xffff));
         if (frames) outbox.current.push(e, frames);
       }
     },
-    [teamId]
+    [teamId, radioPace]
   );
 
   const nearbyOn = Boolean(enabled && available && teamId && uid);
@@ -310,17 +316,18 @@ export function useMesh(me: {
       broadcast([env]);
       // The air gets far fewer updates: on a real move, a status change, or a heartbeat.
       const lr = lastRadioSelf.current;
+      const pace = radioPace();
       const due =
         !lr ||
         lr.status !== m.status ||
-        now - lr.at >= RADIO_POS_HEARTBEAT_MS ||
-        (now - lr.at >= RADIO_POS_MIN_MS && distanceMeters(lr.p, p) >= RADIO_POS_MIN_MOVE_M);
+        now - lr.at >= pace.heartbeatMs ||
+        (now - lr.at >= pace.minMs && distanceMeters(lr.p, p) >= RADIO_POS_MIN_MOVE_M);
       if (due && radioOnRef.current) {
         lastRadioSelf.current = { at: now, p, status: m.status };
         toRadio([env], true);
       }
     },
-    [store, broadcast, toRadio]
+    [store, broadcast, toRadio, radioPace]
   );
 
   const reportSelf = useCallback(
@@ -411,7 +418,7 @@ export function useMesh(me: {
   const radioPeers = useMemo(() => {
     const now = Date.now();
     let n = 0;
-    for (const at of radioHeard.current.values()) if (now - at < 10 * 60_000) n++;
+    for (const at of radioHeard.current.values()) if (now - at < RADIO_PEER_WINDOW_MS) n++;
     return n;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [version]);

@@ -203,3 +203,17 @@ test('outbox paces packets, puts chat first and keeps only the latest position',
   assert.deepEqual([...box.next(2000)!], [2]);
   assert.equal(box.next(3000), null);
 });
+
+test('position rate backs off as the radio net grows, keeping the air under ~25%', async () => {
+  const { radioPosIntervals } = await import('../src/lib/lora.ts');
+  assert.equal(radioPosIntervals(1).minMs, 30_000);
+  assert.equal(radioPosIntervals(0).minMs, 30_000);
+  for (const n of [5, 10, 20, 40]) {
+    const { minMs, heartbeatMs } = radioPosIntervals(n);
+    // Everyone moving: airtime share of positions.
+    const share = (n * 1.1 * 1.7) / (minMs / 1000);
+    assert.ok(share <= 0.26, `${n}: ${share}`);
+    assert.ok(heartbeatMs >= minMs * 3);
+  }
+  assert.ok(radioPosIntervals(20).minMs >= 140_000);
+});

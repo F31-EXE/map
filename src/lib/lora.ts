@@ -306,3 +306,20 @@ export class RadioOutbox {
     this.queue = [];
   }
 }
+
+/** Airtime of one position packet on LongFast (~120 bytes with headers), with repeats by other radios. */
+const POS_AIRTIME_S = 1.1 * 1.7;
+/** Share of the air positions may take; the rest is for chat, markers and other radios. */
+const POS_AIR_SHARE = 0.25;
+
+/**
+ * How often positions go on the air with `fighters` squad radios around, so that
+ * all of them moving at once still use about a quarter of the channel: every 30 s
+ * for a handful, every ~2.5 min for twenty. Standing still and relayed positions
+ * go out three times less often.
+ */
+export function radioPosIntervals(fighters: number): { minMs: number; heartbeatMs: number; relayMs: number } {
+  const n = Math.max(1, fighters);
+  const minMs = Math.max(30_000, Math.ceil((n * POS_AIRTIME_S) / POS_AIR_SHARE) * 1000);
+  return { minMs, heartbeatMs: Math.max(120_000, minMs * 3), relayMs: Math.max(180_000, minMs * 3) };
+}
