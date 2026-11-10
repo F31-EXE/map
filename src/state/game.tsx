@@ -62,6 +62,9 @@ export type GameScores = {
   winners: string[];
 };
 
+export type RosterSquad = { id: string; name: string; color: string; members: Member[] };
+export type RosterSide = { id: string; name: string; color: string; squads: RosterSquad[] };
+
 type GameState = {
   gameId: string | null;
   game: Game | null;
@@ -81,6 +84,8 @@ type GameState = {
   sideColor: (sideId: string | null | undefined) => string;
   sideName: (sideId: string | null | undefined) => string;
   scores: GameScores;
+  /** Techs: every side's squads and fighters, for the HQ panel. */
+  roster: RosterSide[];
   /** Extra people on the map: game techs for everyone; for techs, the fighters of every side. */
   mapMembers: Member[];
   showAll: boolean;
@@ -533,6 +538,24 @@ export function GameProvider({ children }: { children: ReactNode }) {
     return out;
   }, [techs, uid, isTech, sideDocs, squads, squadMembers, showAll, sideColor]);
 
+  const roster = useMemo<RosterSide[]>(
+    () =>
+      isTech
+        ? sideDocs.map((sd) => ({
+            id: sd.id,
+            name: sideName(sd.id),
+            color: sideColor(sd.id),
+            squads: (squads[sd.id] ?? []).map((t) => ({
+              id: t.id,
+              name: t.name,
+              color: sideColor(sd.id),
+              members: (squadMembers[t.id] ?? []).map((m) => ({ ...m, id: `${t.id}/${m.id}`, teamId: t.id })),
+            })),
+          }))
+        : [],
+    [isTech, sideDocs, squads, squadMembers, sideName, sideColor]
+  );
+
   // Game markers, colored by who holds them.
   const shownMarkers = useMemo(
     () =>
@@ -584,6 +607,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
       sideName,
       scores,
       mapMembers,
+      roster,
       showAll,
       setShowAll: async (v) => {
         setShowAllState(v);
@@ -751,6 +775,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
       sideName,
       scores,
       mapMembers,
+      roster,
       showAll,
       requireUid,
       requireGame,

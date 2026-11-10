@@ -37,6 +37,8 @@ export const KEYS = {
   gridOrigin: 'tacmap.gridOrigin',
   /** Night mode: red, dimmed screen. */
   night: 'tacmap.night',
+  /** HQ panel on wide screens shown. */
+  hq: 'tacmap.hq',
   /** Own trail: minutes shown (0 = off) and the crumbs of the last hour. */
   trailMinutes: 'tacmap.trailMinutes',
   trail: 'tacmap.trail',

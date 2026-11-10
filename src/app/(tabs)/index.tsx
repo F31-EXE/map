@@ -17,6 +17,7 @@ import { ROLES } from '../../lib/roles';
 import { STATUSES } from '../../lib/status';
 import { KEYS, loadJson, saveJson } from '../../lib/storage';
 import type { Bounds } from '../../lib/tiles';
+import { HqPanel, type HqGroup } from '../../ui/HqPanel';
 import { powerText } from '../../lib/power';
 import type { GameSide, LatLng, MarkerKind, SelfPosition, TacMarker } from '../../lib/types';
 import {
@@ -197,6 +198,19 @@ function gpsColor(acc: number | null | undefined) {
 export default function MapScreen() {
   const safe = useSafeAreaInsets();
   const window = useWindowDimensions();
+  // HQ panel beside the map on wide screens (a laptop at the command post).
+  const wide = window.width >= 1000;
+  const [hqOn, setHqOn] = useState(true);
+  useEffect(() => {
+    loadJson<boolean>(KEYS.hq, true).then(setHqOn);
+  }, []);
+  const toggleHq = () => {
+    setHqOn((v) => {
+      saveJson(KEYS.hq, !v).catch(() => {});
+      return !v;
+    });
+  };
+  const hqWidth = wide && hqOn ? Math.min(400, Math.round(window.width * 0.3)) : 0;
   const landscape = window.width > window.height;
   // This screen's own size: in landscape the tab bar takes a column on the left.
   const [area, setArea] = useState<{ width: number; height: number } | null>(null);
@@ -471,7 +485,7 @@ export default function MapScreen() {
   const canVote = (m: TacMarker) =>
     inTeam && !m.personal && !m.gameId && (!m.teamId || m.teamId === session.teamId);
 
-  const toolbarButtons = 6 + (visibleMembers.length > 0 ? 1 : 0);
+  const toolbarButtons = 6 + (visibleMembers.length > 0 ? 1 : 0) + (wide ? 1 : 0);
   const toolbarWidth = toolbarButtons * 50 + 8;
 
   // Landscape top row: [team pill][toolbar].
@@ -568,8 +582,10 @@ export default function MapScreen() {
   }, [allMembers, session.uid, session.teamColor, mortar.config.range, calculator, gunAt?.lat, gunAt?.lng]);
 
   const banner =
-    status === 'denied'
-      ? 'Нет доступа к геолокации — разрешите его в настройках телефона'
+    status === 'denied' && !radioPos
+      ? Platform.OS === 'web'
+        ? 'Нет геолокации: разрешите её браузеру (значок слева в адресной строке) или подключите рацию с GPS'
+        : 'Нет доступа к геолокации — разрешите его в настройках телефона'
       : zoneAlert
         ? zoneAlert
         : inTeam && session.teamError
@@ -582,7 +598,30 @@ export default function MapScreen() {
   const columnTop = height - (insets.bottom + 108) - (actionCount * 52 + 64 + actionCount * 14);
   const columnHitsToolbar = toolsBottom != null && columnTop < toolsBottom + 10;
 
+  const hqGroups: HqGroup[] = game.isTech
+    ? game.roster
+    : side.isSideCommander && side.side
+      ? [
+          {
+            id: side.side.id,
+            name: side.side.name,
+            color: session.teamColor,
+            squads: side.squads.map((sq) => ({ id: sq.id, name: sq.name, color: sq.displayColor, members: sq.members })),
+          },
+        ]
+      : inTeam
+        ? [
+            {
+              id: session.teamId ?? 'team',
+              name: session.team?.name ?? 'Отряд',
+              color: session.teamColor,
+              squads: [{ id: session.teamId ?? 'team', name: session.team?.name ?? 'Отряд', color: session.teamColor, members: session.members }],
+            },
+          ]
+        : [];
+
   return (
+    <View style={styles.hqRow}>
     <View
       style={styles.root}
       onLayout={(e) => {
@@ -769,6 +808,12 @@ export default function MapScreen() {
             </View>
           </Pressable>
           <View style={[styles.toolbarSep, landscape && styles.toolbarSepRow]} />
+          {wide && (
+            <>
+              <ToolbarButton icon="view-dashboard-outline" label="Штаб" active={hqOn} onPress={toggleHq} />
+              <View style={[styles.toolbarSep, landscape && styles.toolbarSepRow]} />
+            </>
+          )}
           <ToolbarButton
             icon="draw"
             label="Нарисовать стрелку"
@@ -1302,6 +1347,20 @@ export default function MapScreen() {
         </View>
       </Sheet>
     </View>
+      {hqWidth > 0 && (
+        <HqPanel
+          width={hqWidth}
+          groups={hqGroups}
+          markers={allMarkers}
+          sideName={game.sideName}
+          onFocus={(p, memberId) => {
+            setFollow(false);
+            mapRef.current?.setView(p, 17);
+            if (memberId && allMembers.some((m) => m.id === memberId)) setSelection({ type: 'member', id: memberId });
+          }}
+        />
+      )}
+    </View>
   );
 }
 
@@ -1515,6 +1574,7 @@ const GAP = 7;
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: C.bg },
+  hqRow: { flex: 1, flexDirection: 'row', backgroundColor: C.bg },
 
   top: { position: 'absolute', left: 12, right: 12, flexDirection: 'row', gap: 10 },
   teamPill: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingLeft: 6, paddingRight: 12, height: 54 },
