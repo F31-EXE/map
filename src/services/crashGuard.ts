@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Platform } from 'react-native';
 
 import { GrimMesh } from '../../modules/grim-mesh';
 
@@ -23,6 +24,13 @@ let checking: Promise<boolean> | null = null;
 /** True when the previous launches crashed early; computed once per launch. */
 export function checkSafeMode(): Promise<boolean> {
   if (checking) return checking;
+  // Browser: closing or reloading a tab within seconds is normal (installing the app
+  // reopens it in its own window), and there's no native code to switch off.
+  if (Platform.OS === 'web') {
+    safeMode = false;
+    checking = Promise.resolve(false);
+    return checking;
+  }
   checking = (async () => {
     let boot: Boot = { starting: false, streak: 0 };
     try {
