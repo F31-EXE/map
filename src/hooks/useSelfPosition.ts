@@ -1,4 +1,5 @@
 import * as Location from 'expo-location';
+import * as ScreenOrientation from 'expo-screen-orientation';
 import { useEffect, useRef, useState } from 'react';
 import { Platform } from 'react-native';
 
@@ -10,6 +11,17 @@ import { onBackgroundLocation } from '../services/backgroundLocation';
 import { watchWebCompass } from './webCompass';
 
 const HEADING_STEP = 4;
+
+/**
+ * The compass gives the direction of the phone's top edge; the map's "up" is the
+ * screen's top, which in landscape is a side edge. Degrees to add per orientation.
+ */
+const SCREEN_TURN: Partial<Record<ScreenOrientation.Orientation, number>> = {
+  [ScreenOrientation.Orientation.PORTRAIT_UP]: 0,
+  [ScreenOrientation.Orientation.LANDSCAPE_RIGHT]: 90,
+  [ScreenOrientation.Orientation.PORTRAIT_DOWN]: 180,
+  [ScreenOrientation.Orientation.LANDSCAPE_LEFT]: 270,
+};
 const HEADING_MIN_INTERVAL_MS = 120;
 
 export type LocationStatus = 'pending' | 'granted' | 'denied' | 'error';
@@ -86,6 +98,16 @@ export function useSelfPosition(enabled = true) {
           // declination (~13° around Yekaterinburg) with every reading.
           let useTrue = false;
           let poorSince: number | null = null;
+          let turn = 0;
+          const setTurn = (o: ScreenOrientation.Orientation) => {
+            turn = SCREEN_TURN[o] ?? turn;
+          };
+          try {
+            setTurn(await ScreenOrientation.getOrientationAsync());
+            subs.push(ScreenOrientation.addOrientationChangeListener((e) => setTurn(e.orientationInfo.orientation)));
+          } catch {
+            // Orientation unknown: keep portrait.
+          }
           try {
             subs.push(
               await Location.watchHeadingAsync((h) => {
@@ -98,7 +120,7 @@ export function useSelfPosition(enabled = true) {
                 else poorSince = null;
                 setCompassPoor(poorSince != null && now - poorSince > 3000);
                 if (h.accuracy === 0 || raw < 0) return;
-                onRawHeading(raw);
+                onRawHeading((raw + turn) % 360);
               })
             );
           } catch {
