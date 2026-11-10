@@ -258,6 +258,8 @@ service cloud.firestore {
       // Players register themselves; the chain fighter → squad → side → game is checked.
       match /players/{uid} {
         allow read: if inGame(gameId);
+        // Own doc before registering (it may not exist yet).
+        allow get: if signedIn() && uid == request.auth.uid;
         allow create: if signedIn() && uid == request.auth.uid
           && request.resource.data.callsign is string && request.resource.data.callsign.size() <= 24
           && request.resource.data.sideId is string

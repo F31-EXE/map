@@ -701,8 +701,14 @@ describe('big games: techs, sides, players, game markers', () => {
     await assertFails(attachSide('sam', 'NOPE11'));
     await assertFails(attachSide('bob'));
     await assertSucceeds(attachSide());
+    // The app checks its own (not yet existing) player doc before registering.
+    await assertSucceeds(getDoc(doc(as('bob'), 'games', GAME, 'players', 'bob')));
+    await assertFails(getDoc(doc(as('mallory'), 'games', GAME, 'players', 'bob')));
+    await assertFails(getDocs(collection(as('bob'), 'games', GAME, 'sides')));
     await assertSucceeds(register('bob', TEAM));
     await assertSucceeds(register('sam', null));
+    // Registered: the commander reads the game's sides (to pick a free color).
+    await assertSucceeds(getDocs(collection(as('sam'), 'games', GAME, 'sides')));
     // Not in that squad / not the commander.
     await assertFails(register('carol', TEAM));
     await assertFails(register('mallory', null));

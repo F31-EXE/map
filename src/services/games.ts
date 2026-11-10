@@ -7,6 +7,7 @@ import {
   deleteDoc,
   doc,
   getDoc,
+  getDocs,
   increment,
   onSnapshot,
   query,
@@ -74,14 +75,19 @@ export async function leaveTech(gameId: string, uid: string): Promise<void> {
 }
 
 /** A side commander brings their side into a game with its side code. */
-export async function attachSide(side: Side, rawCode: string, index = 0): Promise<string> {
+export async function attachSide(side: Side, rawCode: string, callsign: string): Promise<string> {
   const { gameId, kind, code } = await lookup(rawCode);
   if (kind !== 'side') throw new Error('Это код игротеха. Командиру стороны нужен код «для сторон»');
   const db = firestore();
   await updateDoc(doc(db, 'sides', side.id), { gameId, gameCode: code });
   const scoreRef = doc(db, 'games', gameId, 'sides', side.id);
+  // The commander registers right away: that lets them read the game's sides.
+  await registerPlayer(gameId, side.ownerId, { sideId: side.id, teamId: null, callsign: callsign || 'Командир' });
   if (!(await getDoc(scoreRef)).exists()) {
-    await setDoc(scoreRef, { name: side.name.slice(0, 40), color: SIDE_COLORS[index % SIDE_COLORS.length] });
+    // A color no other side of the game has yet.
+    const taken = new Set((await getDocs(collection(db, 'games', gameId, 'sides'))).docs.map((d) => d.data().color));
+    const color = SIDE_COLORS.find((c) => !taken.has(c)) ?? SIDE_COLORS[taken.size % SIDE_COLORS.length];
+    await setDoc(scoreRef, { name: side.name.slice(0, 40), color });
   }
   return gameId;
 }

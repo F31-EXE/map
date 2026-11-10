@@ -441,7 +441,7 @@ export default function MapScreen() {
   const canVote = (m: TacMarker) =>
     inTeam && !m.personal && !m.gameId && (!m.teamId || m.teamId === session.teamId);
 
-  const toolbarButtons = 7 + (visibleMembers.length > 0 ? 1 : 0);
+  const toolbarButtons = 6 + (visibleMembers.length > 0 ? 1 : 0);
   const toolbarWidth = toolbarButtons * 50 + 8;
 
   // Landscape top row: [team pill][toolbar].

@@ -188,6 +188,8 @@ export type TacMarker = {
   owner?: string | null;
   /** Territory sector: a capture under way (side, minutes of advantage so far). */
   cap?: { s: string; n: number } | null;
+  /** Territory sector: the last match minute the referee changed it in. */
+  min?: number | null;
   log?: { s: string; t: number }[];
   /** Football ball (`owner` = its side, `points` = its arrow): how far it has rolled. */
   ball?: Ball | null;

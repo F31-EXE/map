@@ -36,7 +36,9 @@ import { useSide } from './side';
 /** A tech counts as online (and may referee) if their position is this fresh. */
 const TECH_ONLINE_MS = 3 * 60_000;
 /** Territory reports for a minute are counted this long after it ends. */
-const REFEREE_GRACE_MS = 15_000;
+const REFEREE_GRACE_MS = 8_000;
+/** Players report their territory this far into each match minute. */
+const REPORT_AT_MS = 30_000;
 /** Football: how often the referee rolls the balls. */
 const BALL_TICK_MS = 3000;
 /** Fighters' positions older than this don't push a ball. */
@@ -247,16 +249,19 @@ export function GameProvider({ children }: { children: ReactNode }) {
       });
   }, [gameId, uid, isTech, mySideId, regTeam, callsign]);
   const me = players.find((p) => p.uid === uid);
+  // A boolean, not the doc: the players list changes every minute, and timers that
+  // depend on it would restart before they ever fire.
+  const inGame = Boolean(me);
 
   // Tickets: every «Я убит» costs the side a life.
   const prevStatus = useRef(status);
   useEffect(() => {
     const was = prevStatus.current;
     prevStatus.current = status;
-    if (status === 'dead' && was !== 'dead' && gameId && uid && me && game?.tickets != null) {
+    if (status === 'dead' && was !== 'dead' && gameId && uid && inGame && game?.tickets != null) {
       games.addDeath(gameId, uid).catch(() => {});
     }
-  }, [status, gameId, uid, me, game?.tickets]);
+  }, [status, gameId, uid, inGame, game?.tickets]);
 
   // Control zone (WARDOGS): the newest game zone; each fighter scores for their side.
   const zone = useMemo(
@@ -264,6 +269,11 @@ export function GameProvider({ children }: { children: ReactNode }) {
       markers.filter((m) => m.zone).reduce<TacMarker | null>((a, m) => (!a || m.createdAt > a.createdAt ? m : a), null),
     [markers]
   );
+  // Every game-marker snapshot (balls move every few seconds) makes new objects: timers
+  // key on what matters and read the latest zone through a ref.
+  const zoneRef = useRef(zone);
+  zoneRef.current = zone;
+  const zoneKey = zone?.zone ? `${zone.id}:${JSON.stringify(zone.zone)}` : null;
   const scoredMinutes = useRef<Record<string, number> | null>(null);
   useEffect(() => {
     loadJson<Record<string, number>>(KEYS.zoneTicks, {}).then((v) => {
@@ -271,11 +281,12 @@ export function GameProvider({ children }: { children: ReactNode }) {
     });
   }, []);
   useEffect(() => {
-    if (!zone?.zone || !gameId || !uid || !me || status === 'dead') return;
-    const z = zone.zone;
+    if (!zoneKey || !gameId || !uid || !inGame || status === 'dead') return;
     const t = setInterval(() => {
       const seen = scoredMinutes.current;
-      if (!seen) return;
+      const zone = zoneRef.current;
+      const z = zone?.zone;
+      if (!seen || !zone || !z) return;
       const now = Date.now();
       const minute = scoreMinute(z, now);
       const last = seen[zone.id];
@@ -289,14 +300,16 @@ export function GameProvider({ children }: { children: ReactNode }) {
       if (n > 0) games.addZonePoints(gameId, uid, zone.id, n).catch(() => {});
     }, 5000);
     return () => clearInterval(t);
-  }, [zone, gameId, uid, me, status, getLastFix]);
+  }, [zoneKey, gameId, uid, inGame, status, getLastFix]);
 
   // Hot zone buzz: the next spot appears, the slide starts.
   const zonePhase = useRef<string | null>(null);
   useEffect(() => {
-    if (!zone?.zone) return;
+    if (!zoneKey) return;
     const t = setInterval(() => {
-      const st = hotState(zone, zone.zone!, Date.now());
+      const zone = zoneRef.current;
+      if (!zone?.zone) return;
+      const st = hotState(zone, zone.zone, Date.now());
       const key = `${st.k}:${st.phase}`;
       const prev = zonePhase.current;
       zonePhase.current = key;
@@ -305,7 +318,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
       else if (st.phase === 'move') Vibration.vibrate([0, 200, 120, 200, 120, 200]);
     }, 1000);
     return () => clearInterval(t);
-  }, [zone]);
+  }, [zoneKey]);
 
   // Territories: every match minute a living fighter reports the sector they're in.
   const sectors = useMemo(() => markers.filter((m) => m.kind === 'sector' && m.points), [markers]);
@@ -314,29 +327,32 @@ export function GameProvider({ children }: { children: ReactNode }) {
     [markers]
   );
   const reported = useRef(-1);
+  const sectorsRef = useRef(sectors);
+  sectorsRef.current = sectors;
+  const hasSectors = sectors.length > 0;
   useEffect(() => {
-    if (!game?.match || !sectors.length || !gameId || !uid || !me) return;
+    if (!game?.match || !hasSectors || !gameId || !uid || !inGame) return;
     const match = game.match;
     const t = setInterval(() => {
       const now = Date.now();
       const st = matchState(match, now);
       if (st.phase !== 'running' || st.minute <= reported.current) return;
-      // Mid-minute: the fix then is what counts for this minute.
-      if ((now - match.start) % 60_000 < 20_000) return;
+      // Mid-minute: the fix then is what counts for this minute. Well clear of the
+      // referee's pass just after the minute, so phones whose clocks are some seconds
+      // off still land in the right minute.
+      if ((now - match.start) % 60_000 < REPORT_AT_MS) return;
       reported.current = st.minute;
       const pos = getLastFix();
       const fresh = pos && now - pos.timestamp < 2 * 60_000 && status !== 'dead';
-      const cell = fresh ? (sectorAt(pos, sectors)?.id ?? null) : null;
+      const cell = fresh ? (sectorAt(pos, sectorsRef.current)?.id ?? null) : null;
       games.reportCell(gameId, uid, cell, st.minute).catch(() => {});
     }, 4000);
     return () => clearInterval(t);
-  }, [game?.match, sectors, gameId, uid, me, status, getLastFix]);
+  }, [game?.match, hasSectors, gameId, uid, inGame, status, getLastFix]);
 
   // Referee: one online tech (the first by uid) counts each finished minute.
   const playersRef = useRef(players);
   playersRef.current = players;
-  const sectorsRef = useRef(sectors);
-  sectorsRef.current = sectors;
   const refereed = useRef(-1);
   const now0 = Date.now();
   const referee = useMemo(
@@ -360,18 +376,22 @@ export function GameProvider({ children }: { children: ReactNode }) {
       const lastMinute = Math.floor((end - match.start) / 60_000) - 1;
       const target = Math.min(upTo, lastMinute);
       if (target < 0 || target <= refereed.current) return;
-      // One minute per pass: the next one needs this one's result back from the server.
-      const k = Math.max(0, refereed.current + 1);
+      // Players' docs hold only their latest minute, so older minutes can't be
+      // recounted: a referee that starts (or takes over) late counts the last one only.
+      const k = target;
+      // A sector already counted for this minute (by another tech's phone) is skipped:
+      // counting it twice would double the capture.
+      const todo = sectorsRef.current.filter((s) => (s.min ?? -1) < k);
       const updates = territoryMinute(
         playersRef.current,
-        sectorsRef.current.map((s) => ({ id: s.id, owner: s.owner, cap: s.cap ?? null })),
+        todo.map((s) => ({ id: s.id, owner: s.owner, cap: s.cap ?? null })),
         k
       );
       const at = match.start + (k + 1) * 60_000;
       for (const u of updates) {
         const s = sectorsRef.current.find((x) => x.id === u.id);
         if (!s) continue;
-        const patch: Record<string, unknown> = { cap: u.cap };
+        const patch: Record<string, unknown> = { cap: u.cap, min: k };
         if (u.owner) {
           patch.owner = u.owner;
           patch.log = [...(s.log ?? []), { s: u.owner, t: at }];
@@ -589,7 +609,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
       },
       attachSide: async (code) => {
         if (!side.side || !side.isSideCommander) throw new Error('Сначала создайте сторону');
-        await games.attachSide(side.side, code);
+        await games.attachSide(side.side, code, callsign);
       },
       detachSide: async (sideId) => {
         await games.detachSide(sideId);
@@ -667,7 +687,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
       },
       resetTerritory: async () => {
         const g = requireGame();
-        await Promise.all(sectors.map((s) => games.updateGameMarker(g.id, s.id, { owner: null, log: [], cap: null } as Partial<TacMarker>)));
+        await Promise.all(sectors.map((s) => games.updateGameMarker(g.id, s.id, { owner: null, log: [], cap: null, min: null } as Partial<TacMarker>)));
       },
       addBall: async (sideId, points) => {
         const g = requireGame();
@@ -705,7 +725,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
           if (!side.side || !side.isSideCommander) {
             throw new Error('Сначала создайте сторону: Отряд → Сторона → «Создать сторону», затем отсканируйте код ещё раз');
           }
-          await games.attachSide(side.side, invite.code);
+          await games.attachSide(side.side, invite.code, callsign);
           return 'Сторона в игре';
         }
         if (invite.kind === 'claim') {

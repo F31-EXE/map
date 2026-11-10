@@ -46,8 +46,12 @@ export function HoldPanel({ marker, self }: { marker: TacMarker; self: SelfPosit
 
   if (marker.kind === 'sector') {
     const st = matchState(g.game?.match, Date.now());
-    // Who stood here in the last counted minute (techs and players alike can see it).
-    const minute = st.phase === 'running' ? st.minute - 1 : null;
+    // Who stood here in the latest reported minute (players report mid-minute and
+    // keep only that one, so it's this minute or the previous).
+    const minute =
+      st.phase === 'running'
+        ? Math.max(-1, ...g.players.map((p) => (p.cellAt != null && p.cellAt <= st.minute ? p.cellAt : -1)))
+        : null;
     const here = minute == null ? [] : g.players.filter((p) => p.cell === marker.id && p.cellAt === minute);
     const counts = g.sides
       .map((s) => ({ s, n: here.filter((p) => p.sideId === s.id).length }))
@@ -64,7 +68,7 @@ export function HoldPanel({ marker, self }: { marker: TacMarker; self: SelfPosit
           />
         )}
         {counts.length > 0 && (
-          <Row label="В прошлую минуту" value={counts.map((x) => `${x.s.name} ${x.n}`).join(' · ')} />
+          <Row label="Последний отсчёт" value={counts.map((x) => `${x.s.name} ${x.n}`).join(' · ')} />
         )}
         <Text style={styles.sub}>
           Чьих живых бойцов в территории больше {CAPTURE_MINUTES} минуты подряд, тот её и берёт. Поровну — отсчёт
