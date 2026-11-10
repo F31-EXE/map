@@ -583,3 +583,26 @@ body,
 .ball-icon .chip {
   top: 34px;
 }
+
+/* Phone or radio battery about to run out. */
+.member-low {
+  position: absolute;
+  right: -7px;
+  bottom: -5px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #ffb547;
+  border: 1.5px solid #04100a;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.member-low svg {
+  width: 11px;
+  height: 11px;
+}
+.lod-dot .member-low {
+  visibility: hidden;
+}

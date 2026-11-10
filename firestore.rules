@@ -123,7 +123,11 @@ service cloud.firestore {
         && (!('status' in d) || d.status in ['alive', 'dead', 'afk'])
         && (!('faction' in d) || d.faction == null || (d.faction is int && d.faction >= 0 && d.faction < 6))
         && (!('pts' in d) || (d.pts is map && d.pts.size() <= 50))
-        && (!('range' in d) || (d.range is number && d.range > 0 && d.range <= 2000));
+        && (!('range' in d) || (d.range is number && d.range > 0 && d.range <= 2000))
+        && (!('battery' in d) || d.battery == null || (d.battery is number && d.battery >= 0 && d.battery <= 100))
+        && (!('charging' in d) || d.charging is bool)
+        && (!('radioBattery' in d) || d.radioBattery == null
+          || (d.radioBattery is number && d.radioBattery >= 0 && d.radioBattery <= 101));
     }
     // Team game: up to six teams of { name, color } on the squad doc.
     function validFactions(f) {

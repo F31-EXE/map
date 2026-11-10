@@ -14,7 +14,7 @@ export const MT_FROM_RADIO = '2c55e69e-4993-11ed-b878-0242ac120002';
 /** Notifies when FromRadio has something new. */
 export const MT_FROM_NUM = 'ed9da18c-a800-4f66-a670-aa7547e34453';
 
-export const PORT = { text: 1, position: 3, nodeInfo: 4, admin: 6, private: 256 } as const;
+export const PORT = { text: 1, position: 3, nodeInfo: 4, admin: 6, telemetry: 67, private: 256 } as const;
 export const BROADCAST = 0xffffffff;
 /** Data.payload limit (Constants.DATA_PAYLOAD_LEN). */
 export const MAX_PAYLOAD = 233;
@@ -106,6 +106,8 @@ export type MtNode = {
   lat: number | null;
   lng: number | null;
   lastHeard: number;
+  /** Battery %, 101 = on external power (DeviceMetrics.battery_level), if reported. */
+  battery?: number | null;
 };
 
 export type FromRadio =
@@ -125,6 +127,17 @@ export function decodePosition(b: Uint8Array): { lat: number; lng: number } | nu
   const lng = f.int(2) / 1e7;
   if (!lat && !lng) return null;
   return Math.abs(lat) <= 90 && Math.abs(lng) <= 180 ? { lat, lng } : null;
+}
+
+/**
+ * Battery % out of a Telemetry message (TELEMETRY_APP): device_metrics (2) →
+ * battery_level (1). 101 means powered from outside. Null for other telemetry.
+ */
+export function decodeTelemetryBattery(b: Uint8Array): number | null {
+  const dm = new Fields(b).bytes(2);
+  if (!dm) return null;
+  const f = new Fields(dm);
+  return f.has(1) ? f.uint(1) : null;
 }
 
 export function decodeUser(b: Uint8Array): { longName: string; shortName: string } {
@@ -164,9 +177,19 @@ export function decodeFromRadio(buf: Uint8Array): FromRadio {
     const pos = node.bytes(3);
     const u = user ? decodeUser(user) : { longName: '', shortName: '' };
     const p = pos ? decodePosition(pos) : null;
+    // NodeInfo.device_metrics (6) → battery_level (1).
+    const dm = node.bytes(6);
+    const df = dm ? new Fields(dm) : null;
     return {
       type: 'node',
-      node: { num: node.uint(1), ...u, lat: p?.lat ?? null, lng: p?.lng ?? null, lastHeard: node.uint(5) },
+      node: {
+        num: node.uint(1),
+        ...u,
+        lat: p?.lat ?? null,
+        lng: p?.lng ?? null,
+        lastHeard: node.uint(5),
+        battery: df?.has(1) ? df.uint(1) : null,
+      },
     };
   }
   const ch = f.message(10);

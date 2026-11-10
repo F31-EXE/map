@@ -4,6 +4,7 @@ import { formatClock } from '../lib/geo';
 import { isArea } from '../lib/geofence';
 import { BALL_RADIUS, TECH_COLOR } from '../lib/gameModes';
 import { isAdminKind, isOrder, MARKER_KINDS } from '../lib/markerKinds';
+import { lowPower } from '../lib/power';
 import { ROLES, type RoleId } from '../lib/roles';
 import { readRange } from '../services/vectorRegions';
 import type { Bounds } from '../lib/tiles';
@@ -232,6 +233,7 @@ export function TacticalMap(props: Props) {
         roleTitle: m.tech ? 'Игротех' : m.mapLabel ? null : ROLES[m.role].title,
         commander: !m.tech && (m.leader ?? (m.canCommand || m.id === props.ownerId)),
         tech: Boolean(m.tech),
+        low: lowPower(m),
         heading: m.heading,
         status: m.status,
         stale: !m.updatedAt || now - m.updatedAt > STALE_MS,

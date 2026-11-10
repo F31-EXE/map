@@ -17,6 +17,7 @@ import { ROLES } from '../../lib/roles';
 import { STATUSES } from '../../lib/status';
 import { KEYS, loadJson, saveJson } from '../../lib/storage';
 import type { Bounds } from '../../lib/tiles';
+import { powerText } from '../../lib/power';
 import type { GameSide, LatLng, MarkerKind, SelfPosition, TacMarker } from '../../lib/types';
 import {
   BASE_LAYERS,
@@ -1244,6 +1245,7 @@ export default function MapScreen() {
             selectedMember.status !== 'alive' ? STATUSES[selectedMember.status].title.toUpperCase() : null,
             selectedMember.canCommand || selectedMember.id === session.team?.ownerId ? 'отдаёт приказы' : null,
             selectedMember.updatedAt ? `на связи ${timeAgo(selectedMember.updatedAt)}` : null,
+            powerText(selectedMember),
           ]
             .filter(Boolean)
             .join(' · ')

@@ -115,6 +115,11 @@ export type Member = {
   pts?: Record<string, number>;
   /** Mortar crews: maximum range in meters (circle on the map). */
   range?: number | null;
+  /** Phone (or laptop) battery %, and whether it's charging. */
+  battery?: number | null;
+  charging?: boolean;
+  /** Meshtastic radio battery %, 101 = on external power. */
+  radioBattery?: number | null;
   /** Map label instead of callsign and role (side view: the squad's name on its commander). */
   mapLabel?: string;
   /** A game tech (organizer): drawn as an orange diamond. */

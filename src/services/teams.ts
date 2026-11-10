@@ -197,12 +197,16 @@ export function subscribeAvatars(
   );
 }
 
-export async function publishPosition(teamId: string, uid: string, p: SelfPosition): Promise<void> {
+export type PowerInfo = { battery: number | null; charging: boolean; radioBattery: number | null };
+
+export async function publishPosition(teamId: string, uid: string, p: SelfPosition, power?: PowerInfo): Promise<void> {
   await updateDoc(doc(firestore(), 'teams', teamId, 'members', uid), {
     lat: p.lat,
     lng: p.lng,
     accuracy: p.accuracy,
     heading: p.heading,
+    // Rides along with positions: no extra writes.
+    ...(power ? { battery: power.battery, charging: power.charging, radioBattery: power.radioBattery } : {}),
     updatedAt: serverTimestamp(),
   });
 }
@@ -273,6 +277,9 @@ export function subscribeMembers(
             faction: Number.isInteger(v.faction) ? v.faction : null,
             pts: parsePoints(v.pts),
             range: typeof v.range === 'number' ? v.range : null,
+            battery: typeof v.battery === 'number' ? v.battery : null,
+            charging: v.charging === true,
+            radioBattery: typeof v.radioBattery === 'number' ? v.radioBattery : null,
           };
         })
       );

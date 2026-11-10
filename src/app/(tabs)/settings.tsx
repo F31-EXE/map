@@ -14,6 +14,7 @@ import { Avatar, Button, Card, Eyebrow, Icon, KeyboardScroll, tap, type IconName
 import { confirmDestructive } from '../../ui/confirm';
 import { RadioCard } from '../../ui/RadioCard';
 import { RolePicker } from '../../ui/RolePicker';
+import { UpdatesCard } from '../../ui/UpdatesCard';
 import { C, F, R } from '../../ui/theme';
 
 const PRIVACY_URL = 'https://f31-exe.github.io/map/privacy.html';
@@ -300,6 +301,8 @@ export default function SettingsScreen() {
           </>
         )}
       </Card>
+
+      <UpdatesCard />
 
       <Text style={styles.version}>
         GRIMMAP v{Constants.expoConfig?.version ?? '—'}

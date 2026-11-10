@@ -34,6 +34,7 @@ import { Alert, Vibration } from 'react-native';
 
 import { signalNewOrder } from '../services/orderAlert';
 import { startBackgroundLocation, stopBackgroundLocation } from '../services/backgroundLocation';
+import { usePhoneBattery } from '../hooks/usePhoneBattery';
 import { checkSafeMode } from '../services/crashGuard';
 import { deleteMyMessages } from '../services/chat';
 import * as recordings from '../services/recordings';
@@ -655,6 +656,14 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const inFlight = useRef(false);
 
   const { reportSelf } = mesh;
+  // Battery of this phone and of its radio, sent along with positions.
+  const phoneBattery = usePhoneBattery();
+  const power = useRef<teams.PowerInfo>({ battery: null, charging: false, radioBattery: null });
+  power.current = {
+    battery: phoneBattery.level,
+    charging: phoneBattery.charging,
+    radioBattery: mesh.radio.state === 'ready' ? mesh.radio.myBattery : null,
+  };
   const reportPosition = useCallback(
     (p: SelfPosition) => {
       lastFix.current = p;
@@ -670,7 +679,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       }
       inFlight.current = true;
       teams
-        .publishPosition(teamId, uid, p)
+        .publishPosition(teamId, uid, p, power.current)
         .then(() => {
           lastSent.current = { at: now, pos: p };
         })

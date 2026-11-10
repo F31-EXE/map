@@ -5,6 +5,7 @@ import { decodeEnvelope, encodeEnvelope, fragment, MAX_FRAGMENTS, Reassembler, t
 import { chatEnvelope, markEnvelope, posEnvelope, voteEnvelope } from '../src/lib/mesh.ts';
 import {
   decodeFromRadio,
+  decodeTelemetryBattery,
   hasSquadChannel,
   MAX_PAYLOAD,
   nodeIdText,
@@ -232,4 +233,16 @@ test('radio writes fit one Bluetooth packet (nRF52 boards like the Heltec T114)'
     assert.ok(frames.every((f) => f.length <= max));
   }
   assert.equal(payloadForMtu(512), MAX_PAYLOAD);
+});
+
+test('radio battery from telemetry and node info', () => {
+  const metrics = new Writer().uint(1, 73).finish();
+  const telemetry = new Writer().fixed32(1, 1700000000).bytesField(2, metrics).finish();
+  assert.equal(decodeTelemetryBattery(telemetry), 73);
+  assert.equal(decodeTelemetryBattery(new Writer().fixed32(1, 1).finish()), null);
+  const nodeInfo = new Writer().uint(1, 42).bytesField(6, new Writer().uint(1, 101).finish());
+  const fromRadio = new Writer().message(4, nodeInfo).finish();
+  const msg = decodeFromRadio(fromRadio);
+  assert.equal(msg.type, 'node');
+  if (msg.type === 'node') assert.equal(msg.node.battery, 101);
 });

@@ -660,6 +660,13 @@ describe('team game', () => {
     await assertFails(updateDoc(doc(as('carol'), 'teams', TEAM, 'members', 'carol'), { range: 0 }));
     await assertFails(updateDoc(doc(as('carol'), 'teams', TEAM, 'members', 'carol'), { range: '200' }));
     await assertFails(updateDoc(doc(as('carol'), 'teams', TEAM, 'members', 'bob'), { range: 150 }));
+    // Battery levels ride along with positions.
+    const carol = doc(as('carol'), 'teams', TEAM, 'members', 'carol');
+    await assertSucceeds(updateDoc(carol, { battery: 55, charging: false, radioBattery: 101 }));
+    await assertSucceeds(updateDoc(carol, { battery: null, radioBattery: null }));
+    await assertFails(updateDoc(carol, { battery: 150 }));
+    await assertFails(updateDoc(carol, { charging: 'yes' }));
+    await assertFails(updateDoc(doc(as('carol'), 'teams', TEAM, 'members', 'bob'), { battery: 10 }));
   });
 });
 

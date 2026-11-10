@@ -11,10 +11,10 @@ on:
   workflow_dispatch:
     inputs:
       target:
-        description: 'apk — собрать APK здесь; expo-android / expo-ios / expo-all — запустить сборку на серверах Expo (видна на expo.dev)'
+        description: 'apk — собрать APK здесь; expo-android / expo-ios / expo-all — сборка на серверах Expo; update — обновление без переустановки (EAS Update, канал preview)'
         type: choice
         default: apk
-        options: [apk, expo-android, expo-ios, expo-all]
+        options: [apk, update, expo-android, expo-ios, expo-all]
 
 permissions:
   contents: read
@@ -26,8 +26,34 @@ concurrency:
 jobs:
   # Cloud build on Expo's servers (preview profile, internal distribution): the build
   # and its install link/QR show up on expo.dev; the job only queues it.
+  # Over-the-air update for installed builds whose native part matches (fingerprint
+  # runtime version): new JavaScript and the map page, no reinstall.
+  update:
+    if: ${{ inputs.target == 'update' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Publish the update
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          # The build profile's env doesn't apply to updates: same public Firebase config.
+          EXPO_PUBLIC_FIREBASE_API_KEY: AIzaSyDOQqQAbRsYvImiaw0Bx0Xwr0gx4e-SV70
+          EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN: airsoftcalendar.firebaseapp.com
+          EXPO_PUBLIC_FIREBASE_PROJECT_ID: airsoftcalendar
+          EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET: airsoftcalendar.firebasestorage.app
+          EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID: '54382632962'
+          EXPO_PUBLIC_FIREBASE_APP_ID: 1:54382632962:web:19462dc47ad704c997071b
+        run: |
+          msg="$(git log -1 --pretty=%s)"
+          npx -y eas-cli@latest update --channel preview --platform android --message "$msg" --non-interactive
+
   expo:
-    if: ${{ inputs.target != '' && inputs.target != 'apk' }}
+    if: ${{ inputs.target != '' && inputs.target != 'apk' && inputs.target != 'update' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

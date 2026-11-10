@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import {
   decodePosition,
+  decodeTelemetryBattery,
   decodeUser,
   hasSquadChannel,
   packetId,
@@ -53,6 +54,8 @@ export type Radio = {
   maxPayload: () => number;
   /** Our own radio's GPS position, if it has GPS (laptops have none of their own). */
   myPosition: { lat: number; lng: number; at: number } | null;
+  /** Our own radio's battery %, 101 = on external power. */
+  myBattery: number | null;
 };
 
 /** Connection to the user's Meshtastic radio; packets go to `onPacket`. */
@@ -68,6 +71,7 @@ export function useRadio(teamId: string | null, onPacket: (p: MtPacket) => void)
   onPacketRef.current = onPacket;
   const myNodeRef = useRef<number | null>(null);
   const [myPosition, setMyPosition] = useState<{ lat: number; lng: number; at: number } | null>(null);
+  const [myBattery, setMyBattery] = useState<number | null>(null);
 
   const updateNode = useCallback((num: number, patch: Partial<MtNode>) => {
     setNodes((cur) => {
@@ -128,10 +132,22 @@ export function useRadio(teamId: string | null, onPacket: (p: MtPacket) => void)
         onChannels: setChannels,
         onNode: (n) => {
           if (n.num !== myNodeRef.current) updateNode(n.num, n);
-          else if (n.lat != null && n.lng != null) setMyPosition({ lat: n.lat, lng: n.lng, at: Date.now() });
+          else {
+            if (n.lat != null && n.lng != null) setMyPosition({ lat: n.lat, lng: n.lng, at: Date.now() });
+            if (n.battery != null) setMyBattery(n.battery);
+          }
         },
         onPacket: (p) => {
           if (p.from === myNodeRef.current) {
+            // Our radio's own telemetry: its battery.
+            if (p.portnum === PORT.telemetry) {
+              try {
+                const b = decodeTelemetryBattery(p.payload);
+                if (b != null) setMyBattery(b);
+              } catch {
+                // Other telemetry.
+              }
+            }
             // Our radio's own position broadcast: its GPS fix.
             if (p.portnum === PORT.position) {
               try {
@@ -259,5 +275,6 @@ export function useRadio(teamId: string | null, onPacket: (p: MtPacket) => void)
     send,
     maxPayload,
     myPosition,
+    myBattery,
   };
 }
