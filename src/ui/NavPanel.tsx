@@ -19,6 +19,7 @@ export function NavPanel({
   mapBearing,
   eta,
   arrived,
+  compassPoor,
   compact,
   style,
   onClose,
@@ -33,6 +34,8 @@ export function NavPanel({
   mapBearing: number;
   eta: string;
   arrived: boolean;
+  /** The compass isn't calibrated: say so instead of trusting the arrow. */
+  compassPoor?: boolean;
   compact?: boolean;
   style?: StyleProp<ViewStyle>;
   onClose: () => void;
@@ -61,7 +64,11 @@ export function NavPanel({
         {!arrived && (
           <Text style={styles.sub} numberOfLines={1}>
             {Math.round(bearing)}°
-            {heading != null ? ` · ${turnText(heading, bearing)}` : ' · стрелка по карте, компаса нет'}
+            {compassPoor
+              ? ' · откалибруйте компас: восьмёркой'
+              : heading != null
+                ? ` · ${turnText(heading, bearing)}`
+                : ' · стрелка по карте, компаса нет'}
           </Text>
         )}
       </View>

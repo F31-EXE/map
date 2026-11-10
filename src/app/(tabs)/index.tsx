@@ -9,6 +9,7 @@ import { bearingDegrees, distanceMeters, formatClock, formatCoords, formatDistan
 import { centroid, isArea, ZoneWatcher, type Area, type AreaKind } from '../../lib/geofence';
 import { turnText } from '../../lib/heading';
 import { ARRIVE_M, etaSeconds, formatEta, SpeedTracker } from '../../lib/nav';
+import { routeRemaining, routeStart, routeStep } from '../../lib/route';
 import { recentTrail } from '../../lib/trail';
 import { hotState, type HotZone } from '../../lib/hotzone';
 import { isOrder, MARKER_KINDS, voteThreshold } from '../../lib/markerKinds';
@@ -228,7 +229,7 @@ export default function MapScreen() {
     [side.mapMembers, game.mapMembers]
   );
   const { overlays, focusRequest, requestFocus, viewRequest, requestView, areas, download } = useOverlays();
-  const { position: gps, status, heading } = useSelfPosition();
+  const { position: gps, status, heading, compassPoor } = useSelfPosition();
   // A laptop has no GPS (and no location at all offline): use the connected radio's
   // GPS when the device's own fix is missing or stale.
   const radioPos = session.mesh.radio.myPosition;
@@ -289,7 +290,9 @@ export default function MapScreen() {
   const drawingRef = useRef(false);
   drawingRef.current = drawing != null;
   // "Lead me there": a marker or a teammate to walk to.
-  const [nav, setNav] = useState<{ type: 'marker' | 'member'; id: string } | null>(null);
+  // «Вести сюда» to a marker or teammate, or «Вести по маршруту» along an arrow
+  // (`idx` = the route point to head for now).
+  const [nav, setNav] = useState<{ type: 'marker' | 'member' | 'route'; id: string; idx?: number } | null>(null);
   const [arrived, setArrived] = useState(false);
   const speed = useRef(new SpeedTracker());
   useEffect(() => {
@@ -522,8 +525,16 @@ export default function MapScreen() {
   const solution = calculator && gunAt && center ? solve(gunAt, center, mortar.config) : null;
 
   // Where "lead me there" points, followed live (a teammate keeps moving).
+  const navRoute = nav?.type === 'route' ? allMarkers.find((x) => x.id === nav.id)?.points ?? null : null;
   const navTo = (() => {
     if (!nav) return null;
+    if (nav.type === 'route') {
+      const m = allMarkers.find((x) => x.id === nav.id);
+      const pts = m?.points;
+      if (!m || !pts || pts.length < 2) return null;
+      const i = Math.min(nav.idx ?? 0, pts.length - 1);
+      return { ...pts[i], name: `${m.label || 'маршрут'} · точка ${i + 1} из ${pts.length}` };
+    }
     if (nav.type === 'marker') {
       const m = allMarkers.find((x) => x.id === nav.id);
       return m ? { lat: m.lat, lng: m.lng, name: m.label || MARKER_KINDS[m.kind].title } : null;
@@ -543,8 +554,23 @@ export default function MapScreen() {
   useEffect(() => {
     if (navLost) setNav(null);
   }, [navLost]);
+  // Route: past a point → on to the next one, with a short buzz.
+  const routeIdx = nav?.type === 'route' ? (nav.idx ?? 0) : null;
+  useEffect(() => {
+    if (routeIdx == null || !navRoute || !position) return;
+    const next = routeStep(navRoute, routeIdx, position, ARRIVE_M);
+    if (next === routeIdx) return;
+    setNav((n) => (n && n.type === 'route' ? { ...n, idx: next } : n));
+    if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy).catch(() => {});
+  }, [routeIdx, navRoute, position]);
+  const routeLeft =
+    routeIdx != null && navRoute && position ? routeRemaining(navRoute, routeIdx, position) : null;
+  const routeEnd = routeIdx != null && navRoute != null && routeIdx < navRoute.length - 1;
+
   useEffect(() => {
     if (navDistance == null) return;
+    // Mid-route points aren't "arrived": the step effect moves on.
+    if (routeEnd) return;
     if (!arrived && navDistance <= ARRIVE_M) {
       setArrived(true);
       if (Platform.OS !== 'web') {
@@ -554,8 +580,8 @@ export default function MapScreen() {
     } else if (arrived && navDistance > ARRIVE_M * 2) {
       setArrived(false);
     }
-  }, [navDistance, arrived]);
-  const startNav = (target: { type: 'marker' | 'member'; id: string }) => {
+  }, [navDistance, arrived, routeEnd]);
+  const startNav = (target: { type: 'marker' | 'member' | 'route'; id: string; idx?: number }) => {
     setMortarOn(false);
     setArrived(false);
     setNav(target);
@@ -1036,8 +1062,14 @@ export default function MapScreen() {
             bearing={position ? bearingDegrees(position, navTo) : 0}
             heading={heading}
             mapBearing={bearing}
-            eta={navDistance != null ? formatEta(etaSeconds(navDistance, speed.current.speed())) : '—'}
+            eta={
+              navDistance != null
+                ? formatEta(etaSeconds(routeLeft ?? navDistance, speed.current.speed())) +
+                  (routeLeft != null ? ` · до конца ${formatDistance(routeLeft)}` : '')
+                : '—'
+            }
             arrived={arrived}
+            compassPoor={compassPoor}
             compact={landscape}
             onClose={() => setNav(null)}
           />
@@ -1177,6 +1209,15 @@ export default function MapScreen() {
             title="Вести сюда"
             icon="navigation-variant"
             onPress={() => startNav({ type: 'marker', id: selectedMarker.id })}
+          />
+        )}
+        {selectedMarker && selectedMarker.kind === 'arrow' && selectedMarker.points && selectedMarker.points.length >= 2 && position && (
+          <Button
+            title="Вести по маршруту"
+            icon="map-marker-path"
+            onPress={() =>
+              startNav({ type: 'route', id: selectedMarker.id, idx: routeStart(selectedMarker.points!, position) })
+            }
           />
         )}
         {selectedMarker && mortar.isMortar && selectedMarker.kind !== 'arrow' && (

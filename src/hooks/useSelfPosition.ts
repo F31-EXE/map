@@ -24,6 +24,8 @@ export function useSelfPosition(enabled = true) {
   const heading = useRef<number | null>(null);
   // Compass reading on its own, so the compass works before the first GPS fix.
   const [compass, setCompass] = useState<number | null>(null);
+  // The compass says it isn't calibrated (wave the phone in a figure eight).
+  const [compassPoor, setCompassPoor] = useState(false);
 
   useEffect(() => {
     if (!enabled) return;
@@ -43,7 +45,9 @@ export function useSelfPosition(enabled = true) {
         setStatus('granted');
 
         const onFix = (loc: Location.LocationObject) => {
-          const course = loc.coords.heading != null && loc.coords.heading >= 0 ? loc.coords.heading : null;
+          // GPS course only means something while moving; standing still it's noise.
+          const moving = loc.coords.speed != null && loc.coords.speed > 1;
+          const course = moving && loc.coords.heading != null && loc.coords.heading >= 0 ? loc.coords.heading : null;
           setPosition({
             lat: loc.coords.latitude,
             lng: loc.coords.longitude,
@@ -77,11 +81,24 @@ export function useSelfPosition(enabled = true) {
         if (Platform.OS === 'web') {
           subs.push({ remove: watchWebCompass(onRawHeading) });
         } else {
+          // One north only: true north once the phone has given it (it needs a location
+          // fix), magnetic until then. Switching back and forth jumped by the magnetic
+          // declination (~13° around Yekaterinburg) with every reading.
+          let useTrue = false;
+          let poorSince: number | null = null;
           try {
             subs.push(
               await Location.watchHeadingAsync((h) => {
-                const raw = h.trueHeading >= 0 ? h.trueHeading : h.magHeading;
-                if (raw >= 0) onRawHeading(raw);
+                if (h.trueHeading >= 0) useTrue = true;
+                const raw = useTrue ? h.trueHeading : h.magHeading;
+                // Calibration 0 = garbage (tens of degrees off): skip it, and tell the user
+                // when the compass stays uncalibrated for a few seconds.
+                const now = Date.now();
+                if (h.accuracy <= 1) poorSince = poorSince ?? now;
+                else poorSince = null;
+                setCompassPoor(poorSince != null && now - poorSince > 3000);
+                if (h.accuracy === 0 || raw < 0) return;
+                onRawHeading(raw);
               })
             );
           } catch {
@@ -100,5 +117,5 @@ export function useSelfPosition(enabled = true) {
     };
   }, [enabled]);
 
-  return { position, status, heading: compass ?? position?.heading ?? null };
+  return { position, status, heading: compass ?? position?.heading ?? null, compassPoor };
 }
