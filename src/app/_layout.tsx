@@ -12,6 +12,7 @@ import '../services/backgroundLocation';
 import { installErrorRecorder, recordError } from '../services/crashGuard';
 import { KEYS, saveJson } from '../lib/storage';
 import { OverlaysProvider } from '../state/overlays';
+import { RegionsProvider } from '../state/regions';
 import { SessionProvider } from '../state/session';
 import { ChatProvider } from '../state/chat';
 import { GameProvider } from '../state/game';
@@ -49,6 +50,7 @@ export default function RootLayout() {
         <GameProvider>
           <ChatProvider>
             <OverlaysProvider>
+              <RegionsProvider>
               <StatusBar style="light" />
               <Stack
                 screenOptions={{
@@ -62,6 +64,7 @@ export default function RootLayout() {
               >
                 <Stack.Screen name="(tabs)" options={{ headerShown: false, title: 'Карта' }} />
                 <Stack.Screen name="maps" options={{ title: 'Карты полигона' }} />
+                <Stack.Screen name="regions" options={{ title: 'Схемы регионов' }} />
                 <Stack.Screen name="side" options={{ title: 'Командование стороной' }} />
                 <Stack.Screen name="game" options={{ title: 'Большая игра' }} />
                 <Stack.Screen name="scan" options={{ title: 'Сканировать QR', presentation: 'modal' }} />
@@ -70,6 +73,7 @@ export default function RootLayout() {
                 <Stack.Screen name="replay" options={{ title: 'Записи игр' }} />
               </Stack>
               <NightFilter />
+              </RegionsProvider>
             </OverlaysProvider>
           </ChatProvider>
         </GameProvider>

@@ -28,6 +28,7 @@ import {
 import { OFFLINE_SUPPORTED, offlineRootUri } from '../../services/offlineMaps';
 import { markerErrorText } from '../../services/teams';
 import { useOverlays } from '../../state/overlays';
+import { useRegions } from '../../state/regions';
 import { useSession, type MarkerScope } from '../../state/session';
 import { useSide, type OrderTarget } from '../../state/side';
 import { useNight } from '../../state/night';
@@ -331,6 +332,18 @@ export default function MapScreen() {
     saveJson(KEYS.baseLayer, id);
   };
 
+  // Offline schematic regions: drawn by the «Схема офлайн» layer.
+  const regions = useRegions();
+  const vectorRegions = useMemo(
+    () => regions.local.map((r) => ({ id: r.id, bbox: r.bbox, maxzoom: r.maxzoom })),
+    [regions.local]
+  );
+  const { showRequest } = regions;
+  useEffect(() => {
+    if (showRequest) chooseLayer('offline-scheme');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showRequest]);
+
   // Publish own position to the team (throttled inside the session), and as a game tech
   // to the whole game.
   const { reportPosition } = session;
@@ -593,6 +606,7 @@ export default function MapScreen() {
         onMemberPress={onMemberPress}
         onViewChanged={setView}
         offline={offline}
+        vectorRegions={vectorRegions}
         onFollowChanged={setFollow}
         onOverlayError={onOverlayError}
         bottomInset={hudTop == null ? undefined : height - hudTop + 6}
@@ -1244,6 +1258,12 @@ export default function MapScreen() {
                 key={l.id}
                 onPress={() => {
                   tap();
+                  // Nothing downloaded yet: the schematic layer would be empty.
+                  if (l.id === 'offline-scheme' && regions.local.length === 0) {
+                    setLayerPicker(false);
+                    router.push('/regions');
+                    return;
+                  }
                   chooseLayer(l.id);
                 }}
                 style={[styles.layerCard, selected && styles.layerCardSelected]}
@@ -1253,7 +1273,9 @@ export default function MapScreen() {
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.layerTitle}>{l.title}</Text>
-                  <Text style={styles.layerProvider}>{l.provider}</Text>
+                  <Text style={styles.layerProvider}>
+                    {l.id === 'offline-scheme' && regions.local.length === 0 ? 'скачать регион →' : l.provider}
+                  </Text>
                 </View>
                 {selected && <Icon name="check-circle" size={20} color={C.accent} />}
               </Pressable>

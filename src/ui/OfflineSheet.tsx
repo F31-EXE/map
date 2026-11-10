@@ -1,3 +1,4 @@
+import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Alert, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
@@ -55,11 +56,31 @@ export function OfflineSheet({
       <View>
         <Text style={styles.title}>Карта без интернета</Text>
         <Text style={styles.sub}>
-          {OFFLINE_SUPPORTED
-            ? `Скачивается то, что сейчас на экране: ${def?.title ?? 'подложка'}.`
-            : 'Скачивание карт работает в приложении на телефоне.'}
+          {!OFFLINE_SUPPORTED
+            ? 'Скачивание карт работает в приложении на телефоне.'
+            : def
+              ? `Участок: скачивается то, что сейчас на экране: ${def.title}.`
+              : 'Сейчас включена «Схема офлайн»: она уже работает без интернета.'}
         </Text>
       </View>
+
+      {OFFLINE_SUPPORTED && (
+        <Pressable
+          onPress={() => {
+            tap();
+            onClose();
+            router.push('/regions');
+          }}
+          style={({ pressed }) => [styles.regions, pressed && { opacity: 0.7 }]}
+        >
+          <Icon name="map-check-outline" size={24} color={C.accent} />
+          <View style={{ flex: 1 }}>
+            <Text style={styles.regionsTitle}>Регион целиком — схема</Text>
+            <Text style={styles.sub}>Вся область без интернета: дороги, дома, леса. Сотни мегабайт, а не гигабайты.</Text>
+          </View>
+          <Icon name="chevron-right" size={22} color={C.faint} />
+        </Pressable>
+      )}
 
       {download ? (
         <View style={{ gap: 10 }}>
@@ -126,6 +147,17 @@ export function OfflineSheet({
 }
 
 const styles = StyleSheet.create({
+  regions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    padding: 14,
+    borderRadius: R.md,
+    borderWidth: 1,
+    borderColor: C.lineStrong,
+    backgroundColor: C.elevated,
+  },
+  regionsTitle: { color: C.text, fontFamily: F.semibold, fontSize: 16 },
   title: { color: C.text, fontSize: 22, fontFamily: F.bold },
   sub: { color: C.dim, fontSize: 14, fontFamily: F.regular, marginTop: 2, lineHeight: 19 },
   row: { flexDirection: 'row', gap: 8 },

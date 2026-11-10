@@ -861,6 +861,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     // Profile and game data on the phone; downloaded maps and display settings stay.
     const keep = new Set<string>([
       KEYS.offlineAreas,
+      KEYS.vectorRegions,
       KEYS.overlays,
       KEYS.baseLayer,
       KEYS.regionPrompted,

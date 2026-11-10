@@ -37,6 +37,8 @@
       maxZoom: 19,
       tiles: [['https://tile.openstreetmap.org/{z}/{x}/{y}.png', '© OpenStreetMap']],
     },
+    // Downloaded regions (vector, OpenStreetMap via Protomaps): works with no network.
+    'offline-scheme': { crs: L.CRS.EPSG3857, maxZoom: 15, vector: true, tiles: [] },
     topo: {
       crs: L.CRS.EPSG3857,
       maxZoom: 17,
@@ -188,6 +190,10 @@
       // Forces every layer to re-project on 'viewreset'.
       map.setView(center, zoom, { reset: true });
     }
+    if (def.vector) {
+      drawVector();
+      return;
+    }
     def.tiles.forEach(function (t, i) {
       new OfflineTileLayer(t[0], {
         attribution: t[1],
@@ -199,6 +205,68 @@
         urlIndex: i,
       }).addTo(baseGroup);
     });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Offline schematic map: one vector layer per downloaded region (PMTiles files on the
+  // phone). The page can't read byte ranges of local files, so it asks the app for them.
+  // ---------------------------------------------------------------------------
+  var vectorRegions = [];
+  var pmPending = {};
+  var pmSeq = 0;
+
+  function BridgeSource(id) {
+    this.id = id;
+  }
+  BridgeSource.prototype.getKey = function () {
+    return this.id;
+  };
+  BridgeSource.prototype.getBytes = function (offset, length) {
+    var id = this.id;
+    return new Promise(function (resolve, reject) {
+      var k = ++pmSeq;
+      pmPending[k] = { resolve: resolve, reject: reject };
+      post('pmRead', { k: k, id: id, offset: offset, length: length });
+    });
+  };
+
+  function pmData(p) {
+    var q = pmPending[p.k];
+    if (!q) return;
+    delete pmPending[p.k];
+    if (p.error) return q.reject(new Error(p.error));
+    var bin = atob(p.b64);
+    var bytes = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    q.resolve({ data: bytes.buffer });
+  }
+
+  function drawVector() {
+    if (!window.protomapsL || !window.pmtiles) return;
+    vectorRegions.forEach(function (r) {
+      var b = r.bbox; // [west, south, east, north]
+      protomapsL
+        .leafletLayer({
+          url: new pmtiles.PMTiles(new BridgeSource(r.id)),
+          flavor: 'light',
+          lang: 'ru',
+          maxDataZoom: r.maxzoom || 15,
+          maxZoom: 21,
+          // Each region draws only over its own area, so regions sit side by side.
+          bounds: [
+            [b[1], b[0]],
+            [b[3], b[2]],
+          ],
+          attribution: '© OpenStreetMap, Protomaps',
+        })
+        .addTo(baseGroup);
+    });
+  }
+
+  function setVectorRegions(list) {
+    vectorRegions = list || [];
+    var def = BASE_LAYERS[currentBase];
+    if (def && def.vector) drawBase(def, currentBase);
   }
 
   function setOffline(p) {
@@ -1930,6 +1998,8 @@
     setAnalysis: setAnalysis,
     setGrid: setGrid,
     setOffline: setOffline,
+    setVectorRegions: setVectorRegions,
+    pmData: pmData,
     setMembers: setMembers,
     setMarkers: setMarkers,
     setMortar: setMortar,

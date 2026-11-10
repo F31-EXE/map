@@ -46,6 +46,8 @@ export const KEYS = {
   techGame: 'tacmap.techGame',
   /** Game tech's map: every fighter, or commanders only. */
   techShowAll: 'tacmap.techShowAll',
+  /** Downloaded offline schematic regions (see src/services/vectorRegions.ts). */
+  vectorRegions: 'tacmap.vectorRegions',
 } as const;
 
 export async function loadJson<T>(key: string, fallback: T): Promise<T> {

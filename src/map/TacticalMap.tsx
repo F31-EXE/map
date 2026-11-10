@@ -5,18 +5,19 @@ import { isArea } from '../lib/geofence';
 import { BALL_RADIUS, TECH_COLOR } from '../lib/gameModes';
 import { isAdminKind, isOrder, MARKER_KINDS } from '../lib/markerKinds';
 import { ROLES, type RoleId } from '../lib/roles';
+import { readRange } from '../services/vectorRegions';
 import type { Bounds } from '../lib/tiles';
 import type { GridMode, LatLng, Member, OverlayMeta, SelfPosition, TacMarker } from '../lib/types';
 import { loadOverlayPayload } from '../services/overlays';
 import { MapFrame, type MapFrameHandle } from './MapFrame';
 
-export type BaseLayerId = 'yandex-sat' | 'yandex-hybrid' | 'yandex-map' | 'esri-sat' | 'osm' | 'topo';
+export type BaseLayerId = 'yandex-sat' | 'yandex-hybrid' | 'yandex-map' | 'esri-sat' | 'osm' | 'topo' | 'offline-scheme';
 
 export const BASE_LAYERS: {
   id: BaseLayerId;
   title: string;
   provider: string;
-  icon: 'satellite-variant' | 'layers-outline' | 'map-outline' | 'earth' | 'terrain' | 'map-legend';
+  icon: 'satellite-variant' | 'layers-outline' | 'map-outline' | 'earth' | 'terrain' | 'map-legend' | 'map-check-outline';
 }[] = [
   { id: 'yandex-sat', title: 'Спутник', provider: 'Яндекс', icon: 'satellite-variant' },
   { id: 'yandex-hybrid', title: 'Гибрид', provider: 'Яндекс', icon: 'layers-outline' },
@@ -24,6 +25,7 @@ export const BASE_LAYERS: {
   { id: 'esri-sat', title: 'Спутник', provider: 'Esri', icon: 'earth' },
   { id: 'topo', title: 'Топо', provider: 'OpenTopoMap', icon: 'terrain' },
   { id: 'osm', title: 'Схема', provider: 'OpenStreetMap', icon: 'map-legend' },
+  { id: 'offline-scheme', title: 'Схема офлайн', provider: 'скачанные регионы', icon: 'map-check-outline' },
 ];
 
 /** Positions older than this are drawn faded. */
@@ -66,6 +68,8 @@ type Props = {
   onHeadingUpChanged?: (on: boolean) => void;
   /** Downloaded base-layer areas (native only): tiles load from disk first. */
   offline?: { root: string; areas: unknown[] } | null;
+  /** Downloaded schematic regions for the «Схема офлайн» layer (native only). */
+  vectorRegions?: { id: string; bbox: number[]; maxzoom: number }[];
   members: Member[];
   /** Own uid — excluded from the members layer (drawn as `self`). */
   selfId: string | null;
@@ -202,10 +206,13 @@ export function TacticalMap(props: Props) {
     if (ready) send({ type: 'setNight', payload: { on: Boolean(night) } });
   }, [ready, generation, night, send]);
 
-  const { offline } = props;
+  const { offline, vectorRegions } = props;
   useEffect(() => {
     if (ready) send({ type: 'setOffline', payload: offline ?? null });
   }, [ready, generation, offline, send]);
+  useEffect(() => {
+    if (ready) send({ type: 'setVectorRegions', payload: vectorRegions ?? [] });
+  }, [ready, generation, vectorRegions, send]);
 
   useEffect(() => {
     if (ready) send({ type: 'setFollow', payload: { follow: props.follow } });
@@ -343,6 +350,17 @@ export function TacticalMap(props: Props) {
       }
       const p = msg.payload;
       switch (msg.type) {
+        case 'pmRead': {
+          // The schematic map reads its region files a byte range at a time.
+          let reply: { k: number; b64?: string; error?: string };
+          try {
+            reply = { k: p.k, b64: readRange(String(p.id), Number(p.offset), Number(p.length)) };
+          } catch (e) {
+            reply = { k: p.k, error: (e as Error).message || 'read failed' };
+          }
+          send({ type: 'pmData', payload: reply });
+          break;
+        }
         case 'ready':
           sentOverlays.current.clear();
           loadedOverlays.current.clear();

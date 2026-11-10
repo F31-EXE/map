@@ -27,8 +27,8 @@ concurrency:
 
 env:
   TAG: offline-regions
-  # A push rebuilds only these (a check that the builder still works).
-  PUSH_REGIONS: sverdlovsk,sevastopol,russia-overview
+  # Regions a push rebuilds (a change to the builder rebuilds everything).
+  PUSH_REGIONS: all
 
 jobs:
   plan:

@@ -16,6 +16,9 @@ const leafletCss = read(join(leafletDir, 'dist/leaflet.css'));
 const heatJs = read(join(dirname(require.resolve('leaflet.heat/package.json')), 'dist/leaflet-heat.js'));
 // Map rotation (two-finger gesture, heading-up); patches Leaflet, so it loads right after it.
 const rotateJs = read(join(dirname(require.resolve('leaflet-rotate/package.json')), 'dist/leaflet-rotate.js'));
+// Offline schematic maps: vector tiles from PMTiles region files drawn on canvas.
+const pmtilesJs = read(join(dirname(require.resolve('pmtiles/package.json')), 'dist/pmtiles.js'));
+const protomapsJs = read(join(dirname(require.resolve('protomaps-leaflet/package.json')), 'dist/protomaps-leaflet.js'));
 const appJs = read(join(root, 'src/map/web/map.js'));
 const appCss = read(join(root, 'src/map/web/map.css'));
 
@@ -35,6 +38,8 @@ const html = `<!DOCTYPE html>
 <script>${safe(leafletJs)}</script>
 <script>${safe(rotateJs)}</script>
 <script>${safe(heatJs)}</script>
+<script>${safe(pmtilesJs)}</script>
+<script>${safe(protomapsJs)}</script>
 <script>${safe(appJs)}</script>
 </body>
 </html>`;
