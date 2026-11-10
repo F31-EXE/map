@@ -92,7 +92,9 @@ jobs:
               id: r.id, name: r.name, bbox: r.bbox.split(",").map(Number), maxzoom: r.maxzoom, bytes, build: process.env.BUILD,
             }));
           '
-          gh release upload "$TAG" "out/$id.pmtiles" "out/$id.json" --clobber
+          # The map file first: a region is listed only once its map is there.
+          gh release upload "$TAG" "out/$id.pmtiles" --clobber
+          gh release upload "$TAG" "out/$id.json" --clobber
 
   index:
     needs: [plan, extract]
@@ -110,5 +112,7 @@ jobs:
           mkdir -p meta
           gh release download "$TAG" --pattern '*.json' --dir meta --clobber
           rm -f meta/regions.json
+          # Skip regions whose map file isn't on the release (e.g. a failed upload).
+          gh release view "$TAG" --json assets --jq '.assets[].name' > meta/assets.txt
           node scripts/regions/index.mjs meta regions.json "https://github.com/${{ github.repository }}/releases/download/$TAG"
           gh release upload "$TAG" regions.json --clobber

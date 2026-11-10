@@ -28,7 +28,8 @@ export const REGIONS = [
   { id: 'zabaykalsky', name: 'Забайкальский край' },
   { id: 'kamchatka', name: 'Камчатский край' },
   { id: 'krasnodar', name: 'Краснодарский край' },
-  { id: 'krasnoyarsk', name: 'Красноярский край' },
+  // Over GitHub's 2 GB per-file limit at zoom 15 (mostly taiga and tundra).
+  { id: 'krasnoyarsk', name: 'Красноярский край', maxzoom: 14 },
   { id: 'perm', name: 'Пермский край' },
   { id: 'primorsky', name: 'Приморский край' },
   { id: 'stavropol', name: 'Ставропольский край' },
