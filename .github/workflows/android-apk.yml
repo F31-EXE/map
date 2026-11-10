@@ -4,10 +4,17 @@
 # One-time setup: expo.dev → Account settings → Access tokens → Create; paste the token
 # into the repository secret EXPO_TOKEN (Settings → Secrets and variables → Actions).
 # Run: Actions → Android APK → Run workflow; the APK is under the run's Artifacts.
+# Target expo-android / expo-ios / expo-all queues a cloud build on Expo instead.
 name: Android APK
 
 on:
   workflow_dispatch:
+    inputs:
+      target:
+        description: 'apk — собрать APK здесь; expo-android / expo-ios / expo-all — запустить сборку на серверах Expo (видна на expo.dev)'
+        type: choice
+        default: apk
+        options: [apk, expo-android, expo-ios, expo-all]
 
 permissions:
   contents: read
@@ -17,7 +24,28 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Cloud build on Expo's servers (preview profile, internal distribution): the build
+  # and its install link/QR show up on expo.dev; the job only queues it.
+  expo:
+    if: ${{ inputs.target != '' && inputs.target != 'apk' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Queue the build on Expo
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          TARGET: ${{ inputs.target }}
+        run: |
+          platform="${TARGET#expo-}"
+          npx -y eas-cli@latest build --platform "$platform" --profile preview --non-interactive --no-wait
+
   apk:
+    if: ${{ inputs.target == '' || inputs.target == 'apk' }}
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
