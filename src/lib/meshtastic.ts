@@ -18,6 +18,20 @@ export const PORT = { text: 1, position: 3, nodeInfo: 4, admin: 6, private: 256 
 export const BROADCAST = 0xffffffff;
 /** Data.payload limit (Constants.DATA_PAYLOAD_LEN). */
 export const MAX_PAYLOAD = 233;
+
+/** Bytes a ToRadio adds around a payload in `sendPacket` (checked in test/lora.test.ts). */
+export const TO_RADIO_OVERHEAD = 30;
+
+/**
+ * Largest payload whose ToRadio write fits one Bluetooth packet with this ATT MTU.
+ * ESP32 boards (Heltec V3) take a 512-byte MTU; nRF52 boards (Heltec T114, RAK4631)
+ * stop at 247, iPhones often at 185 — a bigger write then needs a long write, which
+ * not every radio firmware handles. Unknown MTU: assume the nRF52 limit.
+ */
+export function payloadForMtu(mtu: number | null | undefined): number {
+  const m = mtu && mtu >= 23 ? mtu : 247;
+  return Math.max(100, Math.min(MAX_PAYLOAD, m - 3 - TO_RADIO_OVERHEAD));
+}
 /** Channel slot the squad channel takes on every radio. */
 export const SQUAD_CHANNEL = 1;
 export const SQUAD_CHANNEL_NAME = 'GrimMap';

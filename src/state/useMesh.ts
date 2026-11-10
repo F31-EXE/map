@@ -170,11 +170,11 @@ export function useMesh(me: {
           if (now - last < radioPace().relayMs) continue;
           radioRelayed.current.set(e.body.uid, now);
         }
-        const frames = fragment(encodeEnvelope(e, teamId), Math.floor(Math.random() * 0xffff));
+        const frames = fragment(encodeEnvelope(e, teamId), Math.floor(Math.random() * 0xffff), radio.maxPayload());
         if (frames) outbox.current.push(e, frames);
       }
     },
-    [teamId, radioPace]
+    [teamId, radioPace, radio.maxPayload]
   );
 
   const nearbyOn = Boolean(enabled && available && teamId && uid);

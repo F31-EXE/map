@@ -8,9 +8,11 @@ import {
   hasSquadChannel,
   MAX_PAYLOAD,
   nodeIdText,
+  payloadForMtu,
   sendPacket,
   setSquadChannel,
   squadPsk,
+  TO_RADIO_OVERHEAD,
   wantConfig,
 } from '../src/lib/meshtastic.ts';
 import { Fields, utf8Clip, utf8Decode, utf8Encode, Writer } from '../src/lib/protobuf.ts';
@@ -216,4 +218,18 @@ test('position rate backs off as the radio net grows, keeping the air under ~25%
     assert.ok(heartbeatMs >= minMs * 3);
   }
   assert.ok(radioPosIntervals(20).minMs >= 140_000);
+});
+
+test('radio writes fit one Bluetooth packet (nRF52 boards like the Heltec T114)', () => {
+  // The constant matches what sendPacket really adds around a full payload.
+  const full = sendPacket({ channel: 1, portnum: 256, payload: new Uint8Array(MAX_PAYLOAD), id: 0xffffffff, wantResponse: true });
+  assert.ok(full.length - MAX_PAYLOAD <= TO_RADIO_OVERHEAD);
+  for (const mtu of [185, 247, 512, null]) {
+    const max = payloadForMtu(mtu);
+    const write = sendPacket({ channel: 1, portnum: 256, payload: new Uint8Array(max), id: 0xffffffff, wantResponse: true });
+    assert.ok(write.length <= (mtu ?? 247) - 3, `mtu ${mtu}: ${write.length} bytes`);
+    const frames = fragment(new Uint8Array(1000), 7, max)!;
+    assert.ok(frames.every((f) => f.length <= max));
+  }
+  assert.equal(payloadForMtu(512), MAX_PAYLOAD);
 });

@@ -1,5 +1,5 @@
 /**
- * Link to a Meshtastic radio (Heltec V3 and the like) over Bluetooth LE, through
+ * Link to a Meshtastic radio (Heltec V3, Heltec T114 and the like) over Bluetooth LE, through
  * react-native-ble-plx. Handles scanning, connecting, the config handshake and
  * reading/writing the phone API; protocol details are in src/lib/meshtastic.ts.
  * Not in Expo Go or on the web: `radioSupported` is false there.
@@ -14,6 +14,7 @@ import {
   MT_FROM_NUM,
   MT_FROM_RADIO,
   MT_SERVICE,
+  payloadForMtu,
   MT_TO_RADIO,
   wantConfig,
   type MtChannel,
@@ -117,6 +118,8 @@ export function scanRadios(onFound: (d: RadioDevice) => void, onError: (e: strin
 /** One open connection to one radio. */
 export class RadioLink {
   private device: Device | null = null;
+  /** Largest payload per packet over this Bluetooth link (see payloadForMtu). */
+  maxPayload = payloadForMtu(null);
   private subs: Subscription[] = [];
   private reading = false;
   private readAgain = false;
@@ -144,6 +147,7 @@ export class RadioLink {
       return;
     }
     this.device = await d.discoverAllServicesAndCharacteristics();
+    this.maxPayload = payloadForMtu(this.device.mtu);
     this.subs.push(
       m.onDeviceDisconnected(this.id, (e) => {
         this.stopTimers();

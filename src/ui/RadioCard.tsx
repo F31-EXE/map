@@ -29,7 +29,7 @@ export function RadioCard({ radio, inTeam, peers }: { radio: Radio; inTeam: bool
       <Card style={{ gap: 8 }}>
         <Header />
         <Text style={styles.sub}>
-          Связь через LoRa-рации Meshtastic (Heltec V3 и другие) на километры без интернета. Работает в приложении для
+          Связь через LoRa-рации Meshtastic (Heltec V3, Heltec T114 и другие) на километры без интернета. Работает в приложении для
           Android и iPhone, в браузере недоступна.
         </Text>
       </Card>
@@ -159,8 +159,8 @@ function RadioPicker({
     <Sheet visible={visible} onClose={onClose}>
       <Text style={styles.sheetTitle}>Найти рацию</Text>
       <Text style={styles.sub}>
-        Включите рацию рядом с телефоном. При первом подключении телефон спросит PIN-код: он на экране рации (у Heltec
-        V3 по умолчанию 123456).
+        Включите рацию рядом с телефоном (Heltec V3, T114 и другие с прошивкой Meshtastic). При первом подключении
+        телефон спросит PIN-код: он появится на экране рации, а если экрана нет или PIN фиксированный — 123456.
       </Text>
       {radio.error && <Text style={[styles.sub, { color: C.danger }]}>{radio.error}</Text>}
       {found.length === 0 ? (

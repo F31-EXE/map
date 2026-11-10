@@ -5,6 +5,7 @@ import {
   decodeUser,
   hasSquadChannel,
   packetId,
+  payloadForMtu,
   PORT,
   sendPacket,
   setSquadChannel,
@@ -48,6 +49,8 @@ export type Radio = {
   setupSquadChannel: () => Promise<void>;
   /** Sends one payload on the squad channel. */
   send: (portnum: number, payload: Uint8Array) => Promise<void>;
+  /** Largest payload per packet the connected radio's Bluetooth link takes in one write. */
+  maxPayload: () => number;
 };
 
 /** Connection to the user's Meshtastic radio; packets go to `onPacket`. */
@@ -221,6 +224,8 @@ export function useRadio(teamId: string | null, onPacket: (p: MtPacket) => void)
     [squadReady]
   );
 
+  const maxPayload = useCallback(() => link.current?.maxPayload ?? payloadForMtu(null), []);
+
   const nodeList = useMemo(() => [...nodes.values()].sort((a, b) => b.lastHeard - a.lastHeard), [nodes]);
 
   return {
@@ -237,5 +242,6 @@ export function useRadio(teamId: string | null, onPacket: (p: MtPacket) => void)
     forget,
     setupSquadChannel,
     send,
+    maxPayload,
   };
 }
