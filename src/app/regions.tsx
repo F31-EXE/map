@@ -33,7 +33,7 @@ export default function RegionsScreen() {
   if (!g.supported) {
     return (
       <View style={styles.center}>
-        <Text style={styles.sub}>Схемы регионов скачиваются в приложении на телефоне.</Text>
+        <Text style={styles.sub}>Схемы регионов работают в приложении на телефоне и в Chrome или Edge на компьютере.</Text>
       </View>
     );
   }
@@ -51,13 +51,21 @@ export default function RegionsScreen() {
             Схема OpenStreetMap: дороги, дома, леса, реки и названия. Регион скачивается целиком и работает без
             интернета. На карте: слои → «Схема офлайн».
           </Text>
+          {!g.directDownload && (
+            <Text style={styles.sub}>
+              На компьютере: «Скачать» сохранит файл региона в «Загрузки», затем кнопкой со стрелкой вверх добавьте
+              этот файл в карту — он хранится внутри браузера и работает без интернета.
+            </Text>
+          )}
           {g.local.length > 0 && (
             <Button
               title="Показать схему на карте"
               icon="map-check-outline"
               onPress={() => {
                 g.showOnMap();
-                router.back();
+                // Opened by a link (browser): there's no map screen behind this one.
+                if (router.canGoBack()) router.back();
+                else router.replace('/');
               }}
             />
           )}
@@ -126,6 +134,9 @@ export default function RegionsScreen() {
                     onPress={() => g.download(remote)}
                   />
                 )}
+                {remote && !g.directDownload && (
+                  <RoundButton icon="file-upload-outline" label="Добавить скачанный файл" onPress={() => g.addFile(remote)} />
+                )}
                 {mine && (
                   <RoundButton
                     icon="trash-can-outline"
@@ -157,7 +168,7 @@ function RoundButton({
   onPress,
   accent,
 }: {
-  icon: 'play' | 'pause' | 'close' | 'download' | 'update' | 'trash-can-outline';
+  icon: 'play' | 'pause' | 'close' | 'download' | 'update' | 'trash-can-outline' | 'file-upload-outline';
   label: string;
   onPress: () => void;
   accent?: boolean;

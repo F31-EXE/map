@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
-import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { timeAgo } from '../lib/geo';
 import { nodeIdText } from '../lib/meshtastic';
-import type { RadioDevice } from '../services/meshRadio';
+import { pickRadio, type RadioDevice } from '../services/meshRadio';
 import type { Radio } from '../state/useRadio';
 
 import { Button, Card, Eyebrow, Icon, Sheet, tap } from './components';
@@ -29,8 +29,8 @@ export function RadioCard({ radio, inTeam, peers }: { radio: Radio; inTeam: bool
       <Card style={{ gap: 8 }}>
         <Header />
         <Text style={styles.sub}>
-          Связь через LoRa-рации Meshtastic (Heltec V3, Heltec T114 и другие) на километры без интернета. Работает в приложении для
-          Android и iPhone, в браузере недоступна.
+          Связь через LoRa-рации Meshtastic (Heltec V3, Heltec T114 и другие) на километры без интернета. Работает в
+          приложении для Android и iPhone и на компьютере в Chrome или Edge (Bluetooth или USB-кабель).
         </Text>
       </Card>
     );
@@ -81,7 +81,7 @@ export function RadioCard({ radio, inTeam, peers }: { radio: Radio; inTeam: bool
             </View>
           )}
           <View style={styles.row}>
-            <Button title="Другая рация" kind="secondary" style={{ flex: 1 }} onPress={() => setPicking(true)} />
+            {!WEB && <Button title="Другая рация" kind="secondary" style={{ flex: 1 }} onPress={() => setPicking(true)} />}
             <Button
               title="Отключить"
               kind="secondary"
@@ -92,6 +92,7 @@ export function RadioCard({ radio, inTeam, peers }: { radio: Radio; inTeam: bool
               }}
             />
           </View>
+          {WEB && <WebPick radio={radio} />}
         </>
       ) : (
         <>
@@ -99,7 +100,7 @@ export function RadioCard({ radio, inTeam, peers }: { radio: Radio; inTeam: bool
             Позиции, чат, метки и приказы через LoRa-рацию: километры без интернета и сотовой связи. Рации отряда
             сами настроят закрытый канал, ключ общий для отряда.
           </Text>
-          <Button title="Найти рацию" icon="bluetooth-connect" onPress={() => setPicking(true)} />
+          {WEB ? <WebPick radio={radio} /> : <Button title="Найти рацию" icon="bluetooth-connect" onPress={() => setPicking(true)} />}
         </>
       )}
       <RadioPicker
@@ -112,6 +113,30 @@ export function RadioCard({ radio, inTeam, peers }: { radio: Radio; inTeam: bool
         }}
       />
     </Card>
+  );
+}
+
+const WEB = Platform.OS === 'web';
+
+/** Browser: the radio comes from the browser's own chooser, opened by a click. */
+function WebPick({ radio }: { radio: Radio }) {
+  const pick = (kind: 'ble' | 'usb') => {
+    tap();
+    pickRadio(kind)
+      .then((d) => d && radio.choose(d))
+      .catch((e: Error) => Alert.alert('Рация не подключилась', e.message));
+  };
+  return (
+    <View style={{ gap: 8 }}>
+      <View style={styles.row}>
+        <Button title="Bluetooth" icon="bluetooth-connect" kind="secondary" style={{ flex: 1 }} onPress={() => pick('ble')} />
+        <Button title="USB-кабель" icon="usb" kind="secondary" style={{ flex: 1 }} onPress={() => pick('usb')} />
+      </View>
+      <Text style={styles.sub}>
+        USB-кабель надёжнее Bluetooth на ноутбуке. Если рации нет в списке USB, поставьте драйвер CP210x или CH340
+        (зависит от платы); у T114 и RAK драйвер не нужен.
+      </Text>
+    </View>
   );
 }
 

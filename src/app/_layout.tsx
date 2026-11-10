@@ -19,10 +19,12 @@ import { GameProvider } from '../state/game';
 import { SideProvider } from '../state/side';
 import { C, F } from '../ui/theme';
 import { NightFilter } from '../ui/NightFilter';
+import { setupPwa } from '../services/pwa';
 import { installWebAlert } from '../ui/webAlert';
 
 installErrorRecorder();
 installWebAlert();
+setupPwa();
 
 // Keep the logo up until the fonts are in, so the app doesn't flash blank.
 SplashScreen.preventAutoHideAsync().catch(() => {});

@@ -3,7 +3,10 @@ import { Alert } from 'react-native';
 
 import { KEYS, loadJson, saveJson } from '../lib/storage';
 import {
+  DIRECT_DOWNLOAD,
   fetchIndex,
+  importRegionFile,
+  openRegionDownload,
   hasRegionFile,
   RegionDownload,
   REGIONS_SUPPORTED,
@@ -25,6 +28,9 @@ type RegionsState = {
   local: LocalRegion[];
   downloads: Record<string, DownloadState>;
   download: (r: RegionInfo) => void;
+  /** Browser: downloads come as files; this adds one (from a click). */
+  directDownload: boolean;
+  addFile: (r: RegionInfo) => void;
   pause: (id: string) => void;
   resume: (id: string) => void;
   cancel: (id: string) => void;
@@ -110,7 +116,23 @@ export function RegionsProvider({ children }: { children: ReactNode }) {
       refreshIndex,
       local,
       downloads,
+      directDownload: DIRECT_DOWNLOAD,
+      addFile: (r) => {
+        setProgress(r.id, { received: 0, total: r.bytes, paused: false });
+        importRegionFile(r.id, (p) => setProgress(r.id, p))
+          .then((ok) => {
+            if (!ok) return;
+            const { url: _url, ...info } = r;
+            saveLocal((cur) => [...cur.filter((x) => x.id !== r.id), info]);
+          })
+          .catch((e: Error) => Alert.alert('Файл не добавился', e.message))
+          .finally(() => setProgress(r.id, null));
+      },
       download: (r) => {
+        if (!DIRECT_DOWNLOAD) {
+          openRegionDownload(r);
+          return;
+        }
         if (tasks.current.has(r.id)) return;
         const t = new RegionDownload(r, (p) => setProgress(r.id, p));
         tasks.current.set(r.id, t);

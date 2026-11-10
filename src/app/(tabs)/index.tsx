@@ -213,7 +213,18 @@ export default function MapScreen() {
     [side.mapMembers, game.mapMembers]
   );
   const { overlays, focusRequest, requestFocus, viewRequest, requestView, areas, download } = useOverlays();
-  const { position, status, heading } = useSelfPosition();
+  const { position: gps, status, heading } = useSelfPosition();
+  // A laptop has no GPS (and no location at all offline): use the connected radio's
+  // GPS when the device's own fix is missing or stale.
+  const radioPos = session.mesh.radio.myPosition;
+  const position = useMemo(() => {
+    const now = Date.now();
+    if (gps && now - gps.timestamp < 60_000) return gps;
+    if (radioPos && now - radioPos.at < 10 * 60_000) {
+      return { lat: radioPos.lat, lng: radioPos.lng, accuracy: 15, heading, timestamp: radioPos.at };
+    }
+    return gps;
+  }, [gps, radioPos, heading]);
   const mapRef = useRef<TacticalMapHandle>(null);
 
   const [baseLayer, setBaseLayer] = useState<BaseLayerId>('yandex-sat');
@@ -322,11 +333,16 @@ export default function MapScreen() {
   const gunAt: LatLng | null = mortar.fixed ?? (position ? { lat: position.lat, lng: position.lng } : null);
   const centeredOnce = useRef(false);
 
+  // The saved layer arrives a moment later; a layer chosen meanwhile wins.
+  const layerChosen = useRef(false);
   useEffect(() => {
-    loadJson<BaseLayerId>(KEYS.baseLayer, 'yandex-sat').then(setBaseLayer);
+    loadJson<BaseLayerId>(KEYS.baseLayer, 'yandex-sat').then((id) => {
+      if (!layerChosen.current) setBaseLayer(id);
+    });
   }, []);
 
   const chooseLayer = (id: BaseLayerId) => {
+    layerChosen.current = true;
     setBaseLayer(id);
     setLayerPicker(false);
     saveJson(KEYS.baseLayer, id);

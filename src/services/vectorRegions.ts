@@ -11,6 +11,8 @@ import { Platform } from 'react-native';
 import { toBase64 } from '../lib/base64';
 
 export const REGIONS_SUPPORTED = Platform.OS !== 'web';
+/** Phones download straight into the app; browsers go through a downloaded file. */
+export const DIRECT_DOWNLOAD = true;
 
 const BASE = 'https://github.com/F31-EXE/map/releases/download/offline-regions';
 export const INDEX_URL = `${BASE}/regions.json`;
@@ -28,7 +30,12 @@ export type RegionInfo = {
 };
 
 export async function fetchIndex(): Promise<RegionInfo[]> {
-  const r = await fetch(INDEX_URL, { headers: { 'Cache-Control': 'no-cache' } });
+  let r: Response;
+  try {
+    r = await fetch(INDEX_URL, { headers: { 'Cache-Control': 'no-cache' } });
+  } catch {
+    throw new Error('Нет интернета: список регионов появится, когда будет сеть. Скачанные схемы работают');
+  }
   if (!r.ok) throw new Error(`Список регионов недоступен (${r.status})`);
   const data = (await r.json()) as { regions?: RegionInfo[] };
   return (data.regions ?? []).filter((x) => x && typeof x.id === 'string' && Array.isArray(x.bbox) && x.bbox.length === 4);
@@ -123,4 +130,12 @@ export function readRange(id: string, offset: number, length: number): string {
   }
   h.offset = offset;
   return toBase64(h.readBytes(length));
+}
+
+/** Browser only (see vectorRegions.web.ts). */
+export function openRegionDownload(_region: RegionInfo): void {}
+
+/** Browser only (see vectorRegions.web.ts). */
+export async function importRegionFile(_id: string, _onProgress: (p: Progress) => void): Promise<boolean> {
+  return false;
 }

@@ -5,6 +5,7 @@ import { Alert, Pressable, StyleSheet, Text, TextInput, View } from 'react-nativ
 import { formatClock } from '../lib/geo';
 import { TILE_LAYERS, type Bounds } from '../lib/tiles';
 import { MAX_TOTAL_TILES, OFFLINE_SUPPORTED, planDownload } from '../services/offlineMaps';
+import { REGIONS_SUPPORTED } from '../services/vectorRegions';
 import { useOverlays } from '../state/overlays';
 
 import { Button, Eyebrow, Icon, Sheet, tap } from './components';
@@ -64,7 +65,7 @@ export function OfflineSheet({
         </Text>
       </View>
 
-      {OFFLINE_SUPPORTED && (
+      {REGIONS_SUPPORTED && (
         <Pressable
           onPress={() => {
             tap();

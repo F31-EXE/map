@@ -41,6 +41,9 @@ jobs:
           EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID: '54382632962'
           EXPO_PUBLIC_FIREBASE_APP_ID: 1:54382632962:web:19462dc47ad704c997071b
         run: npx expo export --platform web --output-dir dist
+      # Offline region list next to the app: browsers can't read GitHub release files.
+      - name: Region list
+        run: curl -fsSL -o dist/regions.json https://github.com/${{ github.repository }}/releases/download/offline-regions/regions.json || echo '{"regions":[]}' > dist/regions.json
       # Single-page app: unknown paths (/map/team, /map/join?team=…) load index.html.
       - run: cp dist/index.html dist/404.html && touch dist/.nojekyll
       - uses: actions/upload-pages-artifact@v3

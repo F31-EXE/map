@@ -351,14 +351,11 @@ export function TacticalMap(props: Props) {
       const p = msg.payload;
       switch (msg.type) {
         case 'pmRead': {
-          // The schematic map reads its region files a byte range at a time.
-          let reply: { k: number; b64?: string; error?: string };
-          try {
-            reply = { k: p.k, b64: readRange(String(p.id), Number(p.offset), Number(p.length)) };
-          } catch (e) {
-            reply = { k: p.k, error: (e as Error).message || 'read failed' };
-          }
-          send({ type: 'pmData', payload: reply });
+          // The schematic map reads its region files a byte range at a time (sync on
+          // phones, async in the browser).
+          new Promise<string>((resolve) => resolve(readRange(String(p.id), Number(p.offset), Number(p.length))))
+            .then((b64) => send({ type: 'pmData', payload: { k: p.k, b64 } }))
+            .catch((e: Error) => send({ type: 'pmData', payload: { k: p.k, error: e.message || 'read failed' } }));
           break;
         }
         case 'ready':

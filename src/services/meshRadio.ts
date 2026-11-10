@@ -8,19 +8,9 @@ import { PermissionsAndroid, Platform } from 'react-native';
 import type { BleManager, Device, Subscription } from 'react-native-ble-plx';
 
 import { fromBase64, toBase64 } from '../lib/base64';
-import {
-  decodeFromRadio,
-  heartbeat,
-  MT_FROM_NUM,
-  MT_FROM_RADIO,
-  MT_SERVICE,
-  payloadForMtu,
-  MT_TO_RADIO,
-  wantConfig,
-  type MtChannel,
-  type MtNode,
-  type MtPacket,
-} from '../lib/meshtastic';
+import { MT_FROM_NUM, MT_FROM_RADIO, MT_SERVICE, MT_TO_RADIO, payloadForMtu } from '../lib/meshtastic';
+
+import { RadioSession, type RadioDevice, type RadioListener } from './radioSession';
 
 type BleModule = typeof import('react-native-ble-plx');
 
@@ -51,17 +41,12 @@ function getManager(): BleManager | null {
 
 export const radioSupported = Platform.OS !== 'web' && ble != null;
 
-export type RadioDevice = { id: string; name: string; rssi: number | null };
+export type { RadioDevice, RadioListener, RadioState } from './radioSession';
 
-export type RadioState = 'off' | 'connecting' | 'syncing' | 'ready';
-
-export type RadioListener = {
-  onState: (s: RadioState, error?: string) => void;
-  onMyNode: (num: number) => void;
-  onChannels: (c: MtChannel[]) => void;
-  onNode: (n: MtNode) => void;
-  onPacket: (p: MtPacket) => void;
-};
+/** Web only (browser chooser for Bluetooth or USB); phones scan instead. */
+export async function pickRadio(_kind: 'ble' | 'usb'): Promise<RadioDevice | null> {
+  return null;
+}
 
 export async function requestRadioPermissions(): Promise<boolean> {
   if (Platform.OS !== 'android') return true;
@@ -115,25 +100,15 @@ export function scanRadios(onFound: (d: RadioDevice) => void, onError: (e: strin
   };
 }
 
-/** One open connection to one radio. */
-export class RadioLink {
+/** One open connection to one radio over the phone's Bluetooth. */
+export class RadioLink extends RadioSession {
   private device: Device | null = null;
-  /** Largest payload per packet over this Bluetooth link (see payloadForMtu). */
-  maxPayload = payloadForMtu(null);
   private subs: Subscription[] = [];
   private reading = false;
   private readAgain = false;
-  private writes: Promise<void> = Promise.resolve();
-  private channels: MtChannel[] = [];
-  private nonce = 0;
-  private beat: ReturnType<typeof setInterval> | null = null;
-  private closed = false;
-  private listener: RadioListener;
-  readonly id: string;
 
   constructor(id: string, listener: RadioListener) {
-    this.id = id;
-    this.listener = listener;
+    super(id, listener);
   }
 
   async open(): Promise<void> {
@@ -149,36 +124,21 @@ export class RadioLink {
     this.device = await d.discoverAllServicesAndCharacteristics();
     this.maxPayload = payloadForMtu(this.device.mtu);
     this.subs.push(
-      m.onDeviceDisconnected(this.id, (e) => {
-        this.stopTimers();
-        if (!this.closed) this.listener.onState('off', e?.message ?? 'Связь с рацией потеряна');
-      }),
+      m.onDeviceDisconnected(this.id, (e) => this.lost(e?.message ?? 'Связь с рацией потеряна')),
       this.device.monitorCharacteristicForService(MT_SERVICE, MT_FROM_NUM, (e) => {
         if (!e) this.drain();
       })
     );
-    this.listener.onState('syncing');
-    await this.requestConfig();
-    // Keeps the radio's phone API session alive.
-    this.beat = setInterval(() => this.write(heartbeat()).catch(() => {}), 5 * 60_000);
+    await this.startSession();
   }
 
-  /** Asks the radio for its node info, channels and node list (also after changes). */
-  async requestConfig(): Promise<void> {
-    this.channels = [];
-    this.nonce = (Math.floor(Math.random() * 0x7ffffffe) + 1) >>> 0;
-    await this.write(wantConfig(this.nonce));
+  protected async send(bytes: Uint8Array): Promise<void> {
+    if (!this.device) throw new Error('Рация не подключена');
+    await this.device.writeCharacteristicWithResponseForService(MT_SERVICE, MT_TO_RADIO, toBase64(bytes));
   }
 
-  /** Writes one ToRadio message; writes are queued so they never overlap. */
-  write(bytes: Uint8Array): Promise<void> {
-    const run = this.writes.then(async () => {
-      if (!this.device || this.closed) throw new Error('Рация не подключена');
-      await this.device.writeCharacteristicWithResponseForService(MT_SERVICE, MT_TO_RADIO, toBase64(bytes));
-      this.drain();
-    });
-    this.writes = run.catch(() => {});
-    return run;
+  protected afterWrite(): void {
+    this.drain();
   }
 
   /** Reads FromRadio until the radio has nothing more to say. */
@@ -203,44 +163,6 @@ export class RadioLink {
     } finally {
       this.reading = false;
     }
-  }
-
-  private handle(bytes: Uint8Array) {
-    let msg;
-    try {
-      msg = decodeFromRadio(bytes);
-    } catch {
-      return;
-    }
-    switch (msg.type) {
-      case 'myInfo':
-        this.listener.onMyNode(msg.nodeNum);
-        break;
-      case 'channel':
-        this.channels = [...this.channels.filter((c) => c.index !== msg.channel.index), msg.channel];
-        break;
-      case 'node':
-        this.listener.onNode(msg.node);
-        break;
-      case 'packet':
-        this.listener.onPacket(msg.packet);
-        break;
-      case 'configComplete':
-        if (msg.nonce === this.nonce) {
-          this.listener.onChannels(this.channels);
-          this.listener.onState('ready');
-        }
-        break;
-      case 'rebooted':
-        // Settings changed and the radio restarted: ask for everything again.
-        this.requestConfig().catch(() => {});
-        break;
-    }
-  }
-
-  private stopTimers() {
-    if (this.beat) clearInterval(this.beat);
-    this.beat = null;
   }
 
   async close(): Promise<void> {

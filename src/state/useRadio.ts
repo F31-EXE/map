@@ -51,6 +51,8 @@ export type Radio = {
   send: (portnum: number, payload: Uint8Array) => Promise<void>;
   /** Largest payload per packet the connected radio's Bluetooth link takes in one write. */
   maxPayload: () => number;
+  /** Our own radio's GPS position, if it has GPS (laptops have none of their own). */
+  myPosition: { lat: number; lng: number; at: number } | null;
 };
 
 /** Connection to the user's Meshtastic radio; packets go to `onPacket`. */
@@ -65,6 +67,7 @@ export function useRadio(teamId: string | null, onPacket: (p: MtPacket) => void)
   const onPacketRef = useRef(onPacket);
   onPacketRef.current = onPacket;
   const myNodeRef = useRef<number | null>(null);
+  const [myPosition, setMyPosition] = useState<{ lat: number; lng: number; at: number } | null>(null);
 
   const updateNode = useCallback((num: number, patch: Partial<MtNode>) => {
     setNodes((cur) => {
@@ -125,9 +128,21 @@ export function useRadio(teamId: string | null, onPacket: (p: MtPacket) => void)
         onChannels: setChannels,
         onNode: (n) => {
           if (n.num !== myNodeRef.current) updateNode(n.num, n);
+          else if (n.lat != null && n.lng != null) setMyPosition({ lat: n.lat, lng: n.lng, at: Date.now() });
         },
         onPacket: (p) => {
-          if (p.from === myNodeRef.current) return;
+          if (p.from === myNodeRef.current) {
+            // Our radio's own position broadcast: its GPS fix.
+            if (p.portnum === PORT.position) {
+              try {
+                const pos = decodePosition(p.payload);
+                if (pos) setMyPosition({ ...pos, at: Date.now() });
+              } catch {
+                // Not a position after all.
+              }
+            }
+            return;
+          }
           // Radios announce names and (with GPS) positions; keep the list current.
           const heard = p.rxTime || Math.floor(Date.now() / 1000);
           try {
@@ -243,5 +258,6 @@ export function useRadio(teamId: string | null, onPacket: (p: MtPacket) => void)
     setupSquadChannel,
     send,
     maxPayload,
+    myPosition,
   };
 }
