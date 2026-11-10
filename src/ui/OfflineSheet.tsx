@@ -3,7 +3,7 @@ import { Alert, Pressable, StyleSheet, Text, TextInput, View } from 'react-nativ
 
 import { formatClock } from '../lib/geo';
 import { TILE_LAYERS, type Bounds } from '../lib/tiles';
-import { OFFLINE_SUPPORTED, planDownload } from '../services/offlineMaps';
+import { MAX_TOTAL_TILES, OFFLINE_SUPPORTED, planDownload } from '../services/offlineMaps';
 import { useOverlays } from '../state/overlays';
 
 import { Button, Eyebrow, Icon, Sheet, tap } from './components';
@@ -111,7 +111,9 @@ export function OfflineSheet({
                 {!plan
                   ? '…'
                   : tooBig
-                    ? `Не поместится: ≈ ${size(plan.mb)}${plan.freeMb != null ? `, свободно ${size(plan.freeMb)}` : ''}. Приблизьте карту или выберите меньшую детализацию.`
+                    ? plan.tooMany
+                      ? `Слишком большой район за один раз: ≈ ${size(plan.mb)}, ${Math.round(plan.tiles / 1000)} тыс. квадратиков карты (можно до ${MAX_TOTAL_TILES / 1000} тыс.). Приблизьте карту, выберите меньшую детализацию или скачайте район по частям.`
+                      : `Не поместится на телефон: ≈ ${size(plan.mb)}, свободно ${size(plan.freeMb ?? 0)}. Приблизьте карту или выберите меньшую детализацию.`
                     : `≈ ${size(plan.mb)}${plan.parts.length > 1 ? `, скачается частями: ${plan.parts.length}` : ''}, масштабы ${minZoom}–${Math.min(maxZoom, def.maxZoom)}${plan.freeMb != null ? `. Свободно ${size(plan.freeMb)}` : ''}. Лучше качать по Wi-Fi.`}
               </Text>
             </View>

@@ -121,7 +121,9 @@ export function RegionPrompt({ position, layer }: { position: LatLng | null; lay
           <Text style={[styles.sub, { flex: 1, marginTop: 0 }]}>
             {plan.fits
               ? `≈ ${size(plan.mb)}${plan.freeMb != null ? `, свободно ${size(plan.freeMb)}` : ''}. Лучше качать по Wi-Fi.`
-              : 'Не поместится на телефон: выберите радиус поменьше.'}
+              : plan.tooMany
+                ? 'Слишком большой район за один раз: выберите радиус поменьше.'
+                : 'Не поместится на телефон: выберите радиус поменьше.'}
           </Text>
         </View>
       )}

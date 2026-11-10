@@ -54,7 +54,9 @@ export async function saveAreas(list: OfflineArea[]): Promise<void> {
  */
 export function planDownload(layer: string, b: Bounds, minZoom: number, maxZoom: number) {
   const def = TILE_LAYERS[layer];
-  if (!def) return { parts: [] as Bounds[], tiles: 0, mb: 0, freeMb: null as number | null, fits: false };
+  if (!def) {
+    return { parts: [] as Bounds[], tiles: 0, mb: 0, freeMb: null as number | null, fits: false, tooMany: false, noRoom: false };
+  }
   const top = Math.min(maxZoom, def.maxZoom);
   const tiles = countTiles(b, minZoom, top, def.crs) * def.urls.length;
   const parts = tiles > MAX_TOTAL_TILES ? [] : splitToFit(b, minZoom, top, def.crs, MAX_TILES, def.urls.length);
@@ -68,8 +70,10 @@ export function planDownload(layer: string, b: Bounds, minZoom: number, maxZoom:
     // Not available (web).
   }
   // Leave room for the phone itself.
-  const fits = tiles <= MAX_TOTAL_TILES && (freeMb == null || mb < freeMb - 1024);
-  return { parts, tiles, mb, freeMb, fits };
+  const tooMany = tiles > MAX_TOTAL_TILES;
+  const noRoom = freeMb != null && mb >= freeMb - 1024;
+  const fits = !tooMany && !noRoom;
+  return { parts, tiles, mb, freeMb, fits, tooMany, noRoom };
 }
 
 export function newArea(layer: string, name: string, b: Bounds, minZoom: number, maxZoom: number): OfflineArea {
