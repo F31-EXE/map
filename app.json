@@ -63,13 +63,14 @@
         "expo-image-picker",
         {
           "photosPermission": "Нужно, чтобы выбрать фото для аватара.",
+          "cameraPermission": "Нужно, чтобы делать фото-метки для отряда: снимок с точкой и направлением на карте.",
           "microphonePermission": false
         }
       ],
       [
         "expo-camera",
         {
-          "cameraPermission": "Нужно, чтобы сканировать QR-коды отрядов и сторон.",
+          "cameraPermission": "Нужно, чтобы сканировать QR-коды отрядов и сторон и делать фото-метки для отряда.",
           "microphonePermission": false,
           "recordAudioAndroid": false
         }
