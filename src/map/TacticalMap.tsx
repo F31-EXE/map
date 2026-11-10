@@ -2,7 +2,7 @@ import { useCallback, useEffect, useImperativeHandle, useRef, useState, type Ref
 
 import { formatClock } from '../lib/geo';
 import { isArea } from '../lib/geofence';
-import { BALL_RADIUS, TECH_COLOR } from '../lib/gameModes';
+import { BALL_RADIUS, BALL_SPEED, checkpointsPassed, TECH_COLOR } from '../lib/gameModes';
 import { isAdminKind, isOrder, MARKER_KINDS } from '../lib/markerKinds';
 import { lowPower } from '../lib/power';
 import { ROLES, type RoleId } from '../lib/roles';
@@ -265,7 +265,15 @@ export function TacticalMap(props: Props) {
         zone: m.zone ?? null,
         ball:
           m.kind === 'ball'
-            ? { lat: m.lat, lng: m.lng, r: BALL_RADIUS, push: m.ball?.push ?? 0, goal: Boolean(m.ball?.goal) }
+            ? {
+                lat: m.lat,
+                lng: m.lng,
+                r: BALL_RADIUS,
+                push: m.ball?.push ?? 0,
+                goal: Boolean(m.ball?.goal),
+                passed: checkpointsPassed(m.points ?? [], m.ball?.progress ?? 0),
+                speed: Math.max(0, m.ball?.push ?? 0) * BALL_SPEED,
+              }
             : null,
         personal: Boolean(m.personal),
         time: formatClock(m.createdAt),

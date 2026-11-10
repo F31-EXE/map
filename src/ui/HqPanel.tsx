@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { formatClock, timeAgo } from '../lib/geo';
+import { checkpointsPassed } from '../lib/gameModes';
 import { isOrder, MARKER_KINDS } from '../lib/markerKinds';
 import { lowPower, powerText } from '../lib/power';
 import { ROLES } from '../lib/roles';
@@ -23,7 +24,7 @@ const MARK_NEWS_MS = 2 * 3600_000;
 /**
  * HQ for wide screens (a laptop at the command post): every squad and fighter with
  * status, link and battery, and a feed of what happened (deaths, orders, enemy marks,
- * captures, goals). Fighter events are seen from the moment this panel is open; marker
+ * captures, convoys). Fighter events are seen from the moment this panel is open; marker
  * events come from the markers themselves, so they include what happened before.
  */
 export function HqPanel({
@@ -75,6 +76,30 @@ export function HqPanel({
     if (fresh.length) setFighterEvents((cur) => [...fresh, ...cur].slice(0, MAX_EVENTS));
   }, [fighters]);
 
+  // Convoy checkpoints: seen as they're passed while the panel is open.
+  const [convoyEvents, setConvoyEvents] = useState<Event[]>([]);
+  const passed = useRef(new Map<string, number>());
+  useEffect(() => {
+    const fresh: Event[] = [];
+    const t = Date.now();
+    for (const m of markers) {
+      if (m.kind !== 'ball' || !m.points?.length) continue;
+      const n = checkpointsPassed(m.points, m.ball?.progress ?? 0);
+      const prev = passed.current.get(m.id);
+      passed.current.set(m.id, n);
+      if (prev == null || n <= prev || m.ball?.goal) continue;
+      fresh.push({
+        key: `cp:${m.id}:${n}`,
+        t,
+        icon: 'flag-checkered',
+        color: C.info,
+        text: `Конвой стороны «${sideName(m.owner)}» прошёл чекпойнт ${n} из ${m.points.length - 1}`,
+        target: { lat: m.lat, lng: m.lng },
+      });
+    }
+    if (fresh.length) setConvoyEvents((cur) => [...fresh, ...cur].slice(0, MAX_EVENTS));
+  }, [markers, sideName]);
+
   // Marker events: straight from the markers (orders, enemy, captures, goals).
   const markerEvents = useMemo(() => {
     const out: Event[] = [];
@@ -93,15 +118,15 @@ export function HqPanel({
           out.push({ key: `cap:${m.id}:${e.t}`, t: e.t, icon: m.kind === 'flag' ? 'flag' : 'hexagon-outline', color: C.info, text: `${what} — за стороной «${sideName(e.s)}»`, target: at });
         }
       } else if (m.kind === 'ball' && m.ball?.goal) {
-        out.push({ key: `goal:${m.id}`, t: m.ball.goal, icon: 'soccer', color: C.accent, text: `ГОЛ! Мяч стороны «${sideName(m.owner)}»`, target: at });
+        out.push({ key: `goal:${m.id}`, t: m.ball.goal, icon: 'truck-check', color: C.accent, text: `Конвой стороны «${sideName(m.owner)}» доставлен на базу`, target: at });
       }
     }
     return out;
   }, [markers, sideName]);
 
   const events = useMemo(
-    () => [...fighterEvents, ...markerEvents].sort((a, b) => b.t - a.t).slice(0, MAX_EVENTS),
-    [fighterEvents, markerEvents]
+    () => [...fighterEvents, ...convoyEvents, ...markerEvents].sort((a, b) => b.t - a.t).slice(0, MAX_EVENTS),
+    [fighterEvents, convoyEvents, markerEvents]
   );
 
   const total = fighters.length;

@@ -7,7 +7,7 @@ import {
   mdiCamera,
   mdiFlag,
   mdiHexagonOutline,
-  mdiSoccer,
+  mdiTruck,
   mdiFire,
   mdiFlagVariant,
   mdiMapMarkerRadius,
@@ -50,7 +50,7 @@ type KindDef = {
     | 'camera'
     | 'flag'
     | 'hexagon-outline'
-    | 'soccer';
+    | 'truck';
   /** Same icon as an SVG path, for markers drawn inside the map WebView. */
   path: string;
   color: string;
@@ -78,7 +78,7 @@ export const MARKER_KINDS: Record<MarkerKind, KindDef> = {
   // Game modes (placed by game techs).
   flag: { title: 'Флаг', icon: 'flag', path: mdiFlag, color: '#F2F2F2' },
   sector: { title: 'Сектор', icon: 'hexagon-outline', path: mdiHexagonOutline, color: '#C3CCC6' },
-  ball: { title: 'Мяч', icon: 'soccer', path: mdiSoccer, color: '#F2F2F2' },
+  ball: { title: 'Конвой', icon: 'truck', path: mdiTruck, color: '#F2F2F2' },
   'order-move': { title: 'Двигаться сюда', icon: 'run-fast', path: mdiRunFast, color: '#B4E34A' },
   'order-attack': { title: 'Атаковать', icon: 'sword-cross', path: mdiSwordCross, color: '#FF4D4D' },
   'order-defend': { title: 'Оборонять', icon: 'shield-half-full', path: mdiShieldHalfFull, color: '#3D9BFF' },

@@ -7,7 +7,7 @@
  *   - flags: captured by a fighter on the spot; a side scores a point per minute held;
  *   - tickets: each side's lives; every «Я убит» costs one;
  *   - control zone (WARDOGS): per-fighter points summed per side;
- *   - football: each side rolls its ball along its arrow to the other side's base.
+ *   - convoy: a side escorts its convoy along a route of checkpoints to the enemy base.
  */
 import { distanceMeters } from './geo';
 import { insidePolygon } from './geofence';
@@ -189,14 +189,19 @@ export function leaders(score: Record<string, number>): string[] {
 }
 
 // ---------------------------------------------------------------------------
-// Football: a ball per side on an arrow drawn by a tech (start → opponent's base).
+// Convoy (the `ball` marker kind, kept for compatibility): a convoy per side on a
+// route drawn by a tech — start, checkpoints at every turn, the enemy base at the end.
 // ---------------------------------------------------------------------------
 
-/** Fighters within this many meters of a ball push it. */
+/** Fighters within this many meters of a convoy push or block it. */
 export const BALL_RADIUS = 10;
-/** Meters per minute a ball rolls for each fighter of advantage. */
+/**
+ * Meters per minute for each fighter of advantage. With the usual 200–300 m route and
+ * a 20–30 minute round: one free pusher needs the whole round, five need ~5 minutes,
+ * so a convoy only gets through when the escort keeps winning the fight around it.
+ */
 export const BALL_SPEED = 10;
-/** More than this many fighters of advantage don't make a ball any faster. */
+/** Advantage beyond this many fighters doesn't make a convoy any faster. */
 export const BALL_MAX_PUSH = 5;
 
 export type Ball = {
@@ -236,16 +241,28 @@ export function pointAlong(points: LatLng[], d: number): LatLng {
 }
 
 /**
- * Which way a ball goes with these fighters around it, in fighters of advantage:
- * only owners → forward, faster with more of them; only opponents → backward at half
- * the speed; both → never backward: forward by the owners' surplus, else it stands
- * (one owner can hold it against one opponent).
+ * Fighters of advantage around a convoy: each escort pushes, each enemy cancels one
+ * escort (3 escorts and 1 enemy → 2). Equal or more enemies stop it; it never goes
+ * back. At most BALL_MAX_PUSH.
  */
 export function ballPush(owners: number, opponents: number): number {
-  if (owners > 0 && opponents === 0) return Math.min(owners, BALL_MAX_PUSH);
-  if (owners === 0 && opponents > 0) return -Math.min(opponents, BALL_MAX_PUSH) / 2;
-  if (owners > opponents) return Math.min(owners - opponents, BALL_MAX_PUSH);
-  return 0;
+  return Math.max(0, Math.min(owners - opponents, BALL_MAX_PUSH));
+}
+
+/** Distance along the route of each checkpoint (every point after the start; the last is the base). */
+export function routeCheckpoints(points: LatLng[]): number[] {
+  const out: number[] = [];
+  let d = 0;
+  for (let i = 1; i < points.length; i++) {
+    d += distanceMeters(points[i - 1], points[i]);
+    out.push(d);
+  }
+  return out;
+}
+
+/** Checkpoints a convoy has passed at this progress (the base counts as the last one). */
+export function checkpointsPassed(points: LatLng[], progress: number): number {
+  return routeCheckpoints(points).filter((d) => progress >= d - 0.01).length;
 }
 
 /** Living fighters within BALL_RADIUS of the ball: its owners and everyone else. */
@@ -277,15 +294,25 @@ export function rollBall(ball: Ball, length: number, now: number, push: number):
 }
 
 /**
- * Football result: the first goal wins; without one, the ball furthest along its
- * arrow (as a share of its length) — equal shares are a draw (every leader returned).
+ * Convoy result: the first convoy delivered wins. Otherwise the most checkpoints
+ * passed, then the larger share of the route; equal is a draw (every leader). With a
+ * single convoy that didn't make it, the defending sides win.
  */
-export function footballResult(balls: { owner: string; progress: number; length: number; goal?: number | null }[]): string[] {
-  const goals = balls.filter((b) => b.goal).sort((a, b) => (a.goal as number) - (b.goal as number));
-  if (goals.length) return [goals[0].owner];
-  const share: Record<string, number> = {};
-  for (const b of balls) share[b.owner] = Math.round((b.length > 0 ? b.progress / b.length : 0) * 1000);
-  return leaders(share);
+export function convoyResult(
+  convoys: { owner: string; progress: number; length: number; checkpoints: number; goal?: number | null }[],
+  sides: string[] = []
+): string[] {
+  const done = convoys.filter((b) => b.goal).sort((a, b) => (a.goal as number) - (b.goal as number));
+  if (done.length) return [done[0].owner];
+  if (convoys.length === 1) {
+    const defenders = sides.filter((s) => s !== convoys[0].owner);
+    if (defenders.length) return defenders;
+  }
+  const score: Record<string, number> = {};
+  for (const b of convoys) {
+    score[b.owner] = b.checkpoints * 10_000 + Math.round((b.length > 0 ? b.progress / b.length : 0) * 1000);
+  }
+  return leaders(score);
 }
 
 export const SIDE_COLORS = ['#3D9BFF', '#FF4D4D', '#4ADE80', '#FFC83D', '#B79CFF', '#22D3EE'];

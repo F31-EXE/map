@@ -898,7 +898,7 @@ export default function MapScreen() {
             const pts = drawing.points;
             try {
               if (drawing.kind === 'ball') {
-                if (!drawing.sideId) throw new Error('Выберите сторону, чей это мяч');
+                if (!drawing.sideId) throw new Error('Выберите сторону, чей это конвой');
                 await game.addBall(drawing.sideId, pts);
               } else if (drawing.kind === 'arrow') {
                 await session.addMarker(
@@ -1408,7 +1408,7 @@ function DrawBar({
   const n = drawing.points.length;
   const ball = drawing.kind === 'ball';
   const area = drawing.kind !== 'arrow' && !ball;
-  const kinds = sides.length ? [...DRAW_KINDS, { kind: 'ball' as const, label: 'Мяч' }] : DRAW_KINDS;
+  const kinds = sides.length ? [...DRAW_KINDS, { kind: 'ball' as const, label: 'Конвой' }] : DRAW_KINDS;
   return (
     <Glass radius={R.lg} style={[styles.drawBar, { bottom, left, right }]}>
       <View style={styles.drawRow}>
@@ -1440,13 +1440,13 @@ function DrawBar({
       </View>
       <View style={styles.drawHeader}>
         <Icon
-          name={area ? MARKER_KINDS[drawing.kind as AreaKind].icon : ball ? 'soccer' : 'draw'}
+          name={area ? MARKER_KINDS[drawing.kind as AreaKind].icon : ball ? 'truck' : 'draw'}
           size={20}
           color={drawing.color}
         />
         <View style={{ flex: 1 }}>
           <Text style={styles.drawTitle}>
-            {area ? MARKER_KINDS[drawing.kind as AreaKind].title : ball ? 'Путь мяча' : 'Стрелка'} · {n}{' '}
+            {area ? MARKER_KINDS[drawing.kind as AreaKind].title : ball ? 'Маршрут конвоя' : 'Стрелка'} · {n}{' '}
             {n === 1 ? 'точка' : n >= 2 && n <= 4 ? 'точки' : 'точек'}
           </Text>
           <Text style={styles.drawHint} numberOfLines={1}>
@@ -1455,7 +1455,7 @@ function DrawBar({
                 ? 'Обойдите углы полигона: выход за край — вибрация'
                 : 'Обведите зону по углам: вход в неё — вибрация'
               : ball
-                ? 'От старта мяча к базе соперника'
+                ? 'Старт → чекпойнты → база противника'
                 : 'Нажимайте по карте от начала к острию'}
           </Text>
         </View>
@@ -1484,7 +1484,7 @@ function DrawBar({
               style={[styles.drawScope, sd.id === drawing.sideId && { borderColor: sd.color, borderWidth: 2 }]}
             >
               <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: sd.color }} />
-              <Text style={styles.drawScopeText}>Мяч: {sd.name}</Text>
+              <Text style={styles.drawScopeText}>Конвой: {sd.name}</Text>
             </Pressable>
           ))}
         {!area &&

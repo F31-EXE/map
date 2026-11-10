@@ -1,7 +1,7 @@
 import { Alert, StyleSheet, Text, View } from 'react-native';
 
 import { distanceMeters, formatDistance } from '../lib/geo';
-import { BALL_RADIUS, CAPTURE_MINUTES, matchState, pathLength } from '../lib/gameModes';
+import { BALL_MAX_PUSH, BALL_RADIUS, BALL_SPEED, CAPTURE_MINUTES, checkpointsPassed, matchState, pathLength } from '../lib/gameModes';
 import type { SelfPosition, TacMarker } from '../lib/types';
 import { useGame } from '../state/game';
 
@@ -11,7 +11,7 @@ import { C, F, R } from './theme';
 /** Fighters must be this close to a flag to capture it. */
 const FLAG_REACH_M = 25;
 
-/** Card part of a game flag, territory sector or football ball: its state in the match. */
+/** Card part of a game flag, territory sector or convoy: its state in the match. */
 export function HoldPanel({ marker, self }: { marker: TacMarker; self: SelfPosition | null }) {
   const g = useGame();
   const holder = marker.owner ? g.sideName(marker.owner) : 'ничья';
@@ -19,26 +19,29 @@ export function HoldPanel({ marker, self }: { marker: TacMarker; self: SelfPosit
 
   if (marker.kind === 'ball') {
     const b = marker.ball;
-    const len = pathLength(marker.points ?? []);
+    const route = marker.points ?? [];
+    const len = pathLength(route);
     const done = len > 0 ? Math.min(1, (b?.progress ?? 0) / len) : 0;
+    const passed = checkpointsPassed(route, b?.progress ?? 0);
+    const total = Math.max(0, route.length - 1);
     const owner = marker.owner ? g.sideName(marker.owner) : '—';
     const mine = g.mySideId != null && marker.owner === g.mySideId;
+    const push = b?.push ?? 0;
     const state = b?.goal
-      ? 'ГОЛ'
-      : (b?.push ?? 0) > 0
-        ? 'катится вперёд'
-        : (b?.push ?? 0) < 0
-          ? 'откатывается назад'
-          : 'стоит';
+      ? 'доставлен на базу'
+      : push > 0
+        ? `идёт · ${push * BALL_SPEED} м/мин`
+        : 'стоит';
     return (
       <View style={styles.box}>
-        <Row label="Мяч стороны" value={owner} color={marker.owner ? g.sideColor(marker.owner) : undefined} />
-        <Row label="Пройдено" value={`${Math.round(done * 100)} % · ${formatDistance((1 - done) * len)} до ворот`} />
+        <Row label="Конвой стороны" value={owner} color={marker.owner ? g.sideColor(marker.owner) : undefined} />
+        <Row label="Чекпойнты" value={`${passed} из ${total}`} />
+        <Row label="Пройдено" value={`${Math.round(done * 100)} % · до базы ${formatDistance((1 - done) * len)}`} />
         <Row label="Сейчас" value={state} />
         <Text style={styles.sub}>
           {mine
-            ? `Ваш мяч: встаньте в ${BALL_RADIUS} м от него, чтобы катить к концу стрелки. Чем вас больше, тем быстрее; соперники рядом его тормозят, а одни — откатывают назад.`
-            : `Мяч соперника: встаньте в ${BALL_RADIUS} м от него, чтобы остановить, а без его игроков рядом — откатить назад.`}
+            ? `Ваш конвой: встаньте в ${BALL_RADIUS} м от него, чтобы вести. Каждый боец рядом даёт ${BALL_SPEED} м/мин (до ${BALL_MAX_PUSH} бойцов), каждый противник рядом отнимает одного. Противников столько же или больше — конвой стоит.`
+            : `Конвой противника: встаньте в ${BALL_RADIUS} м от него — каждый из вас останавливает одного из его сопровождения. Сколько их, столько и вас — конвой стоит.`}
         </Text>
       </View>
     );

@@ -6,7 +6,8 @@ import { pointsAt, scoreMinute } from '../lib/game';
 import {
   ballCounts,
   ballPush,
-  footballResult,
+  checkpointsPassed,
+  convoyResult,
   heldMinutes,
   holdings,
   matchState,
@@ -58,6 +59,10 @@ export type GameScores = {
   sectorMinutes: Record<string, number>;
   /** Football: share of its arrow each side's ball has rolled (0..1), and who scored. */
   balls: Record<string, number>;
+  /** Convoy checkpoints passed per side, out of `checkpointsTotal` (the base included). */
+  checkpoints: Record<string, number>;
+  checkpointsTotal: Record<string, number>;
+  /** The side whose convoy reached the enemy base first. */
   goal: string | null;
   winners: string[];
 };
@@ -478,12 +483,20 @@ export function GameProvider({ children }: { children: ReactNode }) {
       owner: b.owner as string,
       progress: b.ball?.progress ?? 0,
       length: pathLength(b.points ?? []),
+      checkpoints: checkpointsPassed(b.points ?? [], b.ball?.progress ?? 0),
+      total: Math.max(0, (b.points?.length ?? 1) - 1),
       goal: b.ball?.goal ?? null,
     }));
     const ballShare: Record<string, number> = {};
-    for (const b of ballList) ballShare[b.owner] = b.length > 0 ? b.progress / b.length : 0;
-    const football = footballResult(ballList);
-    const goal = ballList.some((b) => b.goal) ? football[0] : null;
+    const checkpoints: Record<string, number> = {};
+    const checkpointsTotal: Record<string, number> = {};
+    for (const b of ballList) {
+      ballShare[b.owner] = b.length > 0 ? b.progress / b.length : 0;
+      checkpoints[b.owner] = b.checkpoints;
+      checkpointsTotal[b.owner] = b.total;
+    }
+    const convoy = convoyResult(ballList, gameSides.map((s) => s.id));
+    const goal = ballList.some((b) => b.goal) ? convoy[0] : null;
     return {
       tickets: game?.tickets != null ? ticketsLeft(game.tickets, gameSides, players) : null,
       zone: zone ? zonePoints(players, zone.id) : {},
@@ -493,13 +506,15 @@ export function GameProvider({ children }: { children: ReactNode }) {
       sectors: terr.count,
       sectorMinutes: terr.minutes,
       balls: ballShare,
+      checkpoints,
+      checkpointsTotal,
       goal,
       winners: goal
         ? [goal]
         : ms.phase !== 'over'
           ? []
           : ballList.length
-            ? football
+            ? convoy
             : sectors.length
               ? terr.winners
               : [],
@@ -507,6 +522,17 @@ export function GameProvider({ children }: { children: ReactNode }) {
     // `tick` refreshes held minutes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [game, gameSides, players, markers, sectors, balls, zone, tick]);
+
+  // Convoy: the escort's phones buzz at each checkpoint, longer at the enemy base.
+  const myCheckpoints = mySideId ? (scores.checkpoints[mySideId] ?? null) : null;
+  const lastCheckpoints = useRef<number | null>(null);
+  useEffect(() => {
+    const prev = lastCheckpoints.current;
+    lastCheckpoints.current = myCheckpoints;
+    if (prev == null || myCheckpoints == null || myCheckpoints <= prev) return;
+    const delivered = mySideId != null && scores.goal === mySideId;
+    Vibration.vibrate(delivered ? [0, 600, 200, 600, 200, 600] : [0, 300, 150, 300]);
+  }, [myCheckpoints, mySideId, scores.goal]);
 
   // People on the map: techs for everyone (orange diamonds); every side's fighters for techs.
   const mapMembers = useMemo<Member[]>(() => {

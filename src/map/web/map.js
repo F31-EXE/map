@@ -961,11 +961,24 @@
     return g;
   }
 
-  // Football: the side's arrow, its ball where it has rolled to and the push zone around it.
+  // Convoy: the side's route, its checkpoints (filled once passed, the enemy base a
+  // bigger ring), the convoy where it is now and the escort zone around it.
   function buildBall(m) {
     var g = buildArrow(m);
     var b = m.ball;
     var c = escapeHtml(m.color);
+    for (var i = 1; i < m.points.length; i++) {
+      var base = i === m.points.length - 1;
+      var done = i <= (b.passed || 0);
+      L.circleMarker([m.points[i].lat, m.points[i].lng], {
+        radius: base ? 9 : 6,
+        color: '#0B0F0C',
+        weight: 2,
+        fillColor: done ? m.color : '#F2F2F2',
+        fillOpacity: done ? 1 : 0.85,
+        interactive: false,
+      }).addTo(g);
+    }
     L.circle([b.lat, b.lng], {
       radius: b.r,
       color: m.color,
@@ -976,7 +989,7 @@
       fillOpacity: 0.14,
       interactive: false,
     }).addTo(g);
-    var state = b.goal ? 'ГОЛ' : b.push > 0 ? '▶' : b.push < 0 ? '◀' : '';
+    var state = b.goal ? '· ДОСТАВЛЕН' : b.speed > 0 ? '▶ ' + b.speed + ' м/мин' : '■';
     L.marker([b.lat, b.lng], {
       keyboard: false,
       zIndexOffset: 500,

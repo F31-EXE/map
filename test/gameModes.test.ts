@@ -7,7 +7,9 @@ import {
   BALL_SPEED,
   ballCounts,
   ballPush,
-  footballResult,
+  checkpointsPassed,
+  convoyResult,
+  routeCheckpoints,
   pathLength,
   pointAlong,
   rollBall,
@@ -127,17 +129,34 @@ test('flags: minutes held from the capture log; tickets; zone points; leaders', 
   assert.deepEqual(leaders({}), []);
 });
 
-test('football: who pushes the ball', () => {
+test('convoy: each enemy cancels one escort, never backward, at most 5', () => {
   assert.equal(ballPush(0, 0), 0);
-  assert.equal(ballPush(3, 0), 3, 'owners alone: forward, faster with more');
-  assert.equal(ballPush(9, 0), 5, 'capped');
-  assert.equal(ballPush(0, 2), -1, 'opponents alone: back at half speed');
-  assert.equal(ballPush(4, 1), 3, 'owners outnumber: forward by the surplus');
-  assert.equal(ballPush(1, 1), 0, 'one owner holds it');
-  assert.equal(ballPush(1, 3), 0, 'never backward while an owner is there');
+  assert.equal(ballPush(1, 0), 1);
+  assert.equal(ballPush(3, 0), 3, 'escorts alone: faster with more');
+  assert.equal(ballPush(9, 0), 5, 'no faster beyond 5');
+  assert.equal(ballPush(3, 1), 2, 'three push, one enemy: two');
+  assert.equal(ballPush(2, 2), 0, 'equal: stands');
+  assert.equal(ballPush(1, 3), 0, 'more enemies: still stands');
+  assert.equal(ballPush(0, 4), 0, 'enemies alone: stands, never goes back');
+  assert.equal(ballPush(12, 4), 5);
 });
 
-test('football: path, counts and rolling', () => {
+test('convoy: checkpoints along the route', () => {
+  const m = 1 / 111_195;
+  const route = [
+    { lat: 56, lng: 60 },
+    { lat: 56 + 100 * m, lng: 60 },
+    { lat: 56 + 250 * m, lng: 60 },
+  ];
+  const cps = routeCheckpoints(route);
+  assert.equal(cps.length, 2);
+  assert.ok(Math.abs(cps[0] - 100) < 0.5 && Math.abs(cps[1] - 250) < 0.5);
+  assert.equal(checkpointsPassed(route, 50), 0);
+  assert.equal(checkpointsPassed(route, 120), 1);
+  assert.equal(checkpointsPassed(route, pathLength(route)), 2, 'the base is the last checkpoint');
+});
+
+test('convoy: path, counts and rolling', () => {
   const a = { lat: 56, lng: 60 };
   const b = { lat: 56 + 100 / 111_195, lng: 60 };
   const len = pathLength([a, b]);
@@ -155,37 +174,55 @@ test('football: path, counts and rolling', () => {
   assert.deepEqual(c, { owners: 2, opponents: 1 });
 
   let ball: Ball = { progress: 0, at: 0, push: 2, goal: null };
-  ball = rollBall(ball, len, 60_000, -1);
+  ball = rollBall(ball, len, 60_000, 0);
   assert.equal(ball.progress, 2 * BALL_SPEED);
   ball = rollBall(ball, len, 120_000 * 10, 0);
-  assert.equal(ball.progress, 0, 'never behind the start');
+  assert.equal(ball.progress, 2 * BALL_SPEED, 'stands while blocked');
   ball = rollBall({ progress: 95, at: 0, push: 5, goal: null }, len, 60_000, 5);
   assert.equal(ball.progress, len);
   assert.equal(ball.goal, 60_000);
   assert.equal(rollBall(ball, len, 999_999, -5), ball, 'a goal stays');
 });
 
-test('football: result', () => {
+test('convoy: result', () => {
+  const sides = ['blue', 'red'];
   assert.deepEqual(
-    footballResult([
-      { owner: 'blue', progress: 300, length: 300, goal: 5000 },
-      { owner: 'red', progress: 300, length: 300, goal: 4000 },
-    ]),
-    ['red']
+    convoyResult(
+      [
+        { owner: 'blue', progress: 300, length: 300, checkpoints: 3, goal: 5000 },
+        { owner: 'red', progress: 300, length: 300, checkpoints: 3, goal: 4000 },
+      ],
+      sides
+    ),
+    ['red'],
+    'first delivered wins'
   );
   assert.deepEqual(
-    footballResult([
-      { owner: 'blue', progress: 150, length: 300 },
-      { owner: 'red', progress: 100, length: 400 },
-    ]),
-    ['blue']
+    convoyResult(
+      [
+        { owner: 'blue', progress: 150, length: 300, checkpoints: 1 },
+        { owner: 'red', progress: 290, length: 400, checkpoints: 2 },
+      ],
+      sides
+    ),
+    ['red'],
+    'more checkpoints beat a bigger share'
   );
   assert.deepEqual(
-    footballResult([
-      { owner: 'blue', progress: 100, length: 200 },
-      { owner: 'red', progress: 200, length: 400 },
-    ]).sort(),
-    ['blue', 'red']
+    convoyResult(
+      [
+        { owner: 'blue', progress: 100, length: 200, checkpoints: 1 },
+        { owner: 'red', progress: 200, length: 400, checkpoints: 1 },
+      ],
+      sides
+    ).sort(),
+    ['blue', 'red'],
+    'same checkpoints and share: draw'
   );
-  assert.deepEqual(footballResult([{ owner: 'blue', progress: 0, length: 200 }]), []);
+  assert.deepEqual(
+    convoyResult([{ owner: 'blue', progress: 180, length: 250, checkpoints: 2 }], sides),
+    ['red'],
+    'one convoy not delivered: the defenders win'
+  );
+  assert.deepEqual(convoyResult([{ owner: 'blue', progress: 250, length: 250, checkpoints: 3, goal: 1 }], sides), ['blue']);
 });

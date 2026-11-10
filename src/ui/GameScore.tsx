@@ -52,7 +52,7 @@ export function GameScore({ compact }: { compact?: boolean }) {
         <Text style={[styles.win, compact && { fontSize: 12 }]}>
           {sc.winners.length > 1
             ? 'Ничья'
-            : `${sc.goal ? 'Гол! ' : ''}Победа: ${g.sideName(sc.winners[0])}`}
+            : `${sc.goal ? 'Конвой доставлен! ' : ''}Победа: ${g.sideName(sc.winners[0])}`}
         </Text>
       )}
       {shown.map((s) => {
@@ -61,7 +61,9 @@ export function GameScore({ compact }: { compact?: boolean }) {
           hasSectors ? `территории ${sc.sectors[s.id] ?? 0}/9` : null,
           hasFlags ? `флаги ${sc.flags[s.id] ?? 0} · ${sc.flagMinutes[s.id] ?? 0} мин` : null,
           sc.zoneId ? `зона ${sc.zone[s.id] ?? 0}` : null,
-          hasBalls && s.id in sc.balls ? `мяч ${Math.round(sc.balls[s.id] * 100)} %` : null,
+          hasBalls && s.id in sc.balls
+            ? `конвой ${sc.checkpoints[s.id] ?? 0}/${sc.checkpointsTotal[s.id] ?? 0} чекп.`
+            : null,
         ].filter(Boolean);
         return (
           <View key={s.id} style={[styles.row, !compact && styles.side, !compact && { borderColor: s.color + '88' }]}>
