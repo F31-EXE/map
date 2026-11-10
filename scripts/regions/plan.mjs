@@ -24,11 +24,22 @@ async function latestBuild() {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-async function lookup(region) {
-  const q = new URLSearchParams({ q: region.q ?? region.name, countrycodes: 'ru', featureType: 'state', format: 'jsonv2', limit: '1' });
+async function search(params) {
+  const q = new URLSearchParams({ format: 'jsonv2', limit: '1', ...params });
   const r = await fetch(`https://nominatim.openstreetmap.org/search?${q}`, { headers: { 'User-Agent': UA, 'Accept-Language': 'ru' } });
-  if (!r.ok) throw new Error(`Nominatim ${r.status} for ${region.name}`);
+  if (!r.ok) throw new Error(`Nominatim ${r.status} for ${params.q}`);
   const [hit] = await r.json();
+  return hit;
+}
+
+async function lookup(region) {
+  const q = region.q ?? region.name;
+  let hit = await search({ q, countrycodes: 'ru', featureType: 'state' });
+  if (!hit) {
+    // Some subjects aren't rank "state" in Nominatim: a looser query, still in Russia.
+    await sleep(1100);
+    hit = await search({ q, countrycodes: 'ru' });
+  }
   if (!hit) throw new Error(`Nominatim found nothing for ${region.name}`);
   const [s, n, w, e] = hit.boundingbox.map(Number);
   if (e - w > 90 || n - s > 40) throw new Error(`Suspicious bbox for ${region.name}: ${hit.boundingbox}`);

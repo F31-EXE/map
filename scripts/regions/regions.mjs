@@ -1,6 +1,6 @@
 // Russian regions offered as offline schematic maps. `q` is the Nominatim query when
 // the display name isn't enough; `bbox` [west, south, east, north] overrides the lookup
-// (Chukotka crosses the antimeridian).
+// (Chukotka crosses the antimeridian; Crimea and Sevastopol aren't tagged as Russia in OSM).
 export const REGIONS = [
   { id: 'adygea', name: 'Республика Адыгея' },
   { id: 'altai-rep', name: 'Республика Алтай' },
@@ -13,7 +13,7 @@ export const REGIONS = [
   { id: 'karachay-cherkessia', name: 'Карачаево-Черкесская Республика' },
   { id: 'karelia', name: 'Республика Карелия' },
   { id: 'komi', name: 'Республика Коми' },
-  { id: 'crimea', name: 'Республика Крым' },
+  { id: 'crimea', name: 'Республика Крым', bbox: [32.4, 44.35, 36.7, 46.25] },
   { id: 'mari-el', name: 'Республика Марий Эл' },
   { id: 'mordovia', name: 'Республика Мордовия' },
   { id: 'sakha', name: 'Республика Саха (Якутия)' },
@@ -81,7 +81,7 @@ export const REGIONS = [
   { id: 'yaroslavl', name: 'Ярославская область' },
   { id: 'moscow', name: 'Москва' },
   { id: 'saint-petersburg', name: 'Санкт-Петербург' },
-  { id: 'sevastopol', name: 'Севастополь' },
+  { id: 'sevastopol', name: 'Севастополь', bbox: [33.35, 44.38, 33.95, 44.85] },
   { id: 'jewish-ao', name: 'Еврейская автономная область' },
   { id: 'nenets', name: 'Ненецкий автономный округ' },
   { id: 'khanty-mansi', name: 'Ханты-Мансийский автономный округ — Югра', q: 'Ханты-Мансийский автономный округ' },
