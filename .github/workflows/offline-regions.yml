@@ -1,0 +1,114 @@
+# Builds the offline schematic maps the app downloads by region (Карта без интернета →
+# «Регион целиком»): a Protomaps vector extract (OpenStreetMap data, PMTiles) per region,
+# published as assets of the release `offline-regions` together with regions.json, the
+# list the app reads. Runs monthly, by hand (Actions → Offline map regions → Run workflow,
+# regions "all" or ids from scripts/regions/regions.mjs), and on changes to the builder.
+name: Offline map regions
+
+on:
+  workflow_dispatch:
+    inputs:
+      regions:
+        description: 'all, или id регионов через запятую (scripts/regions/regions.mjs)'
+        default: all
+  schedule:
+    - cron: '17 2 3 * *'
+  push:
+    paths:
+      - .github/workflows/offline-regions.yml
+      - scripts/regions/**
+
+permissions:
+  contents: write
+
+concurrency:
+  group: offline-regions
+  cancel-in-progress: false
+
+env:
+  TAG: offline-regions
+  # A push rebuilds only these (a check that the builder still works).
+  PUSH_REGIONS: sverdlovsk,sevastopol,russia-overview
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      source: ${{ steps.plan.outputs.source }}
+      date: ${{ steps.plan.outputs.date }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - id: plan
+        run: node scripts/regions/plan.mjs "${{ github.event_name == 'push' && env.PUSH_REGIONS || inputs.regions || 'all' }}"
+      - name: Make sure the release exists
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --latest=false \
+            --title "Офлайн-карты регионов" \
+            --notes "Схемы регионов для GrimMap без интернета. Данные © участники OpenStreetMap (ODbL), сборка Protomaps."
+
+  extract:
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      max-parallel: 6
+      matrix:
+        region: ${{ fromJson(needs.plan.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pmtiles
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download --repo protomaps/go-pmtiles --pattern '*Linux_x86_64.tar.gz' --dir /tmp/pmtiles
+          tar -xzf /tmp/pmtiles/*.tar.gz -C /tmp/pmtiles
+          sudo install /tmp/pmtiles/pmtiles /usr/local/bin/pmtiles
+          pmtiles version || true
+      - name: Extract ${{ matrix.region.name }}
+        run: |
+          mkdir -p out
+          pmtiles extract "${{ needs.plan.outputs.source }}" "out/${{ matrix.region.id }}.pmtiles" \
+            --bbox="${{ matrix.region.bbox }}" --maxzoom=${{ matrix.region.maxzoom }} --download-threads=4
+          ls -la out
+      - name: Upload
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REGION: ${{ toJson(matrix.region) }}
+          BUILD: ${{ needs.plan.outputs.date }}
+        run: |
+          id="${{ matrix.region.id }}"
+          node -e '
+            const fs = require("fs");
+            const r = JSON.parse(process.env.REGION);
+            const bytes = fs.statSync(`out/${r.id}.pmtiles`).size;
+            fs.writeFileSync(`out/${r.id}.json`, JSON.stringify({
+              id: r.id, name: r.name, bbox: r.bbox.split(",").map(Number), maxzoom: r.maxzoom, bytes, build: process.env.BUILD,
+            }));
+          '
+          gh release upload "$TAG" "out/$id.pmtiles" "out/$id.json" --clobber
+
+  index:
+    needs: [plan, extract]
+    if: ${{ always() && needs.plan.result == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Write regions.json
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p meta
+          gh release download "$TAG" --pattern '*.json' --dir meta --clobber
+          rm -f meta/regions.json
+          node scripts/regions/index.mjs meta regions.json "https://github.com/${{ github.repository }}/releases/download/$TAG"
+          gh release upload "$TAG" regions.json --clobber
