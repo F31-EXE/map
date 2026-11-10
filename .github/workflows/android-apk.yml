@@ -50,7 +50,7 @@ jobs:
           EXPO_PUBLIC_FIREBASE_APP_ID: 1:54382632962:web:19462dc47ad704c997071b
         run: |
           msg="$(git log -1 --pretty=%s)"
-          npx -y eas-cli@latest update --channel preview --platform android --message "$msg" --non-interactive
+          npx -y eas-cli@latest update --channel preview --platform all --message "$msg" --non-interactive
 
   expo:
     if: ${{ inputs.target != '' && inputs.target != 'apk' && inputs.target != 'update' }}
