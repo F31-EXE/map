@@ -64,6 +64,60 @@
     pitchDrag: false,
   }).setView([55.751, 37.618], 10);
   map.attributionControl.setPrefix(false);
+
+  // leaflet-rotate turns the map with any change of angle between the fingers, so a
+  // pinch zoom kept twisting it. Turn only after a deliberate twist (TWIST_DEG), and
+  // never in a pinch that has already zoomed noticeably first.
+  var TWIST_DEG = 18;
+  (function () {
+    var tg = map.touchGestures;
+    if (!tg) return;
+    // The touchstart listener was bound when the handler was enabled: re-bind it.
+    var wasOn = tg.enabled();
+    if (wasOn) tg.disable();
+    var start = tg._onTouchStart;
+    var move = tg._onTouchMove;
+    function angle(e) {
+      var a = e.touches[0];
+      var b = e.touches[1];
+      return (Math.atan2(b.clientY - a.clientY, b.clientX - a.clientX) * 180) / Math.PI;
+    }
+    function spread(e) {
+      var a = e.touches[0];
+      var b = e.touches[1];
+      return Math.hypot(b.clientX - a.clientX, b.clientY - a.clientY);
+    }
+    tg._onTouchStart = function (e) {
+      start.call(this, e);
+      if (!this._gesture) return;
+      this._twist = this._rotating ? 'pending' : 'off';
+      this._twistAngle = angle(e);
+      this._twistSpread = spread(e) || 1;
+    };
+    tg._onTouchMove = function (e) {
+      if (this._gesture && e.touches && e.touches.length === 2 && this._twist === 'pending') {
+        var d = angle(e) - this._twistAngle;
+        d = ((d + 540) % 360) - 180;
+        if (Math.abs(d) >= TWIST_DEG) {
+          this._twist = 'on';
+          // Start turning from here, without a jump.
+          var v = L.point(
+            e.touches[0].clientX - e.touches[1].clientX,
+            e.touches[0].clientY - e.touches[1].clientY
+          );
+          this._startTheta = Math.atan(v.x / v.y);
+          this._startBearing = map.getBearing() + (v.y < 0 ? 180 : 0);
+        } else if (Math.abs(Math.log(spread(e) / this._twistSpread)) > 0.12) {
+          this._twist = 'off';
+        }
+      }
+      var rotating = this._rotating;
+      if (this._twist !== 'on') this._rotating = false;
+      move.call(this, e);
+      if (this._gesture && this._gesture !== 'pitch') this._rotating = rotating;
+    };
+    if (wasOn) tg.enable();
+  })();
   // Exposed for automated layout tests.
   window.__tacmapMap = map;
   L.control.scale({ imperial: false, position: 'bottomleft' }).addTo(map);
@@ -547,15 +601,36 @@
   map.on('zoomstart', function () {
     zooming = true;
   });
-  map.on('zoomend', function () {
+  map.on('zoomend', settle);
+  // A pinch that only panned or turned may end without a zoomend.
+  map.on('moveend', function () {
+    if (zooming && !map._animatingZoom) settle();
+  });
+  function settle() {
+    if (!zooming) return;
     zooming = false;
+    flushDeferred();
     renderMortar();
     drawNav();
     var now = Date.now();
     Object.keys(zoneShapes).forEach(function (id) {
       drawZone(zoneShapes[id], now, true);
     });
-  });
+  }
+
+  // Messages that redraw vector layers wait for the zoom to finish (latest one per type).
+  var DEFER_WHILE_ZOOMING = { setSelf: 1, setMarkers: 1, setMortar: 1, setNav: 1, setTrail: 1, setAnalysis: 1 };
+  var deferred = {};
+  var deferredOrder = [];
+  function flushDeferred() {
+    var order = deferredOrder;
+    var msgs = deferred;
+    deferred = {};
+    deferredOrder = [];
+    order.forEach(function (type) {
+      window.__tacmap({ type: type, payload: msgs[type] });
+    });
+  }
 
   function drawZone(g, now, force) {
     var m = g._zoneMarker;
@@ -1784,7 +1859,8 @@
   // Rotating fires many events; redraw once per frame at most.
   var gridFrameReq = null;
   function drawGridSoon() {
-    if (gridFrameReq) return;
+    // Mid-zoom the renderer is CSS-scaled: redraw once the zoom settles.
+    if (gridFrameReq || zooming) return;
     gridFrameReq = requestAnimationFrame(function () {
       gridFrameReq = null;
       drawGrid();
@@ -1864,6 +1940,11 @@
   };
 
   window.__tacmap = function (msg) {
+    if (zooming && DEFER_WHILE_ZOOMING[msg.type]) {
+      if (!(msg.type in deferred)) deferredOrder.push(msg.type);
+      deferred[msg.type] = msg.payload;
+      return;
+    }
     var h = handlers[msg.type];
     if (!h) return post('log', { level: 'warn', message: 'unknown message ' + msg.type });
     try {

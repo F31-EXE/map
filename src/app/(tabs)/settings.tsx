@@ -402,10 +402,11 @@ const styles = StyleSheet.create({
   rowTitle: { color: C.text, fontSize: 16, fontFamily: F.semibold },
   sub: { color: C.dim, fontSize: 13, fontFamily: F.regular, marginTop: 1 },
   divider: { height: StyleSheet.hairlineWidth, backgroundColor: C.line },
-  chips: { flexDirection: 'row', gap: 8 },
+  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   chip: {
     paddingHorizontal: 14,
-    height: 32,
+    minHeight: 32,
+    paddingVertical: 4,
     borderRadius: R.sm,
     borderWidth: 1,
     borderColor: C.lineStrong,

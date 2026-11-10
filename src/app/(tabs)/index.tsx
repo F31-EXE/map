@@ -30,7 +30,7 @@ import { markerErrorText } from '../../services/teams';
 import { useOverlays } from '../../state/overlays';
 import { useSession, type MarkerScope } from '../../state/session';
 import { useSide, type OrderTarget } from '../../state/side';
-import { setNight, useNight } from '../../state/night';
+import { useNight } from '../../state/night';
 import { useTrail, useTrailMinutes } from '../../state/trail';
 import { useMortar } from '../../state/useMortar';
 import { AddMarkerModal } from '../../ui/AddMarkerModal';
@@ -224,6 +224,7 @@ export default function MapScreen() {
   const [bearing, setBearing] = useState(0);
   const [headingUp, setHeadingUp] = useState(false);
   const night = useNight();
+  const [toolsBottom, setToolsBottom] = useState<number | null>(null);
   // Own breadcrumb trail of the last minutes (setting), kept by this phone only.
   const trailMinutes = useTrailMinutes();
   const crumbs = useTrail(position);
@@ -545,6 +546,12 @@ export default function MapScreen() {
         ? session.teamError
         : null;
 
+  // The bottom-right column (its height counted, not measured: as a row it'd measure
+  // differently and flip back) must stay under the toolbar.
+  const actionCount = (inTeam ? 1 : 0) + (mortar.isMortar ? 1 : 0) + 2;
+  const columnTop = height - (insets.bottom + 108) - (actionCount * 52 + 64 + actionCount * 14);
+  const columnHitsToolbar = toolsBottom != null && columnTop < toolsBottom + 10;
+
   return (
     <View
       style={styles.root}
@@ -682,7 +689,10 @@ export default function MapScreen() {
 
       {/* Portrait: a column under the team pill. Landscape: a row beside it, so it can't
           run into the bottom-right buttons on short screens. */}
-      <View style={[styles.tools, { top: landscape ? insets.top + 10 : pillTop + 64, right: 12 + insets.right }]}>
+      <View
+        onLayout={(e) => setToolsBottom(e.nativeEvent.layout.y + e.nativeEvent.layout.height)}
+        style={[styles.tools, { top: landscape ? insets.top + 10 : pillTop + 64, right: 12 + insets.right }]}
+      >
         <Glass radius={R.lg} style={[styles.toolbar, landscape && styles.toolbarRow]}>
           <ToolbarButton icon="layers-triple-outline" label="Подложка" onPress={() => setLayerPicker(true)} />
           <View style={[styles.toolbarSep, landscape && styles.toolbarSepRow]} />
@@ -727,13 +737,6 @@ export default function MapScreen() {
               <Icon name="navigation" size={22} color={headingUp ? C.accent : C.text} />
             </View>
           </Pressable>
-          <View style={[styles.toolbarSep, landscape && styles.toolbarSepRow]} />
-          <ToolbarButton
-            icon="weather-night"
-            label={night ? 'Выключить ночной режим' : 'Ночной режим'}
-            active={night}
-            onPress={() => setNight(!night)}
-          />
           <View style={[styles.toolbarSep, landscape && styles.toolbarSepRow]} />
           <ToolbarButton
             icon="draw"
@@ -861,8 +864,9 @@ export default function MapScreen() {
                 : insets.bottom + (landscape ? 12 : 108),
             right: 12 + insets.right,
           },
-          // A tall bottom panel leaves no room for a column under the toolbar: a row then.
-          (landscape || calculator || nav) && { flexDirection: 'row-reverse' },
+          // A tall bottom panel, or a short screen, leaves no room for a column under the
+          // toolbar: a row then.
+          (landscape || calculator || nav || columnHitsToolbar) && { flexDirection: 'row-reverse' },
         ]}
       >
         {inTeam && (
