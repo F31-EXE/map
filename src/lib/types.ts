@@ -124,6 +124,8 @@ export type Member = {
   mapLabel?: string;
   /** A game tech (organizer): drawn as an orange diamond. */
   tech?: boolean;
+  /** Asked for help (SOS) and not cancelled yet: pulses red on the map. */
+  sos?: boolean;
 };
 
 export type OrderKind = 'order-move' | 'order-attack' | 'order-defend';

@@ -521,8 +521,10 @@
     var c = escapeHtml(m.color);
     var status = m.status === 'dead' || m.status === 'afk' ? m.status : '';
     return L.divIcon({
-      className: 'member-icon' + (m.tech ? ' tech' : '') + (m.stale ? ' stale' : '') + (status ? ' ' + status : ''),
+      className:
+        'member-icon' + (m.tech ? ' tech' : '') + (m.stale ? ' stale' : '') + (status ? ' ' + status : '') + (m.sos ? ' sos' : ''),
       html:
+        (m.sos ? '<div class="member-sos"></div><div class="member-sos late"></div>' : '') +
         (m.stale || status ? '' : '<div class="member-halo" style="background:' + c + '"></div>') +
         '<div class="member-dir"><div class="member-dir-tip" style="border-bottom-color:' + c + '"></div></div>' +
         '<div class="member-pin" style="background:' + c + '">' +
@@ -562,7 +564,7 @@
   }
 
   function memberKey(m) {
-    return JSON.stringify([m.callsign, m.color, m.stale, m.rolePath, m.roleTitle, m.commander, m.status, m.tech, m.low]);
+    return JSON.stringify([m.callsign, m.color, m.stale, m.rolePath, m.roleTitle, m.commander, m.status, m.tech, m.low, m.sos]);
   }
 
   function setMembers(list) {

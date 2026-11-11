@@ -8,6 +8,7 @@ import { BACKGROUND_SUPPORTED } from '../../services/backgroundLocation';
 import { clearLastError, lastError } from '../../services/crashGuard';
 import { TRAIL_CHOICES } from '../../lib/trail';
 import { setNight, useNight } from '../../state/night';
+import { setVoice, useVoice } from '../../state/voice';
 import { setTrailMinutes, useTrailMinutes } from '../../state/trail';
 import { useSession } from '../../state/session';
 import { ROLES } from '../../lib/roles';
@@ -23,6 +24,7 @@ const PRIVACY_URL = 'https://f31-exe.github.io/map/privacy.html';
 export default function SettingsScreen() {
   const s = useSession();
   const night = useNight();
+  const voice = useVoice();
   const trailMinutes = useTrailMinutes();
   const [crash, setCrash] = useState<string | null>(null);
   useEffect(() => {
@@ -230,6 +232,14 @@ export default function SettingsScreen() {
           sub="Тёмно-красный экран: не слепит и не светит в темноте"
           value={night}
           onChange={setNight}
+        />
+        <View style={styles.divider} />
+        <SettingRow
+          icon={voice ? 'account-voice' : 'volume-off'}
+          title="Голосовые подсказки"
+          sub="Куда идти при ведении к точке и по маршруту, сигнал SOS — голосом, телефон можно убрать"
+          value={voice}
+          onChange={setVoice}
         />
         <View style={styles.divider} />
         <View style={styles.row}>

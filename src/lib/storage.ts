@@ -41,6 +41,8 @@ export const KEYS = {
   hq: 'tacmap.hq',
   /** Map buttons folded away for a bigger map. */
   toolsHidden: 'tacmap.toolsHidden',
+  /** Spoken navigation hints and SOS alerts. */
+  voice: 'tacmap.voice',
   /** Own trail: minutes shown (0 = off) and the crumbs of the last hour. */
   trailMinutes: 'tacmap.trailMinutes',
   trail: 'tacmap.trail',

@@ -1,13 +1,17 @@
 import * as Haptics from 'expo-haptics';
 import { router } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { Alert, Platform, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { Alert, Platform, Pressable, StyleSheet, Text, useWindowDimensions, Vibration, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useSelfPosition } from '../../hooks/useSelfPosition';
 import { bearingDegrees, distanceMeters, formatClock, formatCoords, formatDistance, timeAgo } from '../../lib/geo';
 import { centroid, isArea, ZoneWatcher, type Area, type AreaKind } from '../../lib/geofence';
-import { turnText } from '../../lib/heading';
+import { turnAngle, turnText } from '../../lib/heading';
+import { activeSos, sosCancelText, sosText } from '../../lib/sos';
+import { VoiceCoach } from '../../lib/voice';
+import { useChat } from '../../state/chat';
+import { say } from '../../state/voice';
 import { ARRIVE_M, etaSeconds, formatEta, SpeedTracker } from '../../lib/nav';
 import { routeRemaining, routeStart, routeStep } from '../../lib/route';
 import { recentTrail } from '../../lib/trail';
@@ -55,6 +59,13 @@ import { InfoSheet, type Stat } from '../../ui/InfoSheet';
 import { C, eyebrow, F, R } from '../../ui/theme';
 
 type Selection = { type: 'marker' | 'member'; id: string } | null;
+/** Where «Вести» leads: a marker, a teammate (followed live), a route, or a fixed point (an SOS). */
+type NavTarget = {
+  type: 'marker' | 'member' | 'route' | 'point';
+  id: string;
+  idx?: number;
+  at?: { lat: number; lng: number; name: string };
+};
 
 function vectorStats(from: SelfPosition | null, to: LatLng, heading: number | null): Stat[] {
   if (!from) return [{ label: 'Координаты', value: formatCoords(to) }];
@@ -304,7 +315,7 @@ export default function MapScreen() {
   // "Lead me there": a marker or a teammate to walk to.
   // «Вести сюда» to a marker or teammate, or «Вести по маршруту» along an arrow
   // (`idx` = the route point to head for now).
-  const [nav, setNav] = useState<{ type: 'marker' | 'member' | 'route'; id: string; idx?: number } | null>(null);
+  const [nav, setNav] = useState<NavTarget | null>(null);
   const [arrived, setArrived] = useState(false);
   const speed = useRef(new SpeedTracker());
   useEffect(() => {
@@ -547,6 +558,7 @@ export default function MapScreen() {
       const i = Math.min(nav.idx ?? 0, pts.length - 1);
       return { ...pts[i], name: `${m.label || 'маршрут'} · точка ${i + 1} из ${pts.length}` };
     }
+    if (nav.type === 'point') return nav.at ?? null;
     if (nav.type === 'marker') {
       const m = allMarkers.find((x) => x.id === nav.id);
       return m ? { lat: m.lat, lng: m.lng, name: m.label || MARKER_KINDS[m.kind].title } : null;
@@ -589,11 +601,97 @@ export default function MapScreen() {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
         setTimeout(() => Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {}), 600);
       }
+      say('Вы на месте');
     } else if (arrived && navDistance > ARRIVE_M * 2) {
       setArrived(false);
     }
   }, [navDistance, arrived, routeEnd]);
-  const startNav = (target: { type: 'marker' | 'member' | 'route'; id: string; idx?: number }) => {
+
+  // Spoken hints while leading somewhere (Settings → «Голосовые подсказки»).
+  const coach = useRef(new VoiceCoach());
+  const navOn = nav != null;
+  useEffect(() => {
+    if (!navOn) coach.current.reset();
+  }, [navOn]);
+  const navTurn = navTo && position && heading != null ? turnAngle(heading, bearingDegrees(position, navTo)) : null;
+  const navName = navTo?.name;
+  useEffect(() => {
+    if (navName == null || navDistance == null || arrived) return;
+    const text = coach.current.update({ target: navName, distance: navDistance, turn: navTurn, now: Date.now() });
+    if (text) say(text);
+  }, [navName, navDistance, navTurn, arrived]);
+
+  // SOS: open calls from the squad chat (they travel by server, Bluetooth and radio).
+  const chat = useChat();
+  const sosNow = useNow(inTeam);
+  const sosMinute = Math.floor(sosNow / 30_000);
+  const sosCalls = useMemo(
+    () => (inTeam ? activeSos(chat.messages, sosMinute * 30_000 + 30_000) : []),
+    [inTeam, chat.messages, sosMinute]
+  );
+  const mySos = sosCalls.find((c) => c.uid === session.uid) ?? null;
+  const otherSos = sosCalls.filter((c) => c.uid !== session.uid);
+  const sosMember = (uid: string) =>
+    allMembers.find((m) => (m.id === uid || m.id.endsWith('/' + uid)) && m.lat != null && m.lng != null);
+  const [sosDismissed, setSosDismissed] = useState<string[]>([]);
+  const sosShown = otherSos.find((c) => !sosDismissed.includes(c.id)) ?? null;
+  const sosAlerted = useRef(new Set<string>());
+  const sosKey = otherSos.map((c) => c.id).join(',');
+  useEffect(() => {
+    for (const c of otherSos) {
+      if (sosAlerted.current.has(c.id)) continue;
+      sosAlerted.current.add(c.id);
+      Vibration.vibrate([0, 700, 250, 700, 250, 700]);
+      const m = sosMember(c.uid);
+      const at = m ? { lat: m.lat!, lng: m.lng! } : c;
+      const d = position ? ` , ${formatDistance(distanceMeters(position, at))}` : '';
+      say(`Внимание! ${c.callsign} просит помощи${d}`, true);
+    }
+    // Only new calls matter; positions are read at that moment.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sosKey]);
+  const sosUids = otherSos.map((c) => c.uid);
+  const sosUidKey = sosUids.join(',');
+  const mapMembers = useMemo(
+    () =>
+      sosUids.length
+        ? allMembers.map((m) => (sosUids.some((u) => m.id === u || m.id.endsWith('/' + u)) ? { ...m, sos: true } : m))
+        : allMembers,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [allMembers, sosUidKey]
+  );
+  const leadToSos = (c: { uid: string; callsign: string; lat: number; lng: number }) => {
+    const m = sosMember(c.uid);
+    startNav(m ? { type: 'member', id: m.id } : { type: 'point', id: c.uid, at: { lat: c.lat, lng: c.lng, name: c.callsign } });
+    setFollow(true);
+    mapRef.current?.centerOnSelf();
+  };
+  const toggleSos = () => {
+    if (mySos) {
+      Alert.alert('Отменить SOS?', 'Отряд увидит, что помощь больше не нужна', [
+        { text: 'Нет', style: 'cancel' },
+        { text: 'Отменить SOS', onPress: () => chat.send(sosCancelText()).catch(() => {}) },
+      ]);
+      return;
+    }
+    if (!position) {
+      Alert.alert('Нет GPS', 'SOS отправляет ваши координаты — дождитесь, пока они определятся');
+      return;
+    }
+    const at = { lat: position.lat, lng: position.lng };
+    Alert.alert('Отправить SOS?', 'Весь отряд получит сигнал тревоги с вашими координатами', [
+      { text: 'Отмена', style: 'cancel' },
+      {
+        text: 'Отправить SOS',
+        style: 'destructive',
+        onPress: () => {
+          chat.send(sosText(at.lat, at.lng)).catch((e: Error) => Alert.alert('SOS не отправлен', e.message));
+          if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
+        },
+      },
+    ]);
+  };
+  const startNav = (target: NavTarget) => {
     setMortarOn(false);
     setArrived(false);
     setNav(target);
@@ -633,8 +731,8 @@ export default function MapScreen() {
   // The bottom-right column (its height counted, not measured: as a row it'd measure
   // differently and flip back) must stay under the toolbar.
   const actionCount = toolsHidden
-    ? 1 + (inTeam && session.status === 'dead' ? 1 : 0) + (calculator ? 1 : 0)
-    : (inTeam ? 1 : 0) + (mortar.isMortar ? 1 : 0) + 2;
+    ? 1 + (inTeam && session.status === 'dead' ? 1 : 0) + (calculator ? 1 : 0) + (mySos ? 1 : 0)
+    : (inTeam ? 2 : 0) + (mortar.isMortar ? 1 : 0) + 2;
   const columnTop = height - (insets.bottom + 108) - (actionCount * 52 + 64 + actionCount * 14);
   const columnHitsToolbar = toolsBottom != null && columnTop < toolsBottom + 10;
 
@@ -686,7 +784,7 @@ export default function MapScreen() {
         onHeadingUpChanged={setHeadingUp}
         topInset={landscape ? insets.top + 60 : pillTop + 58}
         follow={follow}
-        members={allMembers}
+        members={mapMembers}
         selfId={session.uid}
         teamColor={session.teamColor}
         ownerId={session.team?.ownerId ?? null}
@@ -886,7 +984,55 @@ export default function MapScreen() {
         </Glass>
       </View>
 
-      {banner && (
+      {sosShown && (
+        <Glass
+          radius={R.md}
+          style={[
+            styles.banner,
+            styles.sosBanner,
+            { top: pillTop + 64, left: 12 + insets.left },
+            landscape && { right: undefined, width: Math.min(460, pillW) },
+          ]}
+        >
+          <Icon name="lifebuoy" size={22} color={C.danger} />
+          <Pressable style={{ flex: 1 }} onPress={() => leadToSos(sosShown)}>
+            <Text style={styles.sosTitle} numberOfLines={1}>
+              SOS · {sosShown.callsign}
+            </Text>
+            <Text style={styles.bannerText} numberOfLines={1}>
+              нужна помощь
+              {position
+                ? ' · ' +
+                  formatDistance(
+                    distanceMeters(position, sosMember(sosShown.uid) ? { lat: sosMember(sosShown.uid)!.lat!, lng: sosMember(sosShown.uid)!.lng! } : sosShown)
+                  )
+                : ''}
+              {' · '}
+              {timeAgo(sosShown.at)}
+            </Text>
+          </Pressable>
+          <Pressable
+            accessibilityLabel="Вести к нему"
+            onPress={() => {
+              tap();
+              leadToSos(sosShown);
+              setSosDismissed((d) => [...d, sosShown.id]);
+            }}
+            style={({ pressed }) => [styles.sosGo, pressed && { opacity: 0.7 }]}
+          >
+            <Icon name="navigation-variant" size={16} color="#fff" />
+            <Text style={styles.sosGoText}>Вести</Text>
+          </Pressable>
+          <Pressable
+            accessibilityLabel="Скрыть"
+            hitSlop={8}
+            onPress={() => setSosDismissed((d) => [...d, sosShown.id])}
+          >
+            <Icon name="close" size={20} color={C.faint} />
+          </Pressable>
+        </Glass>
+      )}
+      {banner && !sosShown && (
         <Glass
           radius={R.md}
           style={[
@@ -908,7 +1054,7 @@ export default function MapScreen() {
           style={
             landscape
               ? { top: insets.top + 60, left: 12 + insets.left }
-              : { top: pillTop + 64 + (banner ? 56 : 0), left: 12 + insets.left }
+              : { top: pillTop + 64 + (banner || sosShown ? 56 : 0), left: 12 + insets.left }
           }
           onPress={() => setSelection({ type: 'marker', id: zoneMarker.id })}
         />
@@ -921,7 +1067,7 @@ export default function MapScreen() {
             styles.zoneChipWrap,
             landscape
               ? { top: insets.top + 60, left: 12 + insets.left }
-              : { top: pillTop + 64 + (banner ? 56 : 0), left: 12 + insets.left },
+              : { top: pillTop + 64 + (banner || sosShown ? 56 : 0), left: 12 + insets.left },
           ]}
         >
           <Glass radius={R.md} style={[styles.zoneChip, { maxWidth: 260 }]}>
@@ -996,6 +1142,16 @@ export default function MapScreen() {
           (landscape || calculator || nav || columnHitsToolbar) && { flexDirection: 'row-reverse' },
         ]}
       >
+        {inTeam && (!toolsHidden || mySos) && (
+          <GlassButton
+            icon="lifebuoy"
+            label={mySos ? 'Отменить SOS' : 'SOS: нужна помощь'}
+            size={52}
+            active={mySos != null}
+            activeColor={C.danger}
+            onPress={toggleSos}
+          />
+        )}
         {inTeam && (!toolsHidden || session.status === 'dead') && (
           <GlassButton
             icon="skull"
@@ -1675,6 +1831,18 @@ const styles = StyleSheet.create({
     borderLeftColor: C.danger,
   },
   bannerText: { color: C.text, fontSize: 13, fontFamily: F.regular, flex: 1 },
+  sosBanner: { borderLeftWidth: 4, backgroundColor: 'rgba(120, 10, 10, 0.55)' },
+  sosTitle: { color: C.danger, fontSize: 15, fontFamily: F.bold },
+  sosGo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: R.pill,
+    backgroundColor: C.danger,
+  },
+  sosGoText: { color: '#fff', fontSize: 13, fontFamily: F.semibold },
   zoneChipWrap: { position: 'absolute' },
   zoneChip: {
     flexDirection: 'row',

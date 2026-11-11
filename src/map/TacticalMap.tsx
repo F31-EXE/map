@@ -234,6 +234,7 @@ export function TacticalMap(props: Props) {
         commander: !m.tech && (m.leader ?? (m.canCommand || m.id === props.ownerId)),
         tech: Boolean(m.tech),
         low: lowPower(m),
+        sos: Boolean(m.sos),
         heading: m.heading,
         status: m.status,
         stale: !m.updatedAt || now - m.updatedAt > STALE_MS,

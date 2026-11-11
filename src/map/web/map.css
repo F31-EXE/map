@@ -606,3 +606,33 @@ body,
 .lod-dot .member-low {
   visibility: hidden;
 }
+
+/* SOS: red rings spreading from the fighter, visible at every zoom. */
+.member-sos {
+  position: absolute;
+  left: -14px;
+  top: -14px;
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  border: 3px solid #ff3b30;
+  box-sizing: border-box;
+  pointer-events: none;
+  animation: sos-ring 1.6s ease-out infinite;
+}
+.member-sos.late {
+  animation-delay: 0.8s;
+}
+@keyframes sos-ring {
+  from {
+    transform: scale(0.5);
+    opacity: 1;
+  }
+  to {
+    transform: scale(1.6);
+    opacity: 0;
+  }
+}
+.member-icon.sos .member-pin {
+  box-shadow: 0 0 0 2px #ff3b30, 0 0 14px 4px rgba(255, 59, 48, 0.8);
+}
