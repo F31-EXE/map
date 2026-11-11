@@ -24,7 +24,7 @@ import { DEFAULT_TEAM_COLOR, roleOf, type RoleId } from '../lib/roles';
 import { MAX_FACTIONS, type Faction } from '../lib/game';
 import { validZone, type HotZone } from '../lib/hotzone';
 import { validWave, type Wave } from '../lib/waves';
-import type { LatLng, Member, MemberStatus, PinnedMessage, SelfPosition, TacMarker, Team } from '../lib/types';
+import type { Briefing, LatLng, Member, MemberStatus, PinnedMessage, SelfPosition, TacMarker, Team } from '../lib/types';
 
 // No 0/O/1/I/L to keep codes easy to dictate over the radio.
 const CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
@@ -153,6 +153,16 @@ export async function setGridOrigin(teamId: string, grid: LatLng | null): Promis
   await updateDoc(doc(firestore(), 'teams', teamId), { grid });
 }
 
+/** Commanders write (or remove, with null) the squad briefing; a new `at` resets who has read it. */
+export async function setBriefing(teamId: string, briefing: Briefing | null): Promise<void> {
+  await updateDoc(doc(firestore(), 'teams', teamId), { briefing });
+}
+
+/** A member confirms reading the briefing version `at`. */
+export async function markBriefingRead(teamId: string, uid: string, at: number): Promise<void> {
+  await updateDoc(doc(firestore(), 'teams', teamId, 'members', uid), { briefRead: at });
+}
+
 /** Commanders pin a chat message for the squad; null unpins. */
 export async function setPinned(teamId: string, pinned: PinnedMessage | null): Promise<void> {
   await updateDoc(doc(firestore(), 'teams', teamId), { pinned });
@@ -241,6 +251,7 @@ export function subscribeTeam(
               recordingId: typeof d.recordingId === 'string' ? d.recordingId : null,
               pinned: d.pinned && typeof d.pinned.text === 'string' ? (d.pinned as PinnedMessage) : null,
               factions: parseFactions(d.factions),
+              briefing: parseBriefing(d.briefing),
               grid:
                 d.grid && Number.isFinite(d.grid.lat) && Number.isFinite(d.grid.lng)
                   ? { lat: d.grid.lat, lng: d.grid.lng }
@@ -280,6 +291,7 @@ export function subscribeMembers(
             battery: typeof v.battery === 'number' ? v.battery : null,
             charging: v.charging === true,
             radioBattery: typeof v.radioBattery === 'number' ? v.radioBattery : null,
+            briefRead: typeof v.briefRead === 'number' ? v.briefRead : null,
           };
         })
       );
@@ -455,4 +467,18 @@ export function markerErrorText(e: unknown): string {
     return 'Сервер не разрешил. Метку поставил вышестоящий командир, либо в Firebase опубликованы старые правила доступа (firestore.rules).';
   }
   return (e as Error).message;
+}
+
+function parseBriefing(b: unknown): Briefing | null {
+  if (!b || typeof b !== 'object') return null;
+  const v = b as Record<string, unknown>;
+  if (typeof v.text !== 'string' || typeof v.at !== 'number') return null;
+  return {
+    text: v.text,
+    time: typeof v.time === 'string' && v.time ? v.time : null,
+    points: Array.isArray(v.points) ? v.points.filter((x): x is string => typeof x === 'string') : [],
+    by: typeof v.by === 'string' ? v.by : '',
+    byName: typeof v.byName === 'string' ? v.byName : '',
+    at: v.at,
+  };
 }

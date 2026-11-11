@@ -430,6 +430,28 @@ describe('status, assigned roles and pinned messages', () => {
     await assertFails(pin('carol'));
     await assertFails(pin('alice', 'x'.repeat(501)));
   });
+  test('commanders write the briefing as themselves; members mark it read', async () => {
+    const team = (by: string) => doc(as(by), 'teams', TEAM);
+    const brief = (by: string, extra: Record<string, unknown> = {}) => ({
+      text: 'Заходим с севера, держим мост',
+      time: '10:30',
+      points: ['m1'],
+      by,
+      byName: 'Гром',
+      at: 5,
+      ...extra,
+    });
+    await assertSucceeds(updateDoc(team('alice'), { briefing: brief('alice') }));
+    await assertSucceeds(updateDoc(team('bob'), { briefing: brief('bob', { time: null, points: [] }) }));
+    await assertFails(updateDoc(team('carol'), { briefing: brief('carol') }));
+    await assertFails(updateDoc(team('bob'), { briefing: brief('alice') }));
+    await assertFails(updateDoc(team('bob'), { briefing: brief('bob', { text: 'x'.repeat(2001) }) }));
+    await assertFails(updateDoc(team('bob'), { briefing: brief('bob', { extra: 1 }) }));
+    await assertSucceeds(updateDoc(team('bob'), { briefing: null }));
+    await assertSucceeds(updateDoc(member('carol', 'carol'), { briefRead: 5 }));
+    await assertFails(updateDoc(member('carol', 'carol'), { briefRead: 'yes' }));
+    await assertFails(updateDoc(member('bob', 'carol'), { briefRead: 6 }));
+  });
   test('commanders place the snail grid; fighters cannot; only a lat/lng point', async () => {
     const team = (by: string) => doc(as(by), 'teams', TEAM);
     await assertSucceeds(updateDoc(team('alice'), { grid: { lat: 56.83, lng: 60.61 } }));

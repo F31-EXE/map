@@ -73,6 +73,8 @@ export default function RootLayout() {
                 <Stack.Screen name="join" options={{ title: 'Приглашение' }} />
                 <Stack.Screen name="polygon" options={{ title: 'Игра из календаря' }} />
                 <Stack.Screen name="replay" options={{ title: 'Записи игр' }} />
+                <Stack.Screen name="briefing" options={{ title: 'Брифинг' }} />
+                <Stack.Screen name="share-marks" options={{ title: 'Метки по QR' }} />
               </Stack>
               <NightFilter />
               </RegionsProvider>

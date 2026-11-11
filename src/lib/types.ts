@@ -29,7 +29,12 @@ export type Team = {
   factions?: Faction[];
   /** Snail grid: NW corner of square А1, set by a commander for the whole squad. */
   grid?: LatLng | null;
+  /** Commander's briefing for the game: task, time, points; members mark it read. */
+  briefing?: Briefing | null;
 };
+
+/** `at` identifies the version: a member has read it when their `briefRead` equals it. */
+export type Briefing = { text: string; time: string | null; points: string[]; by: string; byName: string; at: number };
 
 /** Grid over the map: none, UTM kilometre squares, or 500 m squares with the snail. */
 export type GridMode = 'off' | 'utm' | 'snail';
@@ -124,6 +129,8 @@ export type Member = {
   mapLabel?: string;
   /** A game tech (organizer): drawn as an orange diamond. */
   tech?: boolean;
+  /** `at` of the squad briefing this fighter has read. */
+  briefRead?: number | null;
   /** Asked for help (SOS) and not cancelled yet: pulses red on the map. */
   sos?: boolean;
 };

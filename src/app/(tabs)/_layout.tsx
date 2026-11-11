@@ -11,10 +11,14 @@ export default function TabsLayout() {
   const landscape = width > height;
   const chat = useChat();
   const session = useSession();
+  // A briefing this fighter hasn't confirmed yet.
+  const brief = session.team?.briefing;
+  const me = session.members.find((m) => m.id === session.uid);
+  const briefingUnread = Boolean(brief && brief.by !== session.uid && me && me.briefRead !== brief.at);
   const meta: Record<string, TabMeta> = {
     index: { icon: 'map-outline', label: 'Карта' },
     chat: { icon: 'forum-outline', label: 'Чат', badge: session.teamId ? chat.unread : 0 },
-    team: { icon: 'account-group-outline', label: 'Отряд' },
+    team: { icon: 'account-group-outline', label: 'Отряд', badge: briefingUnread ? 1 : 0 },
     settings: { icon: 'cog-outline', label: 'Настр.' },
   };
 

@@ -92,6 +92,24 @@ export default function MapsScreen() {
               работает без интернета.
             </Text>
           </Pressable>
+          <Pressable
+            style={({ pressed }) => [styles.item, pressed && { borderColor: C.lineStrong }]}
+            onPress={() => {
+              tap();
+              router.push('/share-marks');
+            }}
+          >
+            <View style={styles.itemIcon}>
+              <Icon name="qrcode" size={22} color={C.accent} />
+            </View>
+            <View style={{ flex: 1, gap: 4 }}>
+              <Text style={styles.name}>Метки по QR</Text>
+              <Text style={styles.meta} numberOfLines={1}>
+                Передать или принять метки и маршруты без интернета
+              </Text>
+            </View>
+            <Icon name="chevron-right" size={22} color={C.dim} />
+          </Pressable>
           {games.length > 0 && (
             <View style={{ gap: 10 }}>
               <Eyebrow style={{ paddingHorizontal: 4 }}>Ближайшие игры · календарь THE GRIM TEAM</Eyebrow>

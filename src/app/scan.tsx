@@ -5,19 +5,85 @@ import { useRef, useState } from 'react';
 import { Alert, Platform, StyleSheet, Text, View } from 'react-native';
 
 import { parseInvite } from '../lib/invite';
+import { MARKER_KINDS, isOrder } from '../lib/markerKinds';
+import { isMarksCode, MarksCollector, type SharedMark } from '../lib/markShare';
+import { distanceMeters } from '../lib/geo';
+import type { MarkerKind } from '../lib/types';
+import { useSession } from '../state/session';
 import { useGame } from '../state/game';
 import { Button, Icon } from '../ui/components';
 import { C, F, R } from '../ui/theme';
 
-/** Scans a squad or side invite QR and acts on it right away. */
+/** Scans a squad or side invite QR and acts on it right away, or collects shared markers. */
 export default function ScanScreen() {
   const [permission, requestPermission] = useCameraPermissions();
   const { acceptInvite } = useGame();
+  const session = useSession();
   const [busy, setBusy] = useState(false);
   const handled = useRef(false);
+  const collector = useRef(new MarksCollector());
+  const [progress, setProgress] = useState<{ got: number; total: number } | null>(null);
+
+  const importMarks = async (marks: SharedMark[], scope: 'team' | 'personal') => {
+    let added = 0;
+    let skipped = 0;
+    for (const m of marks) {
+      const kind = m.kind as MarkerKind;
+      if (!MARKER_KINDS[kind] || (scope === 'team' && isOrder(kind) && !session.canCommand)) {
+        skipped++;
+        continue;
+      }
+      // Already on the map (scanned twice, or the squad has it): skip.
+      const dup = session.markers.some((x) => x.kind === kind && distanceMeters(x, m) < 3);
+      if (dup) {
+        skipped++;
+        continue;
+      }
+      try {
+        await session.addMarker(
+          { kind, label: m.label, lat: m.lat, lng: m.lng, ...(m.points ? { points: m.points } : {}), ...(m.color ? { color: m.color } : {}) },
+          scope
+        );
+        added++;
+      } catch {
+        skipped++;
+      }
+    }
+    router.back();
+    Alert.alert('Метки получены', `Добавлено: ${added}${skipped ? ` · пропущено: ${skipped} (уже есть или нельзя)` : ''}`);
+  };
+
+  const onMarks = (data: string) => {
+    const r = collector.current.push(data);
+    if (!r) return;
+    setProgress({ got: r.got, total: r.total });
+    if (!r.marks) return;
+    handled.current = true;
+    if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+    const marks = r.marks;
+    const again = () => {
+      handled.current = false;
+      collector.current = new MarksCollector();
+      setProgress(null);
+    };
+    Alert.alert(
+      `Получено меток: ${marks.length}`,
+      session.teamId ? 'Добавить их для всего отряда или только себе?' : 'Добавить их на вашу карту?',
+      [
+        { text: 'Отмена', style: 'cancel', onPress: () => router.back() },
+        ...(session.teamId ? [{ text: 'Для отряда', onPress: () => importMarks(marks, 'team') }] : []),
+        { text: session.teamId ? 'Только себе' : 'Добавить', onPress: () => importMarks(marks, 'personal') },
+      ],
+      { onDismiss: again }
+    );
+  };
 
   const onScanned = async (data: string) => {
     if (handled.current) return;
+    if (isMarksCode(data)) {
+      onMarks(data);
+      return;
+    }
     const invite = parseInvite(data);
     if (!invite) return; // Some other QR in view — keep looking.
     handled.current = true;
@@ -43,7 +109,7 @@ export default function ScanScreen() {
     return (
       <View style={[styles.root, styles.center]}>
         <Icon name="camera-off-outline" size={48} color={C.dim} />
-        <Text style={styles.text}>Нужен доступ к камере, чтобы считать QR-код отряда или стороны.</Text>
+        <Text style={styles.text}>Нужен доступ к камере, чтобы считать QR-код отряда, стороны или меток.</Text>
         <Button title="Разрешить камеру" icon="camera" onPress={requestPermission} />
       </View>
     );
@@ -59,7 +125,13 @@ export default function ScanScreen() {
       />
       <View pointerEvents="none" style={[StyleSheet.absoluteFill, styles.center]}>
         <View style={styles.frame} />
-        <Text style={styles.hint}>{busy ? 'Подключаемся…' : 'Наведите на QR-код отряда или стороны'}</Text>
+        <Text style={styles.hint}>
+          {busy
+            ? 'Подключаемся…'
+            : progress
+              ? `Метки: код ${progress.got} из ${progress.total} — держите камеру`
+              : 'Наведите на QR-код отряда, стороны или меток'}
+        </Text>
       </View>
     </View>
   );

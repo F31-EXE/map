@@ -10,6 +10,7 @@ rules_version = '2';
 //   teams/{teamId}/photos/{id}       -> { data, createdBy, createdAt }   photo marker picture
 //   teams/{teamId}/maps/{id}         -> { name, format, size, parts, createdBy, createdByName, createdAt }; parts/{nn} -> { i, data, createdBy }
 //   teams/{teamId}/messages/{id}    -> { uid, callsign, text, createdAt, relayedBy? }   team chat
+//   teams/{teamId}.briefing          -> { text, time, points, by, byName, at }   commanders; members.briefRead = at
 //   teams/{teamId}/recordings/{id}  -> { name, startedAt, endedAt, startedBy }; tracks/{uid} -> { points }
 //   sides/{sideId}                   -> { name, code, ownerId, createdAt }   several squads under one side commander
 //   sideCodes/{code}                 -> { sideId }
@@ -127,7 +128,19 @@ service cloud.firestore {
         && (!('battery' in d) || d.battery == null || (d.battery is number && d.battery >= 0 && d.battery <= 100))
         && (!('charging' in d) || d.charging is bool)
         && (!('radioBattery' in d) || d.radioBattery == null
-          || (d.radioBattery is number && d.radioBattery >= 0 && d.radioBattery <= 101));
+          || (d.radioBattery is number && d.radioBattery >= 0 && d.radioBattery <= 101))
+        && (!('briefRead' in d) || d.briefRead == null || d.briefRead is number);
+    }
+    // Squad briefing: written by commanders as themselves.
+    function validBriefing(b) {
+      return b == null
+        || (b is map && b.keys().hasOnly(['text', 'time', 'points', 'by', 'byName', 'at'])
+          && b.text is string && b.text.size() <= 2000
+          && (b.time == null || (b.time is string && b.time.size() <= 20))
+          && b.points is list && b.points.size() <= 30
+          && b.by == request.auth.uid
+          && b.byName is string && b.byName.size() <= 24
+          && b.at is number);
     }
     // Team game: up to six teams of { name, color } on the squad doc.
     function validFactions(f) {
@@ -324,12 +337,14 @@ service cloud.firestore {
           && (!('color' in request.resource.data) || validColor(request.resource.data.color))
           && (request.resource.data.get('sideId', null) == null
             || request.resource.data.get('sideCode', null) == get(sidePath(request.resource.data.sideId)).data.code))
-        // Commanders start and stop movement recording, pin chat messages and place
-        // the snail grid's square А1.
+        // Commanders start and stop movement recording, pin chat messages, place
+        // the snail grid's square А1 and write the briefing.
         || (canCommand(teamId)
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['recordingId', 'pinned', 'grid'])
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['recordingId', 'pinned', 'grid', 'briefing'])
           && validPinned(request.resource.data.get('pinned', null))
-          && validGrid(request.resource.data.get('grid', null)))
+          && validGrid(request.resource.data.get('grid', null))
+          && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['briefing'])
+            || validBriefing(request.resource.data.briefing)))
         // The side commander may drop a squad from the side, and nothing else.
         || (isSideOwner(resource.data.get('sideId', null))
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['sideId', 'sideCode'])

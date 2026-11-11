@@ -159,6 +159,8 @@ export default function TeamScreen() {
             <StatusPicker value={s.status} onPick={(st) => run('status', () => s.setStatus(st))} />
           </Card>
 
+          <BriefingCard />
+
           <GameLinkCard />
 
           {/* Roster */}
@@ -683,3 +685,38 @@ const styles = StyleSheet.create({
   hint: { flexDirection: 'row', alignItems: 'center', gap: 12, borderColor: C.warn + '66' },
   sheetHead: { flexDirection: 'row', alignItems: 'center', gap: 14 },
 });
+
+/** Briefing entry: hidden for fighters until a commander writes one. */
+function BriefingCard() {
+  const s = useSession();
+  const brief = s.team?.briefing ?? null;
+  if (!brief && !s.canCommand) return null;
+  const me = s.members.find((m) => m.id === s.uid);
+  const unread = Boolean(brief && brief.by !== s.uid && me?.briefRead !== brief.at);
+  const readCount = brief ? s.members.filter((m) => m.briefRead === brief.at).length : 0;
+  const others = brief ? s.members.filter((m) => m.id !== brief.by).length : 0;
+  return (
+    <Pressable onPress={() => router.push('/briefing')}>
+      <Card style={[styles.sideEntry, unread && { borderColor: C.accent }]}>
+        <View style={[styles.switchIcon, unread && { backgroundColor: C.accentSoft }]}>
+          <Icon name="clipboard-text-outline" size={22} color={unread ? C.accent : C.dim} />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.cardTitle}>
+            {brief ? `Брифинг${brief.time ? ` · ${brief.time}` : ''}` : 'Написать брифинг'}
+          </Text>
+          <Text style={styles.sub} numberOfLines={2}>
+            {!brief
+              ? 'Задача, время и точки для отряда'
+              : unread
+                ? 'Новый — откройте и нажмите «Прочитал»'
+                : s.canCommand
+                  ? `Прочитали ${readCount} из ${others}`
+                  : brief.text}
+          </Text>
+        </View>
+        <Icon name="chevron-right" size={20} color={C.faint} />
+      </Card>
+    </Pressable>
+  );
+}
