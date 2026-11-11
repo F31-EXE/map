@@ -15,6 +15,10 @@ on:
         type: choice
         default: apk
         options: [apk, update, expo-android, expo-ios, expo-all, ios-store]
+      build_id:
+        description: 'ios-store: id уже запущенной сборки Expo — дождаться её и отправить, не собирая заново'
+        required: false
+        default: ''
 
 permissions:
   contents: read
@@ -71,8 +75,8 @@ jobs:
           platform="${TARGET#expo-}"
           npx -y eas-cli@latest build --platform "$platform" --profile preview --non-interactive --no-wait
 
-  # App Store build (production profile) from a clean checkout, submitted to App Store
-  # Connect with the credentials and API key stored on Expo. Waits for the result and,
+  # App Store build (production profile) from a clean checkout, then submitted to App
+  # Store Connect with the credentials and API key stored on Expo. Waits for the result and,
   # if the build fails, prints the end of each build phase log here.
   ios-store:
     if: ${{ inputs.target == 'ios-store' }}
@@ -88,17 +92,26 @@ jobs:
       - name: Build and submit
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          BUILD_ID: ${{ inputs.build_id }}
         run: |
-          npx -y eas-cli@latest build --platform ios --profile production --non-interactive --auto-submit --no-wait --json > queued.json
-          cat queued.json
-          id="$(node -e 'const b=JSON.parse(require("fs").readFileSync("queued.json","utf8"));console.log((Array.isArray(b)?b[0]:b).id)')"
+          id="$BUILD_ID"
+          if [ -z "$id" ]; then
+            npx -y eas-cli@latest build --platform ios --profile production --non-interactive --no-wait --json > queued.json
+            cat queued.json
+            id="$(node -e 'const b=JSON.parse(require("fs").readFileSync("queued.json","utf8"));console.log((Array.isArray(b)?b[0]:b).id)')"
+          fi
           echo "Build $id"
           for i in $(seq 1 100); do
             sleep 60
             npx -y eas-cli@latest build:view "$id" --json > build.json 2>/dev/null || continue
             status="$(node -e 'console.log(JSON.parse(require("fs").readFileSync("build.json","utf8")).status)')"
             echo "$(date -u +%H:%M) $status"
-            case "$status" in FINISHED) exit 0;; ERRORED|CANCELED) break;; esac
+            case "$status" in
+              FINISHED)
+                npx -y eas-cli@latest submit --platform ios --profile production --id "$id" --non-interactive
+                exit $?;;
+              ERRORED|CANCELED) break;;
+            esac
           done
           node -e '
             const b = JSON.parse(require("fs").readFileSync("build.json", "utf8"));
