@@ -10,7 +10,8 @@ import { TRAIL_CHOICES } from '../../lib/trail';
 import { setNight, useNight } from '../../state/night';
 import { setTrailMinutes, useTrailMinutes } from '../../state/trail';
 import { useSession } from '../../state/session';
-import { Avatar, Button, Card, Eyebrow, Icon, KeyboardScroll, tap, type IconName } from '../../ui/components';
+import { ROLES } from '../../lib/roles';
+import { Avatar, Button, Card, Eyebrow, Icon, KeyboardScroll, RoleIcon, tap, type IconName } from '../../ui/components';
 import { confirmDestructive } from '../../ui/confirm';
 import { RadioCard } from '../../ui/RadioCard';
 import { RolePicker } from '../../ui/RolePicker';
@@ -29,6 +30,7 @@ export default function SettingsScreen() {
   }, []);
   const [callsign, setCallsign] = useState(s.callsign);
   const [busy, setBusy] = useState(false);
+  const [rolesOpen, setRolesOpen] = useState(false);
   useEffect(() => setCallsign(s.callsign), [s.callsign]);
   const callsignDirty = callsign.trim() !== s.callsign;
   const color = s.teamId ? s.teamColor : C.accent;
@@ -97,7 +99,31 @@ export default function SettingsScreen() {
 
         <View style={{ gap: 10 }}>
           <Eyebrow>Роль · так вас видят на карте</Eyebrow>
-          <RolePicker value={s.role} color={color} onPick={(r) => run(() => s.setRole(r))} />
+          <Pressable
+            onPress={() => {
+              tap();
+              setRolesOpen((v) => !v);
+            }}
+            accessibilityLabel={rolesOpen ? 'Свернуть роли' : 'Выбрать роль'}
+            style={({ pressed }) => [styles.roleRow, pressed && { opacity: 0.7 }]}
+          >
+            <RoleIcon role={s.role} size={34} color={color} framed />
+            <Text style={styles.roleTitle} numberOfLines={1}>
+              {ROLES[s.role].title}
+            </Text>
+            <Text style={styles.roleAction}>{rolesOpen ? 'Свернуть' : 'Выбрать роль'}</Text>
+            <Icon name={rolesOpen ? 'chevron-up' : 'chevron-down'} size={20} color={C.faint} />
+          </Pressable>
+          {rolesOpen && (
+            <RolePicker
+              value={s.role}
+              color={color}
+              onPick={(r) => {
+                setRolesOpen(false);
+                run(() => s.setRole(r));
+              }}
+            />
+          )}
         </View>
       </Card>
 
@@ -368,6 +394,19 @@ function LinkRow({ icon, title, sub, onPress }: { icon: IconName; title: string;
 }
 
 const styles = StyleSheet.create({
+  roleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: R.md,
+    borderWidth: 1,
+    borderColor: C.line,
+    backgroundColor: C.elevated,
+  },
+  roleTitle: { flex: 1, color: C.text, fontSize: 15, fontFamily: F.semibold },
+  roleAction: { color: C.accent, fontSize: 13, fontFamily: F.semibold },
   content: { padding: 16, gap: 14, paddingBottom: 32, width: '100%', maxWidth: 640, alignSelf: 'center' },
   profile: { flexDirection: 'row', alignItems: 'center', gap: 14 },
   avatarEdit: {

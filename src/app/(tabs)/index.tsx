@@ -211,6 +211,18 @@ export default function MapScreen() {
       return !v;
     });
   };
+  // Fewer buttons over the map: the toolbar folds into one button, the action column
+  // keeps only the marker and location buttons.
+  const [toolsHidden, setToolsHidden] = useState(false);
+  useEffect(() => {
+    loadJson<boolean>(KEYS.toolsHidden, false).then(setToolsHidden);
+  }, []);
+  const toggleTools = () => {
+    setToolsHidden((v) => {
+      saveJson(KEYS.toolsHidden, !v).catch(() => {});
+      return !v;
+    });
+  };
   const hqWidth = wide && hqOn ? Math.min(400, Math.round(window.width * 0.3)) : 0;
   const landscape = window.width > window.height;
   // This screen's own size: in landscape the tab bar takes a column on the left.
@@ -620,7 +632,9 @@ export default function MapScreen() {
 
   // The bottom-right column (its height counted, not measured: as a row it'd measure
   // differently and flip back) must stay under the toolbar.
-  const actionCount = (inTeam ? 1 : 0) + (mortar.isMortar ? 1 : 0) + 2;
+  const actionCount = toolsHidden
+    ? 1 + (inTeam && session.status === 'dead' ? 1 : 0) + (calculator ? 1 : 0)
+    : (inTeam ? 1 : 0) + (mortar.isMortar ? 1 : 0) + 2;
   const columnTop = height - (insets.bottom + 108) - (actionCount * 52 + 64 + actionCount * 14);
   const columnHitsToolbar = toolsBottom != null && columnTop < toolsBottom + 10;
 
@@ -790,72 +804,83 @@ export default function MapScreen() {
         style={[styles.tools, { top: landscape ? insets.top + 10 : pillTop + 64, right: 12 + insets.right }]}
       >
         <Glass radius={R.lg} style={[styles.toolbar, landscape && styles.toolbarRow]}>
-          <ToolbarButton icon="layers-triple-outline" label="Подложка" onPress={() => setLayerPicker(true)} />
-          <View style={[styles.toolbarSep, landscape && styles.toolbarSepRow]} />
           <ToolbarButton
-            icon={download ? 'cloud-sync-outline' : 'cloud-download-outline'}
-            label="Карта без интернета"
-            active={download != null}
-            onPress={() => setOfflineSheet(true)}
+            icon={toolsHidden ? 'dots-horizontal' : landscape ? 'chevron-right' : 'chevron-up'}
+            label={toolsHidden ? 'Показать кнопки' : 'Скрыть кнопки'}
+            active={toolsHidden}
+            onPress={toggleTools}
           />
-          <View style={[styles.toolbarSep, landscape && styles.toolbarSepRow]} />
-          <ToolbarButton icon="map-plus" label="Карты полигона" onPress={() => router.push('/maps')} />
-          <View style={[styles.toolbarSep, landscape && styles.toolbarSepRow]} />
-          <ToolbarButton
-            icon={session.gridMode === 'snail' ? 'grid-large' : session.gridMode === 'utm' ? 'grid' : 'grid-off'}
-            label="Сетка координат"
-            active={session.gridMode !== 'off'}
-            onPress={() => setGridSheet(true)}
-          />
-          <View style={[styles.toolbarSep, landscape && styles.toolbarSepRow]} />
-          <Pressable
-            accessibilityLabel={headingUp ? 'Карта по компасу, нажмите для севера вверху' : 'Поворот карты'}
-            hitSlop={4}
-            onPress={() => {
-              tap();
-              if (headingUp) {
-                setHeadingUp(false);
-                mapRef.current?.resetNorth();
-              } else if (Math.abs(((bearing + 180) % 360) - 180) > 1) {
-                mapRef.current?.resetNorth();
-              } else if (heading == null) {
-                Alert.alert('Нет компаса', 'Компас телефона ещё не дал направление');
-              } else {
-                setFollow(true);
-                mapRef.current?.centerOnSelf();
-                setHeadingUp(true);
-              }
-            }}
-            style={({ pressed }) => [styles.toolbarButton, pressed && { opacity: 0.6 }]}
-          >
-            {/* The needle points north on screen. */}
-            <View style={{ transform: [{ rotate: `${bearing}deg` }] }}>
-              <Icon name="navigation" size={22} color={headingUp ? C.accent : C.text} />
-            </View>
-          </Pressable>
-          <View style={[styles.toolbarSep, landscape && styles.toolbarSepRow]} />
-          {wide && (
+          {!toolsHidden && (
             <>
-              <ToolbarButton icon="view-dashboard-outline" label="Штаб" active={hqOn} onPress={toggleHq} />
               <View style={[styles.toolbarSep, landscape && styles.toolbarSepRow]} />
-            </>
-          )}
-          <ToolbarButton
-            icon="draw"
-            label="Нарисовать стрелку"
-            onPress={() => {
-              setFollow(false);
-              setDrawing({ kind: 'arrow', color: ARROW_COLORS[0], points: [], scope: 'team' });
-            }}
-          />
-          {visibleMembers.length > 0 && (
-            <>
+              <ToolbarButton icon="layers-triple-outline" label="Подложка" onPress={() => setLayerPicker(true)} />
               <View style={[styles.toolbarSep, landscape && styles.toolbarSepRow]} />
               <ToolbarButton
-                icon="fit-to-screen-outline"
-                label="Показать всех"
-                onPress={() => mapRef.current?.fitPoints(visibleMembers)}
+                icon={download ? 'cloud-sync-outline' : 'cloud-download-outline'}
+                label="Карта без интернета"
+                active={download != null}
+                onPress={() => setOfflineSheet(true)}
               />
+              <View style={[styles.toolbarSep, landscape && styles.toolbarSepRow]} />
+              <ToolbarButton icon="map-plus" label="Карты полигона" onPress={() => router.push('/maps')} />
+              <View style={[styles.toolbarSep, landscape && styles.toolbarSepRow]} />
+              <ToolbarButton
+                icon={session.gridMode === 'snail' ? 'grid-large' : session.gridMode === 'utm' ? 'grid' : 'grid-off'}
+                label="Сетка координат"
+                active={session.gridMode !== 'off'}
+                onPress={() => setGridSheet(true)}
+              />
+              <View style={[styles.toolbarSep, landscape && styles.toolbarSepRow]} />
+              <Pressable
+                accessibilityLabel={headingUp ? 'Карта по компасу, нажмите для севера вверху' : 'Поворот карты'}
+                hitSlop={4}
+                onPress={() => {
+                  tap();
+                  if (headingUp) {
+                    setHeadingUp(false);
+                    mapRef.current?.resetNorth();
+                  } else if (Math.abs(((bearing + 180) % 360) - 180) > 1) {
+                    mapRef.current?.resetNorth();
+                  } else if (heading == null) {
+                    Alert.alert('Нет компаса', 'Компас телефона ещё не дал направление');
+                  } else {
+                    setFollow(true);
+                    mapRef.current?.centerOnSelf();
+                    setHeadingUp(true);
+                  }
+                }}
+                style={({ pressed }) => [styles.toolbarButton, pressed && { opacity: 0.6 }]}
+              >
+                {/* The needle points north on screen. */}
+                <View style={{ transform: [{ rotate: `${bearing}deg` }] }}>
+                  <Icon name="navigation" size={22} color={headingUp ? C.accent : C.text} />
+                </View>
+              </Pressable>
+              <View style={[styles.toolbarSep, landscape && styles.toolbarSepRow]} />
+              {wide && (
+                <>
+                  <ToolbarButton icon="view-dashboard-outline" label="Штаб" active={hqOn} onPress={toggleHq} />
+                  <View style={[styles.toolbarSep, landscape && styles.toolbarSepRow]} />
+                </>
+              )}
+              <ToolbarButton
+                icon="draw"
+                label="Нарисовать стрелку"
+                onPress={() => {
+                  setFollow(false);
+                  setDrawing({ kind: 'arrow', color: ARROW_COLORS[0], points: [], scope: 'team' });
+                }}
+              />
+              {visibleMembers.length > 0 && (
+                <>
+                  <View style={[styles.toolbarSep, landscape && styles.toolbarSepRow]} />
+                  <ToolbarButton
+                    icon="fit-to-screen-outline"
+                    label="Показать всех"
+                    onPress={() => mapRef.current?.fitPoints(visibleMembers)}
+                  />
+                </>
+              )}
             </>
           )}
         </Glass>
@@ -971,7 +996,7 @@ export default function MapScreen() {
           (landscape || calculator || nav || columnHitsToolbar) && { flexDirection: 'row-reverse' },
         ]}
       >
-        {inTeam && (
+        {inTeam && (!toolsHidden || session.status === 'dead') && (
           <GlassButton
             icon="skull"
             label={session.status === 'dead' ? 'Я снова в игре' : 'Я убит'}
@@ -985,7 +1010,7 @@ export default function MapScreen() {
             }}
           />
         )}
-        {mortar.isMortar && (
+        {mortar.isMortar && (!toolsHidden || calculator) && (
           <GlassButton
             icon="bullseye-arrow"
             label="Миномётный калькулятор"
@@ -1000,27 +1025,29 @@ export default function MapScreen() {
             }}
           />
         )}
-        <GlassButton
-          icon="camera"
-          label="Фото с привязкой"
-          size={52}
-          onPress={async () => {
-            if (!position) {
-              Alert.alert('Нет GPS', 'Фото привязывается к вашей позиции — дождитесь координат');
-              return;
-            }
-            // Where I stand and look when pressing, not after the camera closes.
-            const at = { lat: position.lat, lng: position.lng, heading };
-            try {
-              const data = await takePhoto();
-              if (!data) return;
-              await session.addPhotoMarker({ ...at, data, label: '' }, inTeam ? 'team' : 'personal');
-              if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-            } catch (e) {
-              Alert.alert('Фото не получилось', (e as Error).message);
-            }
-          }}
-        />
+        {!toolsHidden && (
+          <GlassButton
+            icon="camera"
+            label="Фото с привязкой"
+            size={52}
+            onPress={async () => {
+              if (!position) {
+                Alert.alert('Нет GPS', 'Фото привязывается к вашей позиции — дождитесь координат');
+                return;
+              }
+              // Where I stand and look when pressing, not after the camera closes.
+              const at = { lat: position.lat, lng: position.lng, heading };
+              try {
+                const data = await takePhoto();
+                if (!data) return;
+                await session.addPhotoMarker({ ...at, data, label: '' }, inTeam ? 'team' : 'personal');
+                if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+              } catch (e) {
+                Alert.alert('Фото не получилось', (e as Error).message);
+              }
+            }}
+          />
+        )}
         <GlassButton
           icon={follow ? 'crosshairs-gps' : 'crosshairs'}
           label="Моё местоположение"

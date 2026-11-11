@@ -39,6 +39,8 @@ export const KEYS = {
   night: 'tacmap.night',
   /** HQ panel on wide screens shown. */
   hq: 'tacmap.hq',
+  /** Map buttons folded away for a bigger map. */
+  toolsHidden: 'tacmap.toolsHidden',
   /** Own trail: minutes shown (0 = off) and the crumbs of the last hour. */
   trailMinutes: 'tacmap.trailMinutes',
   trail: 'tacmap.trail',
