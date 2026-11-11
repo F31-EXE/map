@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
     inputs:
       target:
-        description: 'apk — собрать APK здесь; expo-android / expo-ios / expo-all — сборка на серверах Expo; update — обновление без переустановки (EAS Update, канал preview); ios-store — iOS для App Store с отправкой в App Store Connect'
+        description: 'apk — собрать APK здесь; expo-android / expo-ios / expo-all — сборка на серверах Expo; update — обновление без переустановки (EAS Update: тестовые сборки и App Store); ios-store — iOS для App Store с отправкой в App Store Connect'
         type: choice
         default: apk
         options: [apk, update, expo-android, expo-ios, expo-all, ios-store]
@@ -53,9 +53,12 @@ jobs:
           EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET: airsoftcalendar.firebasestorage.app
           EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID: '54382632962'
           EXPO_PUBLIC_FIREBASE_APP_ID: 1:54382632962:web:19462dc47ad704c997071b
+        # Both channels: preview (APK / test builds) and production (App Store, Play).
         run: |
           msg="$(git log -1 --pretty=%s)"
-          npx -y eas-cli@latest update --channel preview --platform all --message "$msg" --non-interactive
+          for channel in preview production; do
+            npx -y eas-cli@latest update --channel "$channel" --platform all --message "$msg" --non-interactive
+          done
 
   expo:
     if: ${{ startsWith(inputs.target, 'expo-') }}
