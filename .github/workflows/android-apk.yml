@@ -11,16 +11,17 @@ on:
   workflow_dispatch:
     inputs:
       target:
-        description: 'apk — собрать APK здесь; expo-android / expo-ios / expo-all — сборка на серверах Expo; update — обновление без переустановки (EAS Update, канал preview)'
+        description: 'apk — собрать APK здесь; expo-android / expo-ios / expo-all — сборка на серверах Expo; update — обновление без переустановки (EAS Update, канал preview); ios-store — iOS для App Store с отправкой в App Store Connect'
         type: choice
         default: apk
-        options: [apk, update, expo-android, expo-ios, expo-all]
+        options: [apk, update, expo-android, expo-ios, expo-all, ios-store]
 
 permissions:
   contents: read
 
+# One queue per target: publishing an update must not cancel an APK build.
 concurrency:
-  group: android-apk
+  group: android-apk-${{ inputs.target || 'apk' }}
   cancel-in-progress: true
 
 jobs:
@@ -53,7 +54,7 @@ jobs:
           npx -y eas-cli@latest update --channel preview --platform all --message "$msg" --non-interactive
 
   expo:
-    if: ${{ inputs.target != '' && inputs.target != 'apk' && inputs.target != 'update' }}
+    if: ${{ startsWith(inputs.target, 'expo-') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -69,6 +70,56 @@ jobs:
         run: |
           platform="${TARGET#expo-}"
           npx -y eas-cli@latest build --platform "$platform" --profile preview --non-interactive --no-wait
+
+  # App Store build (production profile) from a clean checkout, submitted to App Store
+  # Connect with the credentials and API key stored on Expo. Waits for the result and,
+  # if the build fails, prints the end of each build phase log here.
+  ios-store:
+    if: ${{ inputs.target == 'ios-store' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Build and submit
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          npx -y eas-cli@latest build --platform ios --profile production --non-interactive --auto-submit --no-wait --json > queued.json
+          cat queued.json
+          id="$(node -e 'const b=JSON.parse(require("fs").readFileSync("queued.json","utf8"));console.log((Array.isArray(b)?b[0]:b).id)')"
+          echo "Build $id"
+          for i in $(seq 1 100); do
+            sleep 60
+            npx -y eas-cli@latest build:view "$id" --json > build.json 2>/dev/null || continue
+            status="$(node -e 'console.log(JSON.parse(require("fs").readFileSync("build.json","utf8")).status)')"
+            echo "$(date -u +%H:%M) $status"
+            case "$status" in FINISHED) exit 0;; ERRORED|CANCELED) break;; esac
+          done
+          node -e '
+            const b = JSON.parse(require("fs").readFileSync("build.json", "utf8"));
+            console.log(JSON.stringify(b.error || {}, null, 2));
+            for (const u of b.logFiles || []) console.log(u);
+          ' > logs.txt
+          cat logs.txt
+          grep '^https' logs.txt | while read -r url; do
+            echo "=== log"
+            curl -sL "$url" | node -e '
+              let t = ""; process.stdin.on("data", (d) => (t += d)).on("end", () => {
+                const out = [];
+                for (const line of t.split("\n")) {
+                  try { const j = JSON.parse(line); out.push(`[${j.phase || ""}] ${j.msg || ""}`); } catch { out.push(line); }
+                }
+                const bad = out.map((l, i) => (/error|fail|exception/i.test(l) ? i : -1)).filter((i) => i >= 0);
+                const from = bad.length ? Math.max(0, bad[0] - 40) : Math.max(0, out.length - 150);
+                console.log(out.slice(from, from + 250).join("\n"));
+              });'
+          done
+          exit 1
 
   apk:
     if: ${{ inputs.target == '' || inputs.target == 'apk' }}
