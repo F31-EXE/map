@@ -109,7 +109,7 @@ export async function kickMember(teamId: string, memberId: string): Promise<void
 export async function updateProfile(
   teamId: string,
   uid: string,
-  profile: { callsign?: string; role?: RoleId; status?: MemberStatus; range?: number }
+  profile: { callsign?: string; tag?: string | null; role?: RoleId; status?: MemberStatus; range?: number }
 ): Promise<void> {
   await updateDoc(doc(firestore(), 'teams', teamId, 'members', uid), profile);
 }
@@ -278,6 +278,7 @@ export function subscribeMembers(
           return {
             id: d.id,
             callsign: v.callsign ?? '???',
+            tag: typeof v.tag === 'string' && v.tag ? v.tag : null,
             role: roleOf(v.role),
             canCommand: v.canCommand === true,
             status: v.status === 'dead' || v.status === 'afk' ? v.status : 'alive',

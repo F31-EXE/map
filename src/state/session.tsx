@@ -28,6 +28,7 @@ import {
 import type { TrackPoint } from '../lib/tracks';
 import { nextWave, type Wave } from '../lib/waves';
 import { KEYS, loadJson, newId, saveJson } from '../lib/storage';
+import { cleanTag } from '../lib/tag';
 import type { GridMode, LatLng, Member, MemberStatus, SelfPosition, TacMarker, Team } from '../lib/types';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { Alert, Vibration } from 'react-native';
@@ -59,6 +60,9 @@ type Session = {
 
   callsign: string;
   setCallsign: (c: string) => Promise<void>;
+  /** Team tag before the callsign («[GRIM] Гром»), '' for none. */
+  tag: string;
+  setTag: (t: string) => Promise<void>;
   role: RoleId;
   setRole: (r: RoleId) => Promise<void>;
   /** Own avatar as a data URI. */
@@ -157,6 +161,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const [uid, setUid] = useState<string | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
   const [callsign, setCallsignState] = useState('');
+  const [tag, setTagState] = useState('');
+  const [tagLoaded, setTagLoaded] = useState(false);
   const [role, setRoleState] = useState<RoleId>(DEFAULT_ROLE);
   const [avatar, setAvatarState] = useState<string | null>(null);
   const [avatars, setAvatars] = useState<Record<string, string>>({});
@@ -210,6 +216,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       setKeepAwakeState(awake);
       setGridModeState(grid === true ? 'utm' : grid === 'utm' || grid === 'snail' ? grid : 'off');
       loadJson<LatLng | null>(KEYS.gridOrigin, null).then(setLocalGridOrigin);
+      loadJson<string>(KEYS.tag, '').then((t) => {
+        setTagState(cleanTag(t));
+        setTagLoaded(true);
+      });
       setStatusState(st === 'dead' || st === 'afk' ? st : 'alive');
       setCallsignState(cs);
       setRoleState(roleOf(r));
@@ -324,6 +334,14 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const canCommand = inTeam && (isOwner || Boolean(me?.canCommand));
   canCommandRef.current = canCommand;
 
+  // The tag lives on this phone; the member doc follows it (also right after joining).
+  const myTag = me ? (me.tag ?? '') : null;
+  useEffect(() => {
+    if (!tagLoaded || !teamId || !uid || myTag == null || myTag === tag) return;
+    fireAndReport(teams.updateProfile(teamId, uid, { tag: tag || null }), 'Тег не сохранился');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tagLoaded, teamId, uid, myTag, tag]);
+
 
   const mesh = useMesh({
     teamId,
@@ -400,6 +418,12 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     if (!c) throw new Error('Сначала укажите позывной');
     return c;
   }, [callsign]);
+
+  const setTag = useCallback(async (t: string) => {
+    const v = cleanTag(t);
+    setTagState(v);
+    await saveJson(KEYS.tag, v);
+  }, []);
 
   const setCallsign = useCallback(
     async (c: string) => {
@@ -970,6 +994,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       authError,
       callsign,
       setCallsign,
+      tag,
+      setTag,
       role,
       setRole,
       avatar,
@@ -1025,6 +1051,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       authError,
       callsign,
       setCallsign,
+      tag,
+      setTag,
       role,
       setRole,
       avatar,

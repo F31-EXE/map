@@ -129,7 +129,8 @@ service cloud.firestore {
         && (!('charging' in d) || d.charging is bool)
         && (!('radioBattery' in d) || d.radioBattery == null
           || (d.radioBattery is number && d.radioBattery >= 0 && d.radioBattery <= 101))
-        && (!('briefRead' in d) || d.briefRead == null || d.briefRead is number);
+        && (!('briefRead' in d) || d.briefRead == null || d.briefRead is number)
+        && (!('tag' in d) || d.tag == null || (d.tag is string && d.tag.size() <= 5));
     }
     // Squad briefing: written by commanders as themselves.
     function validBriefing(b) {

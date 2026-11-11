@@ -5,6 +5,7 @@ import { isArea } from '../lib/geofence';
 import { BALL_RADIUS, BALL_SPEED, checkpointsPassed, TECH_COLOR } from '../lib/gameModes';
 import { isAdminKind, isOrder, MARKER_KINDS } from '../lib/markerKinds';
 import { lowPower } from '../lib/power';
+import { withTag } from '../lib/tag';
 import { ROLES, type RoleId } from '../lib/roles';
 import { readRange } from '../services/vectorRegions';
 import type { Bounds } from '../lib/tiles';
@@ -227,7 +228,7 @@ export function TacticalMap(props: Props) {
         id: m.id,
         lat: m.lat,
         lng: m.lng,
-        callsign: m.mapLabel ?? m.callsign,
+        callsign: m.mapLabel ?? withTag(m.callsign, m.tag),
         color: m.tech ? TECH_COLOR : (m.color ?? props.teamColor),
         rolePath: ROLES[m.role].path,
         roleTitle: m.tech ? 'Игротех' : m.mapLabel ? null : ROLES[m.role].title,

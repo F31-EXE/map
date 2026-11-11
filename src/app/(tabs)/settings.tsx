@@ -12,6 +12,7 @@ import { setVoice, useVoice } from '../../state/voice';
 import { setTrailMinutes, useTrailMinutes } from '../../state/trail';
 import { useSession } from '../../state/session';
 import { ROLES } from '../../lib/roles';
+import { cleanTag, TAG_MAX, withTag } from '../../lib/tag';
 import { Avatar, Button, Card, Eyebrow, Icon, KeyboardScroll, RoleIcon, tap, type IconName } from '../../ui/components';
 import { confirmDestructive } from '../../ui/confirm';
 import { RadioCard } from '../../ui/RadioCard';
@@ -31,6 +32,9 @@ export default function SettingsScreen() {
     lastError().then(setCrash);
   }, []);
   const [callsign, setCallsign] = useState(s.callsign);
+  const [tag, setTag] = useState(s.tag);
+  useEffect(() => setTag(s.tag), [s.tag]);
+  const tagDirty = cleanTag(tag) !== s.tag;
   const [busy, setBusy] = useState(false);
   const [rolesOpen, setRolesOpen] = useState(false);
   useEffect(() => setCallsign(s.callsign), [s.callsign]);
@@ -87,11 +91,33 @@ export default function SettingsScreen() {
               returnKeyType="done"
               onSubmitEditing={() => callsignDirty && run(() => s.setCallsign(callsign))}
             />
+            <View style={styles.tagRow}>
+              <Text style={styles.tagLabel}>Тег команды</Text>
+              <TextInput
+                value={tag}
+                onChangeText={(t) => setTag(cleanTag(t))}
+                placeholder="GRIM"
+                placeholderTextColor={C.faint}
+                maxLength={TAG_MAX}
+                autoCapitalize="characters"
+                autoCorrect={false}
+                style={styles.tagInput}
+                selectionColor={C.accent}
+                returnKeyType="done"
+                onSubmitEditing={() => tagDirty && run(() => s.setTag(tag))}
+              />
+              {s.tag ? <Text style={styles.tagPreview} numberOfLines={1}>{withTag(s.callsign || 'Позывной', s.tag)}</Text> : null}
+            </View>
           </View>
-          {callsignDirty && (
+          {(callsignDirty || tagDirty) && (
             <Pressable
               style={styles.saveIcon}
-              onPress={() => run(() => s.setCallsign(callsign))}
+              onPress={() =>
+                run(async () => {
+                  if (tagDirty) await s.setTag(tag);
+                  if (callsignDirty) await s.setCallsign(callsign);
+                })
+              }
               accessibilityLabel="Сохранить позывной"
             >
               <Icon name="check" size={22} color={C.accentInk} />
@@ -432,6 +458,21 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   callsignInput: { color: C.text, fontSize: 22, fontFamily: F.bold, padding: 0 },
+  tagRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  tagLabel: { color: C.dim, fontSize: 12, fontFamily: F.regular },
+  tagInput: {
+    color: C.text,
+    fontSize: 14,
+    fontFamily: F.mono,
+    minWidth: 64,
+    paddingVertical: 3,
+    paddingHorizontal: 8,
+    borderRadius: R.sm,
+    borderWidth: 1,
+    borderColor: C.line,
+    backgroundColor: C.elevated,
+  },
+  tagPreview: { color: C.faint, fontSize: 12, fontFamily: F.regular, flexShrink: 1 },
   saveIcon: {
     width: 40,
     height: 40,

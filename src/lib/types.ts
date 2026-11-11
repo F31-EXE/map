@@ -129,6 +129,8 @@ export type Member = {
   mapLabel?: string;
   /** A game tech (organizer): drawn as an orange diamond. */
   tech?: boolean;
+  /** Team tag shown before the callsign, up to 5 characters. */
+  tag?: string | null;
   /** `at` of the squad briefing this fighter has read. */
   briefRead?: number | null;
   /** Asked for help (SOS) and not cancelled yet: pulses red on the map. */

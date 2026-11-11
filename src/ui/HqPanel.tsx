@@ -6,6 +6,7 @@ import { checkpointsPassed } from '../lib/gameModes';
 import { isOrder, MARKER_KINDS } from '../lib/markerKinds';
 import { lowPower, powerText } from '../lib/power';
 import { ROLES } from '../lib/roles';
+import { withTag } from '../lib/tag';
 import type { Member, TacMarker } from '../lib/types';
 import { STALE_MS } from '../map/TacticalMap';
 
@@ -218,7 +219,7 @@ function FighterRow({ m, now, onPress }: { m: Member; now: number; onPress: () =
       <View style={[styles.dot, { backgroundColor: color }]} />
       <View style={{ flex: 1 }}>
         <Text style={[styles.callsign, m.status === 'dead' && { color: C.dim, textDecorationLine: 'line-through' }]} numberOfLines={1}>
-          {m.callsign}
+          {withTag(m.callsign, m.tag)}
           <Text style={styles.role}> · {ROLES[m.role].title}</Text>
         </Text>
         <Text style={[styles.meta, stale && m.status === 'alive' && { color: C.warn }]} numberOfLines={1}>

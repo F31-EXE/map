@@ -452,6 +452,12 @@ describe('status, assigned roles and pinned messages', () => {
     await assertFails(updateDoc(member('carol', 'carol'), { briefRead: 'yes' }));
     await assertFails(updateDoc(member('bob', 'carol'), { briefRead: 6 }));
   });
+  test('members set their own team tag, up to 5 characters', async () => {
+    await assertSucceeds(updateDoc(member('carol', 'carol'), { tag: 'GRIM' }));
+    await assertSucceeds(updateDoc(member('carol', 'carol'), { tag: null }));
+    await assertFails(updateDoc(member('carol', 'carol'), { tag: 'TOOLONG' }));
+    await assertFails(updateDoc(member('alice', 'carol'), { tag: 'X' }));
+  });
   test('commanders place the snail grid; fighters cannot; only a lat/lng point', async () => {
     const team = (by: string) => doc(as(by), 'teams', TEAM);
     await assertSucceeds(updateDoc(team('alice'), { grid: { lat: 56.83, lng: 60.61 } }));

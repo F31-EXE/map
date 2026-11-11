@@ -7,6 +7,7 @@ import { Alert, Pressable, Share, StyleSheet, Text, TextInput, View } from 'reac
 import { formatClock, timeAgo } from '../../lib/geo';
 import { inviteUrl } from '../../lib/invite';
 import { ROLE_ORDER, ROLES, TEAM_COLORS, type RoleId } from '../../lib/roles';
+import { withTag } from '../../lib/tag';
 import { STATUSES } from '../../lib/status';
 import type { Member, MemberStatus } from '../../lib/types';
 import { STALE_MS } from '../../map/TacticalMap';
@@ -511,7 +512,7 @@ function MemberRow({
       <View style={{ flex: 1 }}>
         <View style={styles.memberNameRow}>
           <Text style={styles.memberName} numberOfLines={1}>
-            {m.callsign}
+            {withTag(m.callsign, m.tag)}
           </Text>
           {me && <Badge text="Я" />}
           {commands && <Icon name="star" size={15} color={C.warn} />}
@@ -563,7 +564,7 @@ function MemberSheet({
         <Avatar name={m.callsign} color={color} uri={avatar} size={52} />
         <View style={{ flex: 1 }}>
           <Text style={styles.teamName} numberOfLines={1}>
-            {m.callsign}
+            {withTag(m.callsign, m.tag)}
           </Text>
           <Text style={styles.sub}>{ROLES[m.role].title}</Text>
         </View>

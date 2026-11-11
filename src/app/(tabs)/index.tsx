@@ -19,6 +19,7 @@ import { hotState, type HotZone } from '../../lib/hotzone';
 import { isOrder, MARKER_KINDS, voteThreshold } from '../../lib/markerKinds';
 import { correct, DEFAULT_RANGE, solve } from '../../lib/mortar';
 import { ROLES } from '../../lib/roles';
+import { withTag } from '../../lib/tag';
 import { STATUSES } from '../../lib/status';
 import { KEYS, loadJson, saveJson } from '../../lib/storage';
 import type { Bounds } from '../../lib/tiles';
@@ -1505,7 +1506,7 @@ export default function MapScreen() {
             </View>
           )
         }
-        title={selectedMember?.callsign ?? ''}
+        title={selectedMember ? withTag(selectedMember.callsign, selectedMember.tag) : ''}
         subtitle={
           selectedMember &&
           [
