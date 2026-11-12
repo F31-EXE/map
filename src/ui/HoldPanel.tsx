@@ -1,19 +1,34 @@
-import { Alert, StyleSheet, Text, View } from 'react-native';
+import { useEffect, useState } from 'react';
+import { StyleSheet, Text, View } from 'react-native';
 
 import { distanceMeters, formatDistance } from '../lib/geo';
-import { BALL_MAX_PUSH, BALL_RADIUS, BALL_SPEED, CAPTURE_MINUTES, checkpointsPassed, matchState, pathLength } from '../lib/gameModes';
+import {
+  BALL_MAX_PUSH,
+  BALL_RADIUS,
+  BALL_SPEED,
+  CAPTURE_MINUTES,
+  checkpointsPassed,
+  FLAG_HOLD_MS,
+  FLAG_RADIUS,
+  matchState,
+  pathLength,
+} from '../lib/gameModes';
 import type { SelfPosition, TacMarker } from '../lib/types';
 import { useGame } from '../state/game';
 
-import { Button } from './components';
 import { C, F, R } from './theme';
-
-/** Fighters must be this close to a flag to capture it. */
-const FLAG_REACH_M = 25;
 
 /** Card part of a game flag, territory sector or convoy: its state in the match. */
 export function HoldPanel({ marker, self }: { marker: TacMarker; self: SelfPosition | null }) {
   const g = useGame();
+  // Ticks while a flag is being taken, for the seconds count.
+  const [now, setNow] = useState(Date.now());
+  const capturing = marker.kind === 'flag' && Boolean(marker.fcap);
+  useEffect(() => {
+    if (!capturing) return;
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [capturing]);
   const holder = marker.owner ? g.sideName(marker.owner) : 'ничья';
   const color = marker.owner ? g.sideColor(marker.owner) : C.dim;
 
@@ -81,21 +96,24 @@ export function HoldPanel({ marker, self }: { marker: TacMarker; self: SelfPosit
     );
   }
 
+  const fcap = marker.fcap;
+  const held = fcap ? Math.min(FLAG_HOLD_MS, Math.max(0, now - fcap.t)) : 0;
   const dist = self ? distanceMeters(self, marker) : null;
-  const mine = g.mySideId != null && marker.owner === g.mySideId;
-  const canCapture = !g.isTech && g.mySideId != null && !mine;
   return (
     <View style={styles.box}>
       <Row label="Флаг держит" value={holder} color={color} />
-      {canCapture && (
-        <Button
-          title={dist != null && dist > FLAG_REACH_M ? `Захватить · подойдите ближе (${formatDistance(dist)})` : 'Захватить'}
-          icon="flag"
-          disabled={dist == null || dist > FLAG_REACH_M}
-          onPress={() => g.captureFlag(marker).catch((e: Error) => Alert.alert('Не удалось', e.message))}
+      {fcap && (
+        <Row
+          label="Захватывает"
+          value={`${g.sideName(fcap.s)} · ${Math.floor(held / 1000)}/${FLAG_HOLD_MS / 1000} с`}
+          color={g.sideColor(fcap.s)}
         />
       )}
-      {mine && <Text style={styles.sub}>Флаг ваш: стороне идёт минута за каждую минуту удержания.</Text>}
+      {dist != null && <Row label="До флага" value={formatDistance(dist)} />}
+      <Text style={styles.sub}>
+        Захват сам: чьих живых бойцов в {FLAG_RADIUS} м от флага больше {FLAG_HOLD_MS / 1000} секунд подряд — того и
+        флаг. Нажимать ничего не нужно. Стороне идёт очко за каждую минуту удержания.
+      </Text>
     </View>
   );
 }

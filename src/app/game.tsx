@@ -7,17 +7,16 @@ import { Alert, Pressable, Share, StyleSheet, Switch, Text, TextInput, View } fr
 import { SIDE_COLORS, TECH_COLOR } from '../lib/gameModes';
 import { inviteUrl, type Invite } from '../lib/invite';
 import type { GameSide, Side } from '../lib/types';
-import { useGame } from '../state/game';
+import { useGame, type GamePlace } from '../state/game';
 import { useSession } from '../state/session';
 import { useSide } from '../state/side';
-import { Button, Card, Eyebrow, Icon, KeyboardScroll, tap } from '../ui/components';
+import { Button, Card, Eyebrow, Icon, KeyboardScroll, tap, type IconName } from '../ui/components';
 import { confirmDestructive } from '../ui/confirm';
 import { GameScore, matchText, useMatch } from '../ui/GameScore';
 import { QrCode } from '../ui/QrCode';
 import { C, F, R } from '../ui/theme';
 
-const MATCH_MINUTES = [15, 30, 45, 60, 90, 120];
-const TICKETS = [0, 50, 100, 200, 500];
+const MATCH_MINUTES = [10, 15, 20, 30, 45, 60];
 
 export default function GameScreen() {
   const session = useSession();
@@ -200,11 +199,12 @@ function Rules() {
         Когда матч закончится, побеждает сторона с большим числом территорий.
       </Text>
       <Text style={styles.text}>
-        <Text style={styles.bold}>Флаги.</Text> Подойдите к флагу и нажмите «Захватить». Сторона получает минуту за
-        каждую минуту удержания.
+        <Text style={styles.bold}>Флаги.</Text> Захват без кнопок: чьих живых бойцов в 15 м от флага больше 30
+        секунд подряд — того и флаг. Сторона получает очко за каждую минуту удержания.
       </Text>
       <Text style={styles.text}>
         <Text style={styles.bold}>Тикеты.</Text> У стороны ограниченное число жизней, каждое «Я убит» отнимает одну.
+        Включаются отдельно и работают вместе с любым режимом.
       </Text>
       <Text style={styles.text}>
         <Text style={styles.bold}>Хотзона.</Text> Минута в зоне контроля — 1 очко стороне, в хотзоне — 2.
@@ -292,14 +292,25 @@ function TechView({ busy, run }: { busy: boolean; run: Run }) {
   const session = useSession();
   const st = useMatch(g.game);
   const game = g.game!;
-  const [minutes, setMinutes] = useState(30);
+  const [minutesText, setMinutesText] = useState('20');
   const [sideName, setSideName] = useState('');
   const [invite, setInvite] = useState<'tech' | 'side' | null>(null);
   const [claimFor, setClaimFor] = useState<Side | null>(null);
-  const territories = g.markers.filter((m) => m.kind === 'sector').length;
-  const balls = g.markers.filter((m) => m.kind === 'ball').length;
-  const flags = g.markers.filter((m) => m.kind === 'flag').length;
-  const zones = g.markers.filter((m) => m.zone).length;
+  const count = (k: GamePlace) => g.markers.filter((m) => (k === 'hotzone' ? Boolean(m.zone) : m.kind === k)).length;
+  const territories = count('sector');
+  const placed = MODES.some((m) => count(m.k) > 0);
+  const ready = placed || game.tickets != null;
+  const minutes = Number(minutesText.replace(',', '.'));
+  const minutesOk = Number.isInteger(minutes) && minutes >= 1 && minutes <= 1440;
+
+  const place = (k: GamePlace) => {
+    if (k === 'ball' && !g.sides.length) {
+      Alert.alert('Сначала стороны', 'Конвой едет за сторону: создайте хотя бы одну сторону (шаг 1).');
+      return;
+    }
+    g.requestPlace(k);
+    router.navigate('/');
+  };
 
   return (
     <>
@@ -317,74 +328,8 @@ function TechView({ busy, run }: { busy: boolean; run: Run }) {
       </Card>
 
       <Card style={{ gap: 12 }}>
-        <Eyebrow>Матч</Eyebrow>
-        <Text style={[styles.title, { fontSize: 18 }]}>{matchText(st)}</Text>
-        {st.phase === 'running' ? (
-          <Button
-            title="Остановить матч"
-            kind="danger"
-            icon="stop"
-            onPress={() =>
-              confirmDestructive('Остановить матч?', 'Время матча закончится сейчас, итог зафиксируется.', 'Остановить', () =>
-                run(() => g.stopMatch())
-              )
-            }
-          />
-        ) : (
-          <>
-            <Chips values={MATCH_MINUTES} value={minutes} label={(m) => `${m} мин`} onPick={setMinutes} />
-            <Button
-              title={`Запустить матч на ${minutes} мин`}
-              icon="play"
-              busy={busy}
-              onPress={() =>
-                confirmDestructive(
-                  'Запустить матч?',
-                  `У всех игроков пойдёт отсчёт ${minutes} мин.${territories ? ' Захват территорий начнётся с нуля.' : ''}`,
-                  'Запустить',
-                  () =>
-                    run(async () => {
-                      if (territories) await g.resetTerritory();
-                      await g.startMatch(minutes);
-                    })
-                )
-              }
-            />
-          </>
-        )}
-        <Text style={styles.sub}>Если территорий поровну:</Text>
-        <Chips
-          values={['draw', 'time'] as ('draw' | 'time')[]}
-          value={game.tiebreak}
-          label={(t) => (t === 'draw' ? 'ничья' : 'кто дольше держал')}
-          onPick={(t) => run(() => g.setTiebreak(t))}
-        />
-        <Text style={styles.sub}>
-          Захват территорий и конвой считает телефон игротеха: держите приложение открытым и с интернетом, пока идёт матч.
-        </Text>
-      </Card>
-
-      <Card style={{ gap: 12 }}>
-        <Eyebrow>Режимы на карте</Eyebrow>
-        <Text style={styles.text}>
-          Территорий: {territories} · флагов: {flags} · зон контроля: {zones} · конвоев: {balls}
-        </Text>
-        <Text style={styles.sub}>
-          Поставьте перекрестие на карте и нажмите «+» → «Игра»: зона контроля (хотзона), флаг или 9 территорий вокруг
-          перекрестия. Конвой: на карте карандаш → «Конвой», выберите сторону и поставьте точки маршрута от старта до
-          базы противника — каждая точка поворота станет чекпойнтом. Маршрут обычно 200–300 м на раунд 20–30 минут.
-        </Text>
-        <Eyebrow>Тикеты (жизни стороны)</Eyebrow>
-        <Chips
-          values={TICKETS}
-          value={game.tickets ?? 0}
-          label={(n) => (n ? String(n) : 'Выкл')}
-          onPick={(n) => run(() => g.setTickets(n || null))}
-        />
-      </Card>
-
-      <Card style={{ gap: 12 }}>
-        <Eyebrow>Стороны · {g.sides.length}</Eyebrow>
+        <Eyebrow>Шаг 1 · Стороны · {g.sides.length}</Eyebrow>
+        <Text style={styles.sub}>Создайте стороны и отправьте командирам код — они подключат свои отряды.</Text>
         {g.sides.map((s) => {
           const doc = g.sideDocs.find((d) => d.id === s.id);
           return (
@@ -445,6 +390,134 @@ function TechView({ busy, run }: { busy: boolean; run: Run }) {
             invite={{ kind: 'gameside', code: game.sideCode }}
           />
         )}
+      </Card>
+
+      <Card style={{ gap: 12 }}>
+        <Eyebrow>Шаг 2 · Режимы на карте</Eyebrow>
+        <Text style={styles.sub}>
+          Выберите режим и нажмите «Поставить» — откроется карта, наведите перекрестие на место. Режимы можно совмещать.
+        </Text>
+        {MODES.map((m) => {
+          const n = count(m.k);
+          return (
+            <View key={m.k} style={styles.mode}>
+              <View style={[styles.modeIcon, { borderColor: m.color }]}>
+                <Icon name={m.icon} size={20} color={m.color} />
+              </View>
+              <View style={{ flex: 1, gap: 2 }}>
+                <Text style={styles.bold}>{m.title}</Text>
+                <Text style={styles.sub}>{m.desc}</Text>
+                <Text style={[styles.sub, { color: n ? C.accent : C.faint }]}>{n ? m.done(n) : 'не поставлено'}</Text>
+              </View>
+              <View style={{ gap: 6 }}>
+                <Button
+                  title={n && (m.k === 'sector' || m.k === 'ball') ? 'Заново' : n ? 'Ещё' : 'Поставить'}
+                  kind={n ? 'secondary' : 'primary'}
+                  onPress={() => place(m.k)}
+                />
+                {n > 0 && (
+                  <Button
+                    title="Убрать"
+                    kind="ghost"
+                    onPress={() =>
+                      confirmDestructive(`Убрать: ${m.title}?`, 'Объекты режима исчезнут с карты у всех.', 'Убрать', () =>
+                        run(() => g.removeMode(m.k))
+                      )
+                    }
+                  />
+                )}
+              </View>
+            </View>
+          );
+        })}
+        <View style={styles.mode}>
+          <View style={[styles.modeIcon, { borderColor: C.danger }]}>
+            <Icon name="heart-multiple-outline" size={20} color={C.danger} />
+          </View>
+          <View style={{ flex: 1, gap: 6 }}>
+            <Text style={styles.bold}>Жизни сторон (тикеты)</Text>
+            <Text style={styles.sub}>
+              Без точек на карте: у каждой стороны запас жизней, каждое «Я убит» отнимает одну. В счёте видно, сколько
+              осталось. Можно вместе с любым режимом.
+            </Text>
+            <TicketsInput value={game.tickets ?? null} onSave={(n) => run(() => g.setTickets(n))} />
+          </View>
+        </View>
+      </Card>
+
+      <Card style={{ gap: 12 }}>
+        <Eyebrow>Шаг 3 · Время и старт</Eyebrow>
+        <Text style={[styles.title, { fontSize: 18 }]}>{matchText(st)}</Text>
+        {st.phase === 'running' ? (
+          <Button
+            title="Остановить матч"
+            kind="danger"
+            icon="stop"
+            onPress={() =>
+              confirmDestructive('Остановить матч?', 'Время матча закончится сейчас, итог зафиксируется.', 'Остановить', () =>
+                run(() => g.stopMatch())
+              )
+            }
+          />
+        ) : (
+          <>
+            <View style={styles.inline}>
+              <TextInput
+                value={minutesText}
+                onChangeText={(t) => setMinutesText(t.replace(/[^0-9]/g, '').slice(0, 4))}
+                keyboardType="number-pad"
+                maxLength={4}
+                style={[styles.input, styles.minutes]}
+                selectionColor={C.accent}
+              />
+              <Text style={styles.text}>минут</Text>
+            </View>
+            <Chips
+              values={MATCH_MINUTES}
+              value={minutesOk ? minutes : -1}
+              label={(m) => `${m}`}
+              onPick={(m) => setMinutesText(String(m))}
+            />
+            {territories > 0 && (
+              <>
+                <Text style={styles.sub}>Если территорий поровну:</Text>
+                <Chips
+                  values={['draw', 'time'] as ('draw' | 'time')[]}
+                  value={game.tiebreak}
+                  label={(t) => (t === 'draw' ? 'ничья' : 'кто дольше держал')}
+                  onPick={(t) => run(() => g.setTiebreak(t))}
+                />
+              </>
+            )}
+            {!ready && (
+              <Text style={[styles.sub, { color: C.warn }]}>
+                Сначала шаг 2: поставьте на карте хотя бы один режим или включите тикеты — иначе считать нечего.
+              </Text>
+            )}
+            <Button
+              title={minutesOk ? `Старт · ${minutes} мин` : 'Укажите минуты (1–1440)'}
+              icon="play"
+              busy={busy}
+              disabled={!ready || !minutesOk}
+              onPress={() =>
+                confirmDestructive(
+                  'Запустить матч?',
+                  `У всех игроков пойдёт отсчёт ${minutes} мин.${territories ? ' Захват территорий начнётся с нуля.' : ''}`,
+                  'Старт',
+                  () =>
+                    run(async () => {
+                      if (territories) await g.resetTerritory();
+                      await g.startMatch(minutes);
+                    })
+                )
+              }
+            />
+          </>
+        )}
+        <Text style={styles.sub}>
+          Территории, флаги и конвой считает телефон игротеха: держите приложение открытым и с интернетом, пока идёт
+          матч.
+        </Text>
       </Card>
 
       <Card style={{ gap: 12 }}>
@@ -511,6 +584,67 @@ function TechView({ busy, run }: { busy: boolean; run: Run }) {
   );
 }
 
+/** Lives per side: any number, or off. */
+function TicketsInput({ value, onSave }: { value: number | null; onSave: (n: number | null) => void }) {
+  const [text, setText] = useState(value ? String(value) : '');
+  const n = Number(text);
+  const dirty = (text ? n : null) !== value;
+  return (
+    <View style={styles.inline}>
+      <TextInput
+        value={text}
+        onChangeText={(t) => setText(t.replace(/[^0-9]/g, '').slice(0, 5))}
+        placeholder="выкл"
+        placeholderTextColor={C.faint}
+        keyboardType="number-pad"
+        maxLength={5}
+        style={[styles.input, styles.minutes]}
+        selectionColor={C.accent}
+      />
+      {dirty ? (
+        <Button title={text && n > 0 ? 'Сохранить' : 'Выключить'} kind="secondary" onPress={() => onSave(text && n > 0 ? n : null)} />
+      ) : (
+        <Text style={styles.sub}>{value ? 'жизней у каждой стороны' : 'выключены'}</Text>
+      )}
+    </View>
+  );
+}
+
+const MODES: { k: GamePlace; title: string; desc: string; icon: IconName; color: string; done: (n: number) => string }[] = [
+  {
+    k: 'sector',
+    title: 'Захват территорий',
+    desc: 'Поле 3×3. Территорию берёт сторона, у которой там больше живых бойцов 3 минуты подряд.',
+    icon: 'hexagon-outline',
+    color: '#FFC83D',
+    done: () => 'поле размечено',
+  },
+  {
+    k: 'flag',
+    title: 'Флаги',
+    desc: 'Захват сам: больше своих бойцов в 15 м от флага 30 секунд. Очко за минуту удержания.',
+    icon: 'flag',
+    color: '#FF8A3D',
+    done: (n) => `флагов: ${n}`,
+  },
+  {
+    k: 'hotzone',
+    title: 'Хотзона',
+    desc: 'Большой круг, внутри переезжает горячий. Минута в зоне — 1 очко, в хотзоне — 2.',
+    icon: 'fire',
+    color: '#FF5A1F',
+    done: (n) => `зон: ${n}`,
+  },
+  {
+    k: 'ball',
+    title: 'Конвой',
+    desc: 'Маршрут через чекпойнты на базу противника. Едет, пока своих рядом больше, чем чужих.',
+    icon: 'truck',
+    color: '#3D9BFF',
+    done: (n) => `конвоев: ${n}`,
+  },
+];
+
 function SideRow({
   s,
   pending,
@@ -557,6 +691,9 @@ function SideRow({
 }
 
 const styles = StyleSheet.create({
+  mode: { flexDirection: 'row', gap: 12, alignItems: 'flex-start', paddingVertical: 6 },
+  modeIcon: { width: 40, height: 40, borderRadius: 20, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center' },
+  minutes: { width: 90, textAlign: 'center', fontSize: 18 },
   content: { padding: 16, gap: 14, paddingBottom: 48, width: '100%', maxWidth: 640, alignSelf: 'center' },
   title: { color: C.text, fontSize: 22, fontFamily: F.bold },
   text: { color: C.text, fontSize: 14, fontFamily: F.regular, lineHeight: 20 },

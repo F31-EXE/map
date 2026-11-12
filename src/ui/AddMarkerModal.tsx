@@ -9,7 +9,7 @@ import type { LatLng, MarkerKind } from '../lib/types';
 import type { MarkerScope } from '../state/session';
 import type { OrderTarget } from '../state/side';
 import { Button, Eyebrow, Icon, Sheet, tap, type IconName } from './components';
-import { HOT, ZoneSettings } from './ZonePanel';
+import { ZoneSettings } from './ZonePanel';
 import { C, F, R } from './theme';
 
 const TERRITORY_SIZES = [100, 150, 200, 300];
@@ -21,7 +21,7 @@ export function AddMarkerModal({
   at,
   inTeam,
   canCommand,
-  isTech,
+  gameKind,
   orderTargets,
   onCancel,
   onSave,
@@ -30,8 +30,8 @@ export function AddMarkerModal({
   inTeam: boolean;
   /** Shows the orders row (move / attack / defend). */
   canCommand: boolean;
-  /** Game tech: shows the game modes (control zone, flag, territories). */
-  isTech: boolean;
+  /** Placing a game mode from the game screen: only that mode and its settings. */
+  gameKind?: MarkerKind | null;
   /** Who an order can go to; more than one shows a picker (side commander). */
   orderTargets: { id: OrderTarget; label: string; color?: string }[];
   onCancel: () => void;
@@ -59,10 +59,14 @@ export function AddMarkerModal({
 
   useEffect(() => {
     if (at) {
+      if (gameKind) setKind(gameKind);
+      else setKind((k) => (GAME_KINDS.includes(k) ? 'enemy' : k));
       setLabel('');
       setWaveMin(null);
       setZone((z) => newZone(z.r, z.hot, Math.round(z.every / 60_000)));
     }
+    // Only when the sheet opens.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [at]);
 
   // Keep the target valid when squads join or leave the side.
@@ -99,11 +103,11 @@ export function AddMarkerModal({
   return (
     <Sheet visible={!!at} onClose={onCancel}>
       <View>
-        <Text style={styles.title}>{order ? 'Приказ' : 'Новая метка'}</Text>
+        <Text style={styles.title}>{gameKind ? GAME_TITLES[gameKind] ?? 'Игра' : order ? 'Приказ' : 'Новая метка'}</Text>
         {at && <Text style={styles.coords}>{formatCoords(at)}</Text>}
       </View>
 
-      {canCommand && (
+      {canCommand && !gameKind && (
         <View style={{ gap: 8 }}>
           <Eyebrow>Приказ · вибро и звук</Eyebrow>
           <View style={styles.orders}>
@@ -156,6 +160,7 @@ export function AddMarkerModal({
         </View>
       )}
 
+      {!gameKind && (
       <View style={{ gap: 8 }}>
         <Eyebrow>Метка</Eyebrow>
         <View style={styles.grid}>
@@ -187,6 +192,9 @@ export function AddMarkerModal({
         </View>
       </View>
 
+      )}
+
+      {!gameKind && (
       <View style={{ gap: 8 }}>
         <Eyebrow>Полигон</Eyebrow>
         <View style={styles.grid}>
@@ -217,52 +225,38 @@ export function AddMarkerModal({
         </View>
       </View>
 
-      {isTech && (
+      )}
+
+      {gameKind === 'hotzone' && (
         <View style={{ gap: 8 }}>
-          <Eyebrow>Игра · для всех сторон</Eyebrow>
-          <GameTile
-            on={isZone}
-            color={HOT}
-            icon="fire"
-            title="Зона контроля с хотзоной"
-            sub="Большой круг здесь, внутри него переезжает горячий круг"
-            onPress={() => pick('hotzone')}
-          />
-          {isZone && <ZoneSettings zone={zone} onChange={setZone} />}
-          <GameTile
-            on={kind === 'flag'}
-            color={MARKER_KINDS.flag.color}
-            icon="flag"
-            title="Флаг"
-            sub="Боец рядом нажимает «Захватить»; очки за минуты удержания"
-            onPress={() => pick('flag')}
-          />
-          <GameTile
-            on={kind === 'sector'}
-            color="#FFC83D"
-            icon="hexagon-outline"
-            title="Захват территорий · 9 зон"
-            sub="Квадрат 3×3 с центром здесь; захват — перевес бойцов 3 минуты"
-            onPress={() => pick('sector')}
-          />
-          {kind === 'sector' && (
-            <View style={styles.waveRow}>
-              {TERRITORY_SIZES.map((m) => (
-                <Pressable
-                  key={m}
-                  onPress={() => {
-                    tap();
-                    setTerritorySize(m);
-                  }}
-                  style={[styles.waveChip, m === territorySize && styles.waveChipOn]}
-                >
-                  <Text style={[styles.waveText, m === territorySize && { color: C.accentInk }]}>
-                    {m} м · поле {m * 3} м
-                  </Text>
-                </Pressable>
-              ))}
-            </View>
-          )}
+          <Text style={styles.coords}>Большой круг с центром здесь, внутри него переезжает горячий круг.</Text>
+          <ZoneSettings zone={zone} onChange={setZone} />
+        </View>
+      )}
+      {gameKind === 'flag' && (
+        <Text style={styles.coords}>
+          Флаг здесь. Захват сам: чьих бойцов в 15 м больше 30 секунд подряд — того и флаг. Очко за минуту удержания.
+        </Text>
+      )}
+      {gameKind === 'sector' && (
+        <View style={{ gap: 8 }}>
+          <Text style={styles.coords}>Поле 3×3 с центром здесь. Сторона квадрата:</Text>
+          <View style={styles.waveRow}>
+            {TERRITORY_SIZES.map((m) => (
+              <Pressable
+                key={m}
+                onPress={() => {
+                  tap();
+                  setTerritorySize(m);
+                }}
+                style={[styles.waveChip, m === territorySize && styles.waveChipOn]}
+              >
+                <Text style={[styles.waveText, m === territorySize && { color: C.accentInk }]}>
+                  {m} м · поле {m * 3} м
+                </Text>
+              </Pressable>
+            ))}
+          </View>
         </View>
       )}
 
@@ -341,33 +335,12 @@ export function AddMarkerModal({
   );
 }
 
-function GameTile({
-  on,
-  color,
-  icon,
-  title,
-  sub,
-  onPress,
-}: {
-  on: boolean;
-  color: string;
-  icon: IconName;
-  title: string;
-  sub: string;
-  onPress: () => void;
-}) {
-  return (
-    <Pressable onPress={onPress} style={[styles.zoneTile, on && { borderColor: color, backgroundColor: color + '1F' }]}>
-      <View style={[styles.kindIcon, { borderColor: color, backgroundColor: on ? color : 'transparent' }]}>
-        <Icon name={icon} size={20} color={on ? C.accentInk : color} />
-      </View>
-      <View style={{ flex: 1 }}>
-        <Text style={[styles.zoneTitle, on && { color: C.text }]}>{title}</Text>
-        <Text style={styles.zoneSub}>{sub}</Text>
-      </View>
-    </Pressable>
-  );
-}
+
+const GAME_TITLES: Partial<Record<MarkerKind, string>> = {
+  hotzone: 'Зона контроля с хотзоной',
+  flag: 'Флаг',
+  sector: 'Захват территорий',
+};
 
 const styles = StyleSheet.create({
   title: { color: C.text, fontSize: 22, fontFamily: F.bold },

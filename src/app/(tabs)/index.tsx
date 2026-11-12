@@ -307,6 +307,9 @@ export default function MapScreen() {
     [areas]
   );
   const [addAt, setAddAt] = useState<LatLng | null>(null);
+  // A game mode being placed from the game screen (flag, zone, territories).
+  const [gameKind, setGameKind] = useState<MarkerKind | null>(null);
+  const placingRef = useRef<MarkerKind | null>(null);
   const [selection, setSelection] = useState<Selection>(null);
   const [drawing, setDrawing] = useState<Drawing | null>(null);
   // Top edge of the bottom HUD, measured, so the map's scale bar sits above it.
@@ -437,6 +440,8 @@ export default function MapScreen() {
   const openAdd = useCallback((p: LatLng) => {
     if (drawingRef.current) return;
     if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+    // Placing a game mode from the game screen: that mode only; otherwise a plain marker.
+    setGameKind(placingRef.current);
     setAddAt(p);
   }, []);
 
@@ -468,6 +473,21 @@ export default function MapScreen() {
   );
   const onMemberPress = useCallback((id: string) => setSelection({ type: 'member', id }), []);
 
+  // The game screen asked to place a mode: convoy routes are drawn, the rest go at the crosshair.
+  const placeRequest = game.placeRequest;
+  useEffect(() => {
+    if (!placeRequest) return;
+    setFollow(false);
+    setSelection(null);
+    if (placeRequest === 'ball') {
+      setDrawing({ kind: 'ball', color: ARROW_COLORS[0], points: [], scope: 'team', sideId: game.sides[0]?.id });
+      game.requestPlace(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [placeRequest]);
+  const placing = placeRequest && placeRequest !== 'ball' ? placeRequest : null;
+  placingRef.current = placing;
+
   const saveMarker = async (
     kind: MarkerKind,
     label: string,
@@ -481,6 +501,7 @@ export default function MapScreen() {
     try {
       const at = { label, lat: addAt.lat, lng: addAt.lng };
       // Game modes go to the game, for every side.
+      const placingGame = kind === 'hotzone' || kind === 'flag' || kind === 'sector';
       if (kind === 'hotzone' && zone) await game.addZone(addAt, zone, label);
       else if (kind === 'flag') await game.addFlag(addAt, label);
       else if (kind === 'sector') await game.addTerritory(addAt, territorySize);
@@ -492,6 +513,12 @@ export default function MapScreen() {
       }
       setAddAt(null);
       if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+      if (placingGame) {
+        // Back to the game screen, where the next step is.
+        setGameKind(null);
+        game.requestPlace(null);
+        router.navigate('/game');
+      }
     } catch (e) {
       Alert.alert('Не удалось поставить метку', (e as Error).message);
     }
@@ -1098,6 +1125,9 @@ export default function MapScreen() {
               if (drawing.kind === 'ball') {
                 if (!drawing.sideId) throw new Error('Выберите сторону, чей это конвой');
                 await game.addBall(drawing.sideId, pts);
+                setDrawing(null);
+                router.navigate('/game');
+                return;
               } else if (drawing.kind === 'arrow') {
                 await session.addMarker(
                   {
@@ -1125,11 +1155,39 @@ export default function MapScreen() {
         />
       )}
 
+      {placing && !addAt && (
+        <Glass
+          radius={R.lg}
+          style={[styles.placeBar, { bottom: insets.bottom + 12, left: 12 + insets.left, right: 12 + insets.right }]}
+        >
+          <Text style={styles.placeTitle}>{PLACE_TEXT[placing]}</Text>
+          <Text style={styles.placeSub}>Двигайте карту, чтобы перекрестие встало на место, и нажмите «Сюда».</Text>
+          <View style={{ flexDirection: 'row', gap: 10 }}>
+            <Button
+              title="Отмена"
+              kind="secondary"
+              style={{ flex: 1 }}
+              onPress={() => {
+                setGameKind(null);
+                game.requestPlace(null);
+                router.navigate('/game');
+              }}
+            />
+            <Button
+              title="Сюда"
+              icon="crosshairs-gps"
+              style={{ flex: 1.4 }}
+              onPress={() => center && openAdd(center)}
+            />
+          </View>
+        </Glass>
+      )}
+
       {/* Bottom-right actions */}
       <View
-        pointerEvents={drawing ? 'none' : 'auto'}
+        pointerEvents={drawing || placing ? 'none' : 'auto'}
         style={[
-          drawing && { opacity: 0 },
+          (drawing || placing) && { opacity: 0 },
           styles.actions,
           {
             bottom:
@@ -1361,7 +1419,7 @@ export default function MapScreen() {
         at={addAt}
         inTeam={inTeam}
         canCommand={session.canCommand || side.isSideCommander}
-        isTech={game.isTech}
+        gameKind={gameKind}
         orderTargets={orderTargets}
         onCancel={() => setAddAt(null)}
         onSave={saveMarker}
@@ -1633,7 +1691,8 @@ function DrawBar({
   const n = drawing.points.length;
   const ball = drawing.kind === 'ball';
   const area = drawing.kind !== 'arrow' && !ball;
-  const kinds = sides.length ? [...DRAW_KINDS, { kind: 'ball' as const, label: 'Конвой' }] : DRAW_KINDS;
+  // The convoy route is started from the game screen; the usual kinds otherwise.
+  const kinds = ball ? [] : DRAW_KINDS;
   return (
     <Glass radius={R.lg} style={[styles.drawBar, { bottom, left, right }]}>
       <View style={styles.drawRow}>
@@ -1797,6 +1856,12 @@ function Reticle() {
 const TICK = 9;
 const GAP = 7;
 
+const PLACE_TEXT: Record<'sector' | 'flag' | 'hotzone', string> = {
+  sector: 'Захват территорий: центр поля 3×3',
+  flag: 'Флаг: где он стоит',
+  hotzone: 'Зона контроля: центр большого круга',
+};
+
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: C.bg },
   hqRow: { flex: 1, flexDirection: 'row', backgroundColor: C.bg },
@@ -1832,6 +1897,9 @@ const styles = StyleSheet.create({
     borderLeftColor: C.danger,
   },
   bannerText: { color: C.text, fontSize: 13, fontFamily: F.regular, flex: 1 },
+  placeBar: { position: 'absolute', padding: 14, gap: 10 },
+  placeTitle: { color: C.text, fontSize: 16, fontFamily: F.bold },
+  placeSub: { color: C.dim, fontSize: 13, fontFamily: F.regular },
   sosBanner: { borderLeftWidth: 4, backgroundColor: 'rgba(120, 10, 10, 0.55)' },
   sosTitle: { color: C.danger, fontSize: 15, fontFamily: F.bold },
   sosGo: {

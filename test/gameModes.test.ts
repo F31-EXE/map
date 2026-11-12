@@ -226,3 +226,27 @@ test('convoy: result', () => {
   );
   assert.deepEqual(convoyResult([{ owner: 'blue', progress: 250, length: 250, checkpoints: 3, goal: 1 }], sides), ['blue']);
 });
+
+test('flags are taken by standing at them', async () => {
+  const { flagLeader, flagStep, FLAG_HOLD_MS } = await import('../src/lib/gameModes.ts');
+  const flag = { lat: 56.8, lng: 60.6 };
+  const near = (sideId: string) => ({ sideId, lat: 56.8, lng: 60.6001 }); // ~6 m
+  const far = (sideId: string) => ({ sideId, lat: 56.801, lng: 60.6 }); // ~110 m
+  assert.equal(flagLeader(flag, []), null);
+  assert.equal(flagLeader(flag, [near('a'), far('b'), far('b')]), 'a');
+  assert.equal(flagLeader(flag, [near('a'), near('b')]), null);
+  assert.equal(flagLeader(flag, [near('a'), near('b'), near('b')]), 'b');
+
+  let st = flagStep(null, null, 'a', 0);
+  assert.deepEqual(st, { owner: null, cap: { s: 'a', t: 0 }, captured: false });
+  st = flagStep(st.owner, st.cap, 'a', FLAG_HOLD_MS - 1);
+  assert.equal(st.captured, false);
+  st = flagStep(st.owner, st.cap, 'a', FLAG_HOLD_MS);
+  assert.deepEqual(st, { owner: 'a', cap: null, captured: true });
+  // Nobody there: stays with the holder.
+  assert.deepEqual(flagStep('a', null, null, 99), { owner: 'a', cap: null, captured: false });
+  // A tie or leaving resets the count.
+  assert.equal(flagStep('a', { s: 'b', t: 0 }, null, 10).cap, null);
+  // Another side starts over.
+  assert.deepEqual(flagStep('a', { s: 'b', t: 0 }, 'c', 10).cap, { s: 'c', t: 10 });
+});

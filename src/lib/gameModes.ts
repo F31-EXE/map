@@ -4,7 +4,8 @@
  *   - territories: the field split 3×3 (numbered like the snail grid); every match
  *     minute each sector goes to the side with the most living fighters in it
  *     (a tie keeps the old owner); at the end the side holding most sectors wins;
- *   - flags: captured by a fighter on the spot; a side scores a point per minute held;
+ *   - flags: taken by outnumbering the others within 15 m for 30 s (refereed by a tech's phone);
+ *     a side scores a point per minute held;
  *   - tickets: each side's lives; every «Я убит» costs one;
  *   - control zone (WARDOGS): per-fighter points summed per side;
  *   - convoy: a side escorts its convoy along a route of checkpoints to the enemy base.
@@ -160,6 +161,41 @@ export function heldMinutes(log: Capture[] | undefined, until: number): Record<s
   }
   for (const k of Object.keys(out)) out[k] = Math.floor(out[k] / 60_000);
   return out;
+}
+
+/** Flags are taken by standing at them: no buttons, the phones stay in pockets. */
+export const FLAG_RADIUS = 15;
+export const FLAG_HOLD_MS = 30_000;
+export type FlagCap = { s: string; t: number } | null;
+
+/** The side with strictly more live fighters within `radius` of `pos`, or null (nobody / tie). */
+export function flagLeader(
+  pos: LatLng,
+  fighters: { sideId: string; lat: number; lng: number }[],
+  radius = FLAG_RADIUS
+): string | null {
+  const n: Record<string, number> = {};
+  for (const f of fighters) if (distanceMeters(pos, f) <= radius) n[f.sideId] = (n[f.sideId] ?? 0) + 1;
+  const ranked = Object.entries(n).sort((a, b) => b[1] - a[1]);
+  if (!ranked.length || (ranked[1] && ranked[1][1] === ranked[0][1])) return null;
+  return ranked[0][0];
+}
+
+/**
+ * One referee look at a flag: a side that outnumbers the others at it for
+ * FLAG_HOLD_MS in a row takes it. Leaving, a tie or the holder outnumbering resets
+ * the count; an empty flag stays with its holder.
+ */
+export function flagStep(
+  owner: string | null,
+  cap: FlagCap,
+  leader: string | null,
+  now: number
+): { owner: string | null; cap: FlagCap; captured: boolean } {
+  if (!leader || leader === owner) return { owner, cap: null, captured: false };
+  if (cap?.s !== leader) return { owner, cap: { s: leader, t: now }, captured: false };
+  if (now - cap.t >= FLAG_HOLD_MS) return { owner: leader, cap: null, captured: true };
+  return { owner, cap, captured: false };
 }
 
 export type ScorePlayer = { sideId: string; deaths?: number; pts?: Record<string, number> };

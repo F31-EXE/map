@@ -14,6 +14,9 @@ import {
   pathLength,
   pointAlong,
   rollBall,
+  flagLeader,
+  flagStep,
+  type FlagCap,
   sectorAt,
   SIDE_COLORS,
   territoryMinute,
@@ -118,11 +121,18 @@ type GameState = {
   deleteMarker: (m: TacMarker) => Promise<void>;
   /** A fighter captures a flag for their side (standing next to it). */
   captureFlag: (m: TacMarker) => Promise<void>;
+  /** Game screen → map: place this mode's objects at the crosshair (convoy: draw its route). */
+  placeRequest: GamePlace | null;
+  requestPlace: (k: GamePlace | null) => void;
+  /** Removes every object of one mode from the map. */
+  removeMode: (k: GamePlace) => Promise<void>;
   /** Techs: publish my position (shown to everyone as an orange diamond). */
   reportPosition: (p: SelfPosition) => void;
   /** Any scanned or opened invite: game ones here, squad and side ones via the side. */
   acceptInvite: (invite: Invite) => Promise<string>;
 };
+
+export type GamePlace = 'sector' | 'flag' | 'hotzone' | 'ball';
 
 const Ctx = createContext<GameState | null>(null);
 
@@ -155,6 +165,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
   const [gameSides, setGameSides] = useState<GameSide[]>([]);
   const [players, setPlayers] = useState<GamePlayer[]>([]);
   const [markers, setMarkers] = useState<TacMarker[]>([]);
+  const [placeRequest, requestPlace] = useState<GamePlace | null>(null);
   useEffect(() => {
     setGame(null);
     setTechs([]);
@@ -431,13 +442,30 @@ export function GameProvider({ children }: { children: ReactNode }) {
   const ballsRef = useRef(balls);
   ballsRef.current = balls;
   const hasBalls = balls.length > 0;
+  const flagMarkers = useMemo(() => markers.filter((m) => m.kind === 'flag'), [markers]);
+  const flagsRef = useRef(flagMarkers);
+  flagsRef.current = flagMarkers;
+  const hasFlags = flagMarkers.length > 0;
   useEffect(() => {
-    if (!isTech || referee !== uid || !game?.match || !gameId || !hasBalls) return;
+    if (!isTech || referee !== uid || !game?.match || !gameId || !(hasBalls || hasFlags)) return;
     const match = game.match;
     const t = setInterval(() => {
       const now = Date.now();
       if (matchState(match, now).phase !== 'running') return;
       const live = fightersRef.current.filter((f) => f.updatedAt != null && now - f.updatedAt < BALL_FRESH_MS);
+      // Flags: whoever outnumbers the others at a flag for 30 s takes it. Written only
+      // when something changes, not every tick.
+      for (const f of flagsRef.current) {
+        const cap = (f.fcap as FlagCap | undefined) ?? null;
+        const next = flagStep(f.owner ?? null, cap, flagLeader(f, live), now);
+        if (next.captured) {
+          games
+            .updateGameMarker(gameId, f.id, { owner: next.owner, log: [...(f.log ?? []), { s: next.owner!, t: now }], fcap: null } as Partial<TacMarker>)
+            .catch(() => {});
+        } else if ((next.cap?.s ?? null) !== (cap?.s ?? null)) {
+          games.updateGameMarker(gameId, f.id, { fcap: next.cap } as Partial<TacMarker>).catch(() => {});
+        }
+      }
       for (const b of ballsRef.current) {
         const pts = b.points as LatLng[];
         const cur = b.ball ?? { progress: 0, at: match.start, push: 0, goal: null };
@@ -454,7 +482,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
       }
     }, BALL_TICK_MS);
     return () => clearInterval(t);
-  }, [isTech, referee, uid, game?.match, gameId, hasBalls]);
+  }, [isTech, referee, uid, game?.match, gameId, hasBalls, hasFlags]);
 
   // A new match starts the count over.
   const matchStart = game?.match?.start;
@@ -758,6 +786,13 @@ export function GameProvider({ children }: { children: ReactNode }) {
       deleteMarker: async (m) => {
         await games.deleteGameMarker(requireGame().id, m.id);
       },
+      placeRequest,
+      requestPlace,
+      removeMode: async (k) => {
+        const g = requireGame();
+        const of = markers.filter((m) => (k === 'hotzone' ? Boolean(m.zone) : m.kind === k));
+        await Promise.all(of.map((m) => games.deleteGameMarker(g.id, m.id)));
+      },
       captureFlag: async (m) => {
         if (!mySideId) throw new Error('Вы не в игре');
         if (m.owner === mySideId) return;
@@ -812,6 +847,8 @@ export function GameProvider({ children }: { children: ReactNode }) {
       sectors,
       balls,
       reportPosition,
+      placeRequest,
+      markers,
     ]
   );
 
