@@ -73,7 +73,7 @@ function NoGame({ busy, run }: { busy: boolean; run: Run }) {
         </View>
         <Text style={styles.text}>
           Ведёт большую игру: создаёт стороны и раздаёт коды их командирам, запускает матч, ставит режимы (захват
-          территорий, флаги, тикеты, хотзона). Видит все стороны. Игротехов может быть несколько, у всех одинаковые
+          территорий, флаги, хотзона, конвой, тикеты). Видит все стороны. Игротехов может быть несколько, у всех одинаковые
           права. На карте игротех — оранжевый ромб.
         </Text>
         <TextInput
@@ -309,7 +309,8 @@ function TechView({ busy, run }: { busy: boolean; run: Run }) {
       return;
     }
     g.requestPlace(k);
-    router.navigate('/');
+    // Off the stack while placing: the map brings a fresh game screen back afterwards.
+    router.dismissTo('/');
   };
 
   return (

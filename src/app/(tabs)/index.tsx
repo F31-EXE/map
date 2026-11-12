@@ -1350,7 +1350,7 @@ export default function MapScreen() {
         radius={R.lg}
         onLayout={(e) => setHudTop(e.nativeEvent.layout.y)}
         style={[
-          (drawing || calculator || nav) && { display: 'none' },
+          (drawing || calculator || nav || placing) && { display: 'none' },
           styles.hud,
           { bottom: insets.bottom + 12, left: 12 + insets.left, right: 12 + insets.right },
           landscape && styles.hudCompact,
