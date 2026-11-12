@@ -64,13 +64,17 @@
     shiftKeyRotate: true,
     rotateControl: false,
     pitchDrag: false,
+    // Vector shapes (zones, polygon edges, own trail) are drawn only a little past the
+    // screen by default (10 %); zooming out or turning the map showed their clipped
+    // edges until the zoom ended, so they looked like jumping. Draw a screen around.
+    renderer: L.svg({ padding: 1 }),
   }).setView([55.751, 37.618], 10);
   map.attributionControl.setPrefix(false);
 
   // leaflet-rotate turns the map with any change of angle between the fingers, so a
   // pinch zoom kept twisting it. Turn only after a deliberate twist (TWIST_DEG), and
-  // never in a pinch that has already zoomed noticeably first.
-  var TWIST_DEG = 18;
+  // never in a pinch that has already zoomed a lot first (18° and any zoom were too stiff).
+  var TWIST_DEG = 10;
   (function () {
     var tg = map.touchGestures;
     if (!tg) return;
@@ -109,7 +113,7 @@
           );
           this._startTheta = Math.atan(v.x / v.y);
           this._startBearing = map.getBearing() + (v.y < 0 ? 180 : 0);
-        } else if (Math.abs(Math.log(spread(e) / this._twistSpread)) > 0.12) {
+        } else if (Math.abs(Math.log(spread(e) / this._twistSpread)) > 0.35) {
           this._twist = 'off';
         }
       }
@@ -1984,6 +1988,11 @@
     },
     setDraw: setDraw,
     // Back to north-up (animated), or a given bearing.
+    zoomBy: function (p) {
+      var d = (p && p.d) || 0;
+      if (d > 0) map.zoomIn(d);
+      else if (d < 0) map.zoomOut(-d);
+    },
     setBearing: function (p) {
       headingUp = false;
       turningByCode = true;

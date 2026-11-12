@@ -651,8 +651,14 @@ export default function MapScreen() {
 
   // SOS: open calls from the squad chat (they travel by server, Bluetooth and radio).
   const chat = useChat();
-  const sosNow = useNow(inTeam);
-  const sosMinute = Math.floor(sosNow / 30_000);
+  // Calls expire after 15 min: a 30 s clock is plenty (a 1 s one re-rendered the whole
+  // map screen every second).
+  const [sosMinute, setSosMinute] = useState(() => Math.floor(Date.now() / 30_000));
+  useEffect(() => {
+    if (!inTeam) return;
+    const t = setInterval(() => setSosMinute(Math.floor(Date.now() / 30_000)), 30_000);
+    return () => clearInterval(t);
+  }, [inTeam]);
   const sosCalls = useMemo(
     () => (inTeam ? activeSos(chat.messages, sosMinute * 30_000 + 30_000) : []),
     [inTeam, chat.messages, sosMinute]
@@ -1012,6 +1018,35 @@ export default function MapScreen() {
         </Glass>
       </View>
 
+      {/* Zoom buttons: left edge, mid-height, out of the way of the panels. */}
+      {!drawing && (
+        <Glass radius={R.lg} style={[styles.zoom, { left: 12 + insets.left, top: height / 2 - 48 }]}>
+          <Pressable
+            accessibilityLabel="Приблизить"
+            hitSlop={4}
+            onPress={() => {
+              tap();
+              mapRef.current?.zoomBy(1);
+            }}
+            style={({ pressed }) => [styles.zoomBtn, pressed && { opacity: 0.6 }]}
+          >
+            <Icon name="plus" size={24} color={C.text} />
+          </Pressable>
+          <View style={styles.toolbarSep} />
+          <Pressable
+            accessibilityLabel="Отдалить"
+            hitSlop={4}
+            onPress={() => {
+              tap();
+              mapRef.current?.zoomBy(-1);
+            }}
+            style={({ pressed }) => [styles.zoomBtn, pressed && { opacity: 0.6 }]}
+          >
+            <Icon name="minus" size={24} color={C.text} />
+          </Pressable>
+        </Glass>
+      )}
+
       {sosShown && (
         <Glass
           radius={R.md}
@@ -1082,7 +1117,12 @@ export default function MapScreen() {
           style={
             landscape
               ? { top: insets.top + 60, left: 12 + insets.left }
-              : { top: pillTop + 64 + (banner || sosShown ? 56 : 0), left: 12 + insets.left }
+              : {
+                  top: pillTop + 64 + (banner || sosShown ? 56 : 0),
+                  left: 12 + insets.left,
+                  // Clear of the toolbar column on the right.
+                  right: 12 + insets.right + 64,
+                }
           }
           onPress={() => setSelection({ type: 'marker', id: zoneMarker.id })}
         />
@@ -1898,6 +1938,8 @@ const styles = StyleSheet.create({
   },
   bannerText: { color: C.text, fontSize: 13, fontFamily: F.regular, flex: 1 },
   placeBar: { position: 'absolute', padding: 14, gap: 10 },
+  zoom: { position: 'absolute', paddingHorizontal: 2 },
+  zoomBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
   placeTitle: { color: C.text, fontSize: 16, fontFamily: F.bold },
   placeSub: { color: C.dim, fontSize: 13, fontFamily: F.regular },
   sosBanner: { borderLeftWidth: 4, backgroundColor: 'rgba(120, 10, 10, 0.55)' },

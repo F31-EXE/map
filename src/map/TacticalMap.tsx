@@ -40,6 +40,8 @@ export type TacticalMapHandle = {
   fitPoints: (points: LatLng[]) => void;
   /** Turns the map back to north-up. */
   resetNorth: () => void;
+  /** Zoom in (+1) or out (−1) around the center, like the +/− buttons. */
+  zoomBy: (d: number) => void;
 };
 
 type Props = {
@@ -153,6 +155,7 @@ export function TacticalMap(props: Props) {
       setView: (p, zoom) => command({ type: 'setView', payload: { ...p, zoom } }),
       fitPoints: (points) => command({ type: 'fitPoints', payload: points }),
       resetNorth: () => command({ type: 'setBearing', payload: { bearing: 0 } }),
+      zoomBy: (d) => command({ type: 'zoomBy', payload: { d } }),
     }),
     [command]
   );

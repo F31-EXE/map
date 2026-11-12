@@ -136,6 +136,32 @@ export type GamePlace = 'sector' | 'flag' | 'hotzone' | 'ball';
 
 const Ctx = createContext<GameState | null>(null);
 
+/**
+ * A listener that comes back after an error. Firestore drops a listener for good on
+ * a refusal, and a tech's listeners are refused when they start a moment before the
+ * side they read is written (a new side, a squad just attached): without this the
+ * tech's phone never saw the fighters, so flags, territories and convoys never moved.
+ */
+function retrying(subscribe: (onError: (e: Error) => void) => Unsubscribe, delayMs = 4000): Unsubscribe {
+  let stopped = false;
+  let current: Unsubscribe | null = null;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const start = () => {
+    if (stopped) return;
+    current = subscribe(() => {
+      current?.();
+      current = null;
+      if (!stopped) timer = setTimeout(start, delayMs);
+    });
+  };
+  start();
+  return () => {
+    stopped = true;
+    if (timer) clearTimeout(timer);
+    current?.();
+  };
+}
+
 export function useGame(): GameState {
   const v = useContext(Ctx);
   if (!v) throw new Error('useGame must be used inside <GameProvider>');
@@ -173,13 +199,13 @@ export function GameProvider({ children }: { children: ReactNode }) {
     setPlayers([]);
     setMarkers([]);
     if (!gameId || !uid) return;
-    const ignore = () => {};
+    // Retried: right after creating or joining a game the first reads can be refused.
     const subs = [
-      games.subscribeGame(gameId, setGame, ignore),
-      games.subscribeTechs(gameId, setTechs, ignore),
-      games.subscribeGameSides(gameId, setGameSides, ignore),
-      games.subscribePlayers(gameId, setPlayers, ignore),
-      games.subscribeGameMarkers(gameId, setMarkers, ignore),
+      retrying((e) => games.subscribeGame(gameId, setGame, e)),
+      retrying((e) => games.subscribeTechs(gameId, setTechs, e)),
+      retrying((e) => games.subscribeGameSides(gameId, setGameSides, e)),
+      retrying((e) => games.subscribePlayers(gameId, setPlayers, e)),
+      retrying((e) => games.subscribeGameMarkers(gameId, setMarkers, e)),
     ];
     return () => subs.forEach((u) => u());
   }, [gameId, uid]);
@@ -204,10 +230,10 @@ export function GameProvider({ children }: { children: ReactNode }) {
     setSquads({});
     setSquadMembers({});
     if (!isTech || !gameId) return;
-    const ignore = () => {};
     const perSide = new Map<string, Unsubscribe>();
     const perTeam = new Map<string, Unsubscribe>();
-    const unsub = games.subscribeSidesOfGame(
+    const unsub = retrying((onSidesError) =>
+      games.subscribeSidesOfGame(
       gameId,
       (list) => {
         setSideDocs(list);
@@ -222,21 +248,29 @@ export function GameProvider({ children }: { children: ReactNode }) {
           if (perSide.has(s.id)) continue;
           perSide.set(
             s.id,
-            sides.subscribeSideTeams(
+            retrying((onError) =>
+              sides.subscribeSideTeams(
               s.id,
               (ts) => {
                 setSquads((cur) => ({ ...cur, [s.id]: ts }));
                 for (const t of ts) {
                   if (perTeam.has(t.id)) continue;
-                  perTeam.set(t.id, teams.subscribeMembers(t.id, (m) => setSquadMembers((cur) => ({ ...cur, [t.id]: m })), ignore));
+                  perTeam.set(
+                    t.id,
+                    retrying((onError) =>
+                      teams.subscribeMembers(t.id, (m) => setSquadMembers((cur) => ({ ...cur, [t.id]: m })), onError)
+                    )
+                  );
                 }
               },
-              ignore
+              onError
+              )
             )
           );
         }
       },
-      ignore
+      onSidesError
+      )
     );
     return () => {
       unsub();

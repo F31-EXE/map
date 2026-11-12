@@ -8,7 +8,7 @@ import { BACKGROUND_SUPPORTED } from '../../services/backgroundLocation';
 import { clearLastError, lastError } from '../../services/crashGuard';
 import { TRAIL_CHOICES } from '../../lib/trail';
 import { setNight, useNight } from '../../state/night';
-import { setVoice, useVoice } from '../../state/voice';
+import { say, setVoice, setVolume, useVoice, useVolume } from '../../state/voice';
 import { setTrailMinutes, useTrailMinutes } from '../../state/trail';
 import { useSession } from '../../state/session';
 import { ROLES } from '../../lib/roles';
@@ -20,12 +20,15 @@ import { RolePicker } from '../../ui/RolePicker';
 import { UpdatesCard } from '../../ui/UpdatesCard';
 import { C, F, R } from '../../ui/theme';
 
+const VOLUMES = [0.25, 0.5, 0.75, 1];
+
 const PRIVACY_URL = 'https://f31-exe.github.io/map/privacy.html';
 
 export default function SettingsScreen() {
   const s = useSession();
   const night = useNight();
   const voice = useVoice();
+  const volume = useVolume();
   const trailMinutes = useTrailMinutes();
   const [crash, setCrash] = useState<string | null>(null);
   useEffect(() => {
@@ -267,6 +270,26 @@ export default function SettingsScreen() {
           value={voice}
           onChange={setVoice}
         />
+        <View style={styles.volumeRow}>
+          <Text style={styles.volumeLabel}>Громкость голоса и сигнала приказа</Text>
+          <View style={styles.volumeChips}>
+            {VOLUMES.map((v) => (
+              <Pressable
+                key={v}
+                onPress={() => {
+                  tap();
+                  setVolume(v);
+                  say(v === 1 ? 'Громкость сто процентов' : `Громкость ${Math.round(v * 100)} процентов`);
+                }}
+                style={[styles.volumeChip, Math.abs(volume - v) < 0.01 && styles.volumeChipOn]}
+              >
+                <Text style={[styles.volumeText, Math.abs(volume - v) < 0.01 && { color: C.accentInk }]}>
+                  {Math.round(v * 100)}%
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+        </View>
         <View style={styles.divider} />
         <View style={styles.row}>
           <View style={[styles.rowIcon, s.gridMode !== 'off' && { backgroundColor: C.accentSoft, borderColor: C.lineStrong }]}>
@@ -458,6 +481,19 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   callsignInput: { color: C.text, fontSize: 22, fontFamily: F.bold, padding: 0 },
+  volumeRow: { gap: 8, paddingBottom: 10, paddingLeft: 56 },
+  volumeLabel: { color: C.dim, fontSize: 12, fontFamily: F.regular },
+  volumeChips: { flexDirection: 'row', gap: 8 },
+  volumeChip: {
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: R.pill,
+    borderWidth: 1,
+    borderColor: C.line,
+    backgroundColor: C.elevated,
+  },
+  volumeChipOn: { backgroundColor: C.accent, borderColor: C.accent },
+  volumeText: { color: C.text, fontSize: 13, fontFamily: F.semibold },
   tagRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   tagLabel: { color: C.dim, fontSize: 12, fontFamily: F.regular },
   tagInput: {

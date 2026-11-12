@@ -1,6 +1,8 @@
 import { createAudioPlayer, type AudioPlayer } from 'expo-audio';
 import { Vibration } from 'react-native';
 
+import { getVolume } from '../state/voice';
+
 let player: AudioPlayer | null = null;
 
 /**
@@ -13,6 +15,7 @@ export function signalNewOrder(withSound: boolean): void {
   if (!withSound) return;
   try {
     if (!player) player = createAudioPlayer(require('../../assets/sounds/order.wav'));
+    player.volume = getVolume();
     player.seekTo(0).catch(() => {});
     // On web play() returns a promise that rejects until the user has interacted with the page.
     const played: unknown = player.play();

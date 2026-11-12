@@ -45,6 +45,8 @@ export const KEYS = {
   tag: 'tacmap.tag',
   /** Spoken navigation hints and SOS alerts. */
   voice: 'tacmap.voice',
+  /** Volume of voice hints and the order chirp, 0.1–1. */
+  volume: 'tacmap.volume',
   /** Own trail: minutes shown (0 = off) and the crumbs of the last hour. */
   trailMinutes: 'tacmap.trailMinutes',
   trail: 'tacmap.trail',
