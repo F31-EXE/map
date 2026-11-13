@@ -46,6 +46,8 @@ const REFEREE_GRACE_MS = 8_000;
 const REPORT_AT_MS = 30_000;
 /** Football: how often the referee rolls the balls. */
 const BALL_TICK_MS = 3000;
+/** The referee writes a moving convoy at least this often (5 ticks may be rolled at once). */
+const BALL_WRITE_MS = 12_000;
 /** Fighters' positions older than this don't push a ball. */
 // Standing fighters write their position once a minute: keep them counted between.
 const BALL_FRESH_MS = 90_000;
@@ -148,12 +150,16 @@ function retrying(subscribe: (onError: (e: Error) => void) => Unsubscribe, delay
   let stopped = false;
   let current: Unsubscribe | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
+  // 4 s, 8 s, 16 s… up to 2 min: a refusal that lasts (removed from the game) must not
+  // re-read every few seconds and eat the database's daily read limit.
+  let wait = delayMs;
   const start = () => {
     if (stopped) return;
     current = subscribe(() => {
       current?.();
       current = null;
-      if (!stopped) timer = setTimeout(start, delayMs);
+      if (!stopped) timer = setTimeout(start, wait);
+      wait = Math.min(wait * 2, 120_000);
     });
   };
   start();
@@ -478,6 +484,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
   const ballsRef = useRef(balls);
   ballsRef.current = balls;
   const hasBalls = balls.length > 0;
+  const ballWrites = useRef(new Map<string, number>());
   const flagMarkers = useMemo(() => markers.filter((m) => m.kind === 'flag'), [markers]);
   const flagsRef = useRef(flagMarkers);
   flagsRef.current = flagMarkers;
@@ -513,6 +520,15 @@ export function GameProvider({ children }: { children: ReactNode }) {
         // A new referee or a pause in updates: never roll more than a few ticks at once.
         const from = { ...cur, at: Math.max(cur.at, match.start, now - 5 * BALL_TICK_MS) };
         const next = rollBall(from, pathLength(pts), now, push);
+        // Every write is read by every phone in the game: write when the speed changes,
+        // at a checkpoint or the base, and otherwise every 12 s (phones extrapolate between).
+        const last = ballWrites.current.get(b.id) ?? 0;
+        const changed =
+          push !== cur.push ||
+          Boolean(next.goal) ||
+          checkpointsPassed(pts, next.progress) !== checkpointsPassed(pts, cur.progress);
+        if (!changed && now - last < BALL_WRITE_MS) continue;
+        ballWrites.current.set(b.id, now);
         games.updateGameMarker(gameId, b.id, { ball: next }).catch(() => {});
         if (next.goal) games.setMatch(gameId, { ...match, stoppedAt: now }).catch(() => {});
       }
@@ -646,17 +662,35 @@ export function GameProvider({ children }: { children: ReactNode }) {
     [isTech, sideDocs, squads, squadMembers, sideName, sideColor]
   );
 
+  // Moving convoys are written every ~12 s: tick every 3 s to move them in between.
+  const ballsMoving = markers.some((m) => m.kind === 'ball' && (m.ball?.push ?? 0) > 0 && !m.ball?.goal);
+  const matchRunning = Boolean(game?.match && !game.match.stoppedAt);
+  const [ballClock, setBallClock] = useState(0);
+  useEffect(() => {
+    if (!ballsMoving || !matchRunning) return;
+    const t = setInterval(() => setBallClock(Date.now()), BALL_TICK_MS);
+    return () => clearInterval(t);
+  }, [ballsMoving, matchRunning]);
+
   // Game markers, colored by who holds them.
   const shownMarkers = useMemo(
     () =>
       markers.map((m) => {
         if (m.kind === 'ball' && m.points?.length) {
-          const at = pointAlong(m.points, m.ball?.progress ?? 0);
+          const b = m.ball;
+          // Where the convoy is now at its last known speed, at most 15 s ahead of the write.
+          const progress =
+            b && b.push > 0 && !b.goal && matchRunning
+              ? rollBall(b, pathLength(m.points), Math.min(Date.now(), b.at + 5 * BALL_TICK_MS), b.push).progress
+              : (b?.progress ?? 0);
+          const at = pointAlong(m.points, progress);
           return { ...m, lat: at.lat, lng: at.lng, color: sideColor(m.owner) };
         }
         return m.kind === 'flag' || m.kind === 'sector' ? { ...m, color: m.owner ? sideColor(m.owner) : undefined } : m;
       }),
-    [markers, sideColor]
+    // ballClock re-runs this every 3 s while a convoy moves.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [markers, sideColor, ballClock, matchRunning]
   );
 
   const requireUid = useCallback(() => {

@@ -2,7 +2,7 @@ import * as Clipboard from 'expo-clipboard';
 import { router } from 'expo-router';
 import { useHeaderHeight } from 'expo-router/react-navigation';
 import { useState } from 'react';
-import { Alert, Pressable, Share, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
+import { Alert, Platform, Pressable, Share, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 
 import { SIDE_COLORS, TECH_COLOR } from '../lib/gameModes';
 import { inviteUrl, type Invite } from '../lib/invite';
@@ -462,13 +462,19 @@ function TechView({ busy, run }: { busy: boolean; run: Run }) {
           />
         ) : (
           <>
+            <Text style={styles.sub}>Длительность матча — впишите любое число минут или нажмите готовое:</Text>
             <View style={styles.inline}>
               <TextInput
                 value={minutesText}
                 onChangeText={(t) => setMinutesText(t.replace(/[^0-9]/g, '').slice(0, 4))}
-                keyboardType="number-pad"
+                placeholder="мин"
+                placeholderTextColor={C.faint}
+                // iOS number pad has no «Done»: this one has, so the keyboard can close.
+                keyboardType={Platform.OS === 'ios' ? 'numbers-and-punctuation' : 'number-pad'}
+                returnKeyType="done"
                 maxLength={4}
-                style={[styles.input, styles.minutes]}
+                selectTextOnFocus
+                style={[styles.input, styles.minutes, styles.minutesField]}
                 selectionColor={C.accent}
               />
               <Text style={styles.text}>минут</Text>
@@ -597,7 +603,8 @@ function TicketsInput({ value, onSave }: { value: number | null; onSave: (n: num
         onChangeText={(t) => setText(t.replace(/[^0-9]/g, '').slice(0, 5))}
         placeholder="выкл"
         placeholderTextColor={C.faint}
-        keyboardType="number-pad"
+        keyboardType={Platform.OS === 'ios' ? 'numbers-and-punctuation' : 'number-pad'}
+        returnKeyType="done"
         maxLength={5}
         style={[styles.input, styles.minutes]}
         selectionColor={C.accent}
@@ -695,6 +702,7 @@ const styles = StyleSheet.create({
   mode: { flexDirection: 'row', gap: 12, alignItems: 'flex-start', paddingVertical: 6 },
   modeIcon: { width: 40, height: 40, borderRadius: 20, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center' },
   minutes: { width: 90, textAlign: 'center', fontSize: 18 },
+  minutesField: { borderColor: C.accent, borderWidth: 1.5 },
   content: { padding: 16, gap: 14, paddingBottom: 48, width: '100%', maxWidth: 640, alignSelf: 'center' },
   title: { color: C.text, fontSize: 22, fontFamily: F.bold },
   text: { color: C.text, fontSize: 14, fontFamily: F.regular, lineHeight: 20 },

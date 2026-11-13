@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Alert, Pressable, StyleSheet, Text, TextInput, View, type StyleProp, type ViewStyle } from 'react-native';
+import { Alert, Platform, Pressable, StyleSheet, Text, TextInput, View, type StyleProp, type ViewStyle } from 'react-native';
 
 import { formatDistance } from '../lib/geo';
 import { turnText } from '../lib/heading';
@@ -227,7 +227,8 @@ export function MortarSheet({
           onChangeText={setAngle}
           placeholder="Угол, °"
           placeholderTextColor={C.faint}
-          keyboardType="decimal-pad"
+          keyboardType={Platform.OS === 'ios' ? 'numbers-and-punctuation' : 'decimal-pad'}
+          returnKeyType="done"
           maxLength={5}
           style={[styles.input, { flex: 1 }]}
           selectionColor={C.accent}
@@ -237,7 +238,8 @@ export function MortarSheet({
           onChangeText={setDist}
           placeholder={aimDistance != null ? `${Math.round(aimDistance)} м` : 'Дальность, м'}
           placeholderTextColor={C.faint}
-          keyboardType="decimal-pad"
+          keyboardType={Platform.OS === 'ios' ? 'numbers-and-punctuation' : 'decimal-pad'}
+          returnKeyType="done"
           maxLength={5}
           style={[styles.input, { flex: 1 }]}
           selectionColor={C.accent}
