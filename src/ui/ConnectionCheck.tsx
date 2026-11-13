@@ -10,6 +10,14 @@ import { C, F } from './theme';
 
 type Step = { name: string; ok: boolean; detail: string };
 
+const HOSTS: [string, string][] = [
+  ['База (firestore.googleapis.com)', 'https://firestore.googleapis.com/'],
+  ['Вход (identitytoolkit.googleapis.com)', 'https://identitytoolkit.googleapis.com/'],
+  ['Обновления (u.expo.dev)', 'https://u.expo.dev/'],
+  ['google.com', 'https://www.google.com/generate_204'],
+  ['yandex.ru', 'https://yandex.ru/'],
+];
+
 /**
  * Settings → «Проверка связи с сервером»: sign-in, reaching Firestore's host, and a
  * real read from the server, each with its error text — for when writes hang on one
@@ -30,12 +38,16 @@ export function ConnectionCheck() {
       push({ name: 'Настройки сервера', ok: isFirebaseConfigured, detail: isFirebaseConfigured ? 'есть' : 'нет в сборке' });
       const user = isFirebaseConfigured ? firebaseAuth().currentUser : null;
       push({ name: 'Вход', ok: Boolean(user), detail: user ? `id ${user.uid.slice(0, 6)}…` : 'не выполнен' });
-      const t0 = Date.now();
-      try {
-        const r = await withTimeout(fetch('https://firestore.googleapis.com/'), 10_000);
-        push({ name: 'Сервер базы доступен', ok: true, detail: `HTTP ${r.status}, ${Date.now() - t0} мс` });
-      } catch (e) {
-        push({ name: 'Сервер базы доступен', ok: false, detail: (e as Error).message });
+      // Which hosts this phone reaches: any HTTP answer counts. A VPN, an ad blocker, a
+      // DNS profile or the network may cut some of them.
+      for (const [name, url] of HOSTS) {
+        const t0 = Date.now();
+        try {
+          const r = await withTimeout(fetch(url, { cache: 'no-store' }), 10_000);
+          push({ name, ok: true, detail: `HTTP ${r.status}, ${Date.now() - t0} мс` });
+        } catch (e) {
+          push({ name, ok: false, detail: (e as Error).message || 'нет ответа' });
+        }
       }
       if (isFirebaseConfigured) {
         const t1 = Date.now();
