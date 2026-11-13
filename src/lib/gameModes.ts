@@ -14,18 +14,49 @@ import { distanceMeters } from './geo';
 import { insidePolygon } from './geofence';
 import type { LatLng } from './types';
 
-export type Match = { start: number; minutes: number; stoppedAt?: number | null };
+/**
+ * `pausedAt`: the clock is frozen since then. Resuming moves `start` forward by the
+ * pause (`resumeMatch`), so match minutes and everything counted from `start` simply
+ * continue where they stopped.
+ */
+export type Match = { start: number; minutes: number; stoppedAt?: number | null; pausedAt?: number | null };
 
 export type MatchState =
   | { phase: 'none' }
   | { phase: 'running'; minute: number; left: number }
+  | { phase: 'paused'; minute: number; left: number }
   | { phase: 'over'; endedAt: number };
+
+/** When the match time runs out (or ran out): end of time, stop or pause, whichever is first. */
+export function matchEnd(m: Match): number {
+  return Math.min(m.start + m.minutes * 60_000, m.stoppedAt ?? Infinity, m.pausedAt ?? Infinity);
+}
 
 export function matchState(m: Match | null | undefined, now: number): MatchState {
   if (!m) return { phase: 'none' };
-  const end = Math.min(m.start + m.minutes * 60_000, m.stoppedAt ?? Infinity);
+  const limit = m.start + m.minutes * 60_000;
+  if (m.pausedAt != null && m.stoppedAt == null && m.pausedAt < limit) {
+    return { phase: 'paused', minute: Math.max(0, Math.floor((m.pausedAt - m.start) / 60_000)), left: limit - m.pausedAt };
+  }
+  const end = matchEnd(m);
   if (now >= end) return { phase: 'over', endedAt: end };
   return { phase: 'running', minute: Math.max(0, Math.floor((now - m.start) / 60_000)), left: end - now };
+}
+
+export const MAX_MATCH_MINUTES = 1440;
+
+export function pauseMatch(m: Match, now: number): Match {
+  return m.pausedAt != null ? m : { ...m, pausedAt: now };
+}
+
+export function resumeMatch(m: Match, now: number): Match {
+  if (m.pausedAt == null) return m;
+  return { ...m, start: m.start + Math.max(0, now - m.pausedAt), pausedAt: null };
+}
+
+/** More minutes for a running or paused match (never past the 24 h limit). */
+export function addMatchMinutes(m: Match, n: number): Match {
+  return { ...m, minutes: Math.min(MAX_MATCH_MINUTES, Math.max(1, m.minutes + Math.round(n))) };
 }
 
 /** Sector numbers in the 3×3 split, row by row: the snail 1 2 3 / 8 9 4 / 7 6 5. */

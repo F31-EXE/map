@@ -427,7 +427,11 @@ export default function MapScreen() {
   useEffect(() => {
     if (!viewRequest) return;
     centeredOnce.current = true;
+    // Following self (or heading-up) would pull the map straight back to me.
+    setFollow(false);
+    setHeadingUp(false);
     mapRef.current?.setView({ lat: viewRequest.lat, lng: viewRequest.lng }, viewRequest.zoom);
+    if (viewRequest.markerId) setSelection({ type: 'marker', id: viewRequest.markerId });
     requestView(null);
   }, [viewRequest, requestView]);
 

@@ -463,30 +463,38 @@ body,
   cursor: crosshair;
 }
 
-/* Snail grid: square names in their NW corners, snail numbers in cell middles. */
+/* Snail grid: one name per big square, in the middle of its visible part. */
 .snail-label span {
   position: absolute;
-  left: 4px;
-  top: 4px;
-  padding: 1px 6px;
-  border-radius: 4px;
-  background: rgba(5, 12, 8, 0.85);
-  border: 1px solid #ffc83d;
-  color: #ffc83d;
-  font: 700 13px/1.3 ui-monospace, 'JetBrains Mono', Menlo, monospace;
-  white-space: nowrap;
-}
-.snail-num span {
-  position: absolute;
   transform: translate(-50%, -50%);
-  color: rgba(255, 200, 61, 0.95);
-  font: 700 16px/1 ui-monospace, 'JetBrains Mono', Menlo, monospace;
-  text-shadow: 0 0 3px #000, 0 0 3px #000;
+  padding: 2px 8px;
+  border-radius: 5px;
+  background: rgba(5, 12, 8, 0.6);
+  border: 1px solid rgba(255, 200, 61, 0.8);
+  color: #ffc83d;
+  font: 700 15px/1.3 ui-monospace, 'JetBrains Mono', Menlo, monospace;
   white-space: nowrap;
+  pointer-events: none;
 }
-.snail-num2 span {
-  font-size: 11px;
-  color: rgba(255, 255, 255, 0.85);
+/* Letter (column) white, number (row) amber, apart: «З6» never reads as «36». */
+.snail-label b {
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  font-weight: 800;
+  color: #fff;
+  margin-right: 3px;
+}
+.grid-hint {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 800;
+  padding: 3px 10px;
+  border-radius: 6px;
+  background: rgba(5, 12, 8, 0.75);
+  color: #ffc83d;
+  font: 600 12px/1.3 ui-monospace, 'JetBrains Mono', Menlo, monospace;
+  pointer-events: none;
+  white-space: nowrap;
 }
 
 /* Night mode: tiles and everything drawn on them turn dim red. */

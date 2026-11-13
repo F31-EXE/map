@@ -445,6 +445,11 @@ export async function setMarkerZone(teamId: string, markerId: string, zone: HotZ
 }
 
 /** The author moves their own marker (enforced by rules). */
+/** A marker's caption (author or a commander; rules: `label` only, ≤ 40 chars). */
+export async function renameTeamMarker(teamId: string, id: string, label: string): Promise<void> {
+  await updateDoc(doc(firestore(), 'teams', teamId, 'markers', id), { label: label.slice(0, 40) });
+}
+
 export async function moveTeamMarker(teamId: string, markerId: string, lat: number, lng: number): Promise<void> {
   await updateDoc(doc(firestore(), 'teams', teamId, 'markers', markerId), { lat, lng });
 }

@@ -23,6 +23,7 @@ export function useMatch(game: Game | null): MatchState {
 
 export function matchText(st: MatchState): string {
   if (st.phase === 'running') return `до конца ${formatCountdown(st.left)}`;
+  if (st.phase === 'paused') return `пауза · осталось ${formatCountdown(st.left)}`;
   if (st.phase === 'over') return 'матч окончен';
   return 'матч не начат';
 }
@@ -44,7 +45,7 @@ export function GameScore({ compact }: { compact?: boolean }) {
     <View style={{ gap: compact ? 4 : 8 }}>
       {g.game.match && (
         <View style={styles.row}>
-          <Icon name="timer-outline" size={compact ? 14 : 18} color={st.phase === 'running' ? C.accent : C.dim} />
+          <Icon name="timer-outline" size={compact ? 14 : 18} color={st.phase === 'running' ? C.accent : st.phase === 'paused' ? C.warn : C.dim} />
           <Text style={[styles.clock, compact && { fontSize: 12 }]}>{matchText(st)}</Text>
         </View>
       )}

@@ -4,7 +4,7 @@ import { useHeaderHeight } from 'expo-router/react-navigation';
 import { useState } from 'react';
 import { Alert, Platform, Pressable, Share, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 
-import { SIDE_COLORS, TECH_COLOR } from '../lib/gameModes';
+import { MAX_MATCH_MINUTES, SIDE_COLORS, TECH_COLOR } from '../lib/gameModes';
 import { inviteUrl, type Invite } from '../lib/invite';
 import type { GameSide, Side } from '../lib/types';
 import { useGame, type GamePlace } from '../state/game';
@@ -17,6 +17,8 @@ import { QrCode } from '../ui/QrCode';
 import { C, F, R } from '../ui/theme';
 
 const MATCH_MINUTES = [10, 15, 20, 30, 45, 60];
+/** Quick «+N мин» while a match is on. */
+const ADD_MINUTES = [1, 5, 10, 15];
 
 export default function GameScreen() {
   const session = useSession();
@@ -308,9 +310,26 @@ function TechView({ busy, run }: { busy: boolean; run: Run }) {
       Alert.alert('Сначала стороны', 'Конвой едет за сторону: создайте хотя бы одну сторону (шаг 1).');
       return;
     }
-    g.requestPlace(k);
-    // Off the stack while placing: the map brings a fresh game screen back afterwards.
-    router.dismissTo('/');
+    const go = () => {
+      g.requestPlace(k);
+      // Off the stack while placing: the map brings a fresh game screen back afterwards.
+      router.dismissTo('/');
+    };
+    // One mode per match: the winner is counted by the mode that is on the map, so the
+    // previous mode's objects go away first.
+    const others = MODES.filter((m) => m.k !== k && count(m.k) > 0);
+    if (!others.length) return go();
+    const names = others.map((m) => `«${m.title}»`).join(', ');
+    confirmDestructive(
+      `Сменить режим?`,
+      `На карте уже стоит ${names}. Режимы не совмещаются: старые объекты уберутся с карты у всех.`,
+      'Убрать и поставить',
+      () =>
+        run(async () => {
+          for (const m of others) await g.removeMode(m.k);
+          go();
+        })
+    );
   };
 
   return (
@@ -396,7 +415,7 @@ function TechView({ busy, run }: { busy: boolean; run: Run }) {
       <Card style={{ gap: 12 }}>
         <Eyebrow>Шаг 2 · Режимы на карте</Eyebrow>
         <Text style={styles.sub}>
-          Выберите режим и нажмите «Поставить» — откроется карта, наведите перекрестие на место. Режимы можно совмещать.
+          Выберите режим и нажмите «Поставить» — откроется карта, наведите перекрестие на место. Режим в матче один: при выборе другого старый уберётся с карты. Тикеты можно включить с любым.
         </Text>
         {MODES.map((m) => {
           const n = count(m.k);
@@ -449,17 +468,45 @@ function TechView({ busy, run }: { busy: boolean; run: Run }) {
       <Card style={{ gap: 12 }}>
         <Eyebrow>Шаг 3 · Время и старт</Eyebrow>
         <Text style={[styles.title, { fontSize: 18 }]}>{matchText(st)}</Text>
-        {st.phase === 'running' ? (
-          <Button
-            title="Остановить матч"
-            kind="danger"
-            icon="stop"
-            onPress={() =>
-              confirmDestructive('Остановить матч?', 'Время матча закончится сейчас, итог зафиксируется.', 'Остановить', () =>
-                run(() => g.stopMatch())
-              )
-            }
-          />
+        {st.phase === 'running' || st.phase === 'paused' ? (
+          <>
+            {st.phase === 'running' ? (
+              <Button title="Пауза" icon="pause" kind="secondary" busy={busy} onPress={() => run(() => g.pauseMatch())} />
+            ) : (
+              <>
+                <Text style={[styles.sub, { color: C.warn }]}>
+                  Матч на паузе: время стоит, флаги, территории и конвой не считаются.
+                </Text>
+                <Button title="Продолжить" icon="play" busy={busy} onPress={() => run(() => g.resumeMatch())} />
+              </>
+            )}
+            <Text style={styles.sub}>Добавить время:</Text>
+            <View style={styles.chips}>
+              {ADD_MINUTES.map((n) => (
+                <Pressable
+                  key={n}
+                  disabled={busy || (game.match?.minutes ?? 0) >= MAX_MATCH_MINUTES}
+                  onPress={() => {
+                    tap();
+                    run(() => g.addMinutes(n));
+                  }}
+                  style={styles.chip}
+                >
+                  <Text style={styles.chipText}>+{n} мин</Text>
+                </Pressable>
+              ))}
+            </View>
+            <Button
+              title="Остановить матч"
+              kind="danger"
+              icon="stop"
+              onPress={() =>
+                confirmDestructive('Остановить матч?', 'Время матча закончится сейчас, итог зафиксируется.', 'Остановить', () =>
+                  run(() => g.stopMatch())
+                )
+              }
+            />
+          </>
         ) : (
           <>
             <Text style={styles.sub}>Длительность матча — впишите любое число минут или нажмите готовое:</Text>

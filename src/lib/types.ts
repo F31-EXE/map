@@ -67,7 +67,7 @@ export type Game = {
   sideCode: string;
   /** Tickets mode: lives per side at the start (null = off). */
   tickets: number | null;
-  match: { start: number; minutes: number; stoppedAt?: number | null } | null;
+  match: { start: number; minutes: number; stoppedAt?: number | null; pausedAt?: number | null } | null;
   /** Territories: equal sectors at the end are a draw, or go to the longer holder. */
   tiebreak: 'draw' | 'time';
 };

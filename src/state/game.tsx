@@ -10,7 +10,11 @@ import {
   convoyResult,
   heldMinutes,
   holdings,
+  matchEnd,
   matchState,
+  addMatchMinutes,
+  pauseMatch,
+  resumeMatch,
   pathLength,
   pointAlong,
   rollBall,
@@ -113,6 +117,9 @@ type GameState = {
   saveSide: (s: GameSide) => Promise<void>;
   startMatch: (minutes: number) => Promise<void>;
   stopMatch: () => Promise<void>;
+  pauseMatch: () => Promise<void>;
+  resumeMatch: () => Promise<void>;
+  addMinutes: (n: number) => Promise<void>;
   setTickets: (n: number | null) => Promise<void>;
   setTiebreak: (t: 'draw' | 'time') => Promise<void>;
   addZone: (at: LatLng, zone: HotZone, label: string) => Promise<void>;
@@ -433,7 +440,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
     const match = game.match;
     const t = setInterval(() => {
       const now = Date.now();
-      const end = Math.min(match.start + match.minutes * 60_000, match.stoppedAt ?? Infinity);
+      const end = matchEnd(match);
       // Last finished minute whose reports have had time to arrive.
       const upTo = Math.floor((Math.min(now, end + REFEREE_GRACE_MS) - REFEREE_GRACE_MS - match.start) / 60_000) - 1;
       const lastMinute = Math.floor((end - match.start) / 60_000) - 1;
@@ -552,7 +559,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
   const scores = useMemo<GameScores>(() => {
     const now = Date.now();
     const ms = matchState(game?.match, now);
-    const until = ms.phase === 'over' ? ms.endedAt : now;
+    const until = ms.phase === 'over' ? ms.endedAt : ms.phase === 'paused' && game?.match?.pausedAt ? game.match.pausedAt : now;
     const flags = markers.filter((m) => m.kind === 'flag');
     const flagMinutes: Record<string, number> = {};
     for (const f of flags) {
@@ -664,7 +671,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
 
   // Moving convoys are written every ~12 s: tick every 3 s to move them in between.
   const ballsMoving = markers.some((m) => m.kind === 'ball' && (m.ball?.push ?? 0) > 0 && !m.ball?.goal);
-  const matchRunning = Boolean(game?.match && !game.match.stoppedAt);
+  const matchRunning = Boolean(game?.match && !game.match.stoppedAt && !game.match.pausedAt);
   const [ballClock, setBallClock] = useState(0);
   useEffect(() => {
     if (!ballsMoving || !matchRunning) return;
@@ -781,6 +788,36 @@ export function GameProvider({ children }: { children: ReactNode }) {
       stopMatch: async () => {
         const g = requireGame();
         if (g.match) await games.setMatch(g.id, { ...g.match, stoppedAt: Date.now() });
+      },
+      pauseMatch: async () => {
+        const g = requireGame();
+        if (!g.match || g.match.stoppedAt || g.match.pausedAt != null) return;
+        const now = Date.now();
+        // Convoys stop where they are now (not at their last write, up to 12 s back).
+        await Promise.all(
+          balls
+            .filter((b) => b.ball && !b.ball.goal && b.ball.push > 0 && b.points?.length)
+            .map((b) =>
+              games.updateGameMarker(g.id, b.id, { ball: rollBall(b.ball!, pathLength(b.points!), now, 0) })
+            )
+        );
+        await games.setMatch(g.id, pauseMatch(g.match, now));
+      },
+      resumeMatch: async () => {
+        const g = requireGame();
+        if (!g.match || g.match.pausedAt == null) return;
+        const now = Date.now();
+        // Convoys stood still during the pause: they start again from here, now.
+        await Promise.all(
+          balls
+            .filter((b) => b.ball && !b.ball.goal)
+            .map((b) => games.updateGameMarker(g.id, b.id, { ball: { ...b.ball!, at: now, push: 0 } }))
+        );
+        await games.setMatch(g.id, resumeMatch(g.match, now));
+      },
+      addMinutes: async (n) => {
+        const g = requireGame();
+        if (g.match && !g.match.stoppedAt) await games.setMatch(g.id, addMatchMinutes(g.match, n));
       },
       setTickets: async (n) => {
         await games.setTickets(requireGame().id, n);

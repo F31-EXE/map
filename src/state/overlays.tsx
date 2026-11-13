@@ -11,6 +11,9 @@ import * as shared from '../services/sharedMaps';
 
 import { useSession } from './session';
 
+/** Where to center the map; with `markerId` its card opens too (briefing points). */
+export type ViewRequest = LatLng & { zoom: number; markerId?: string };
+
 type Overlays = {
   overlays: OverlayMeta[];
   importOverlay: () => Promise<OverlayMeta | null>;
@@ -22,8 +25,8 @@ type Overlays = {
   focusRequest: string | null;
   requestFocus: (id: string | null) => void;
   /** A point to center the map on (calendar polygon without a map file); consumed like focusRequest. */
-  viewRequest: (LatLng & { zoom: number }) | null;
-  requestView: (v: (LatLng & { zoom: number }) | null) => void;
+  viewRequest: ViewRequest | null;
+  requestView: (v: ViewRequest | null) => void;
 
   /** Base-layer areas saved for use without internet. */
   areas: offline.OfflineArea[];
@@ -54,7 +57,7 @@ export function useOverlays(): Overlays {
 export function OverlaysProvider({ children }: { children: ReactNode }) {
   const [overlays, setOverlays] = useState<OverlayMeta[]>([]);
   const [focusRequest, requestFocus] = useState<string | null>(null);
-  const [viewRequest, requestView] = useState<(LatLng & { zoom: number }) | null>(null);
+  const [viewRequest, requestView] = useState<ViewRequest | null>(null);
   const [areas, setAreas] = useState<offline.OfflineArea[]>([]);
   const [download, setDownload] = useState<{ areaId: string; done: number; total: number; part: number; parts: number } | null>(
     null

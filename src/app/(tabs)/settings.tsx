@@ -3,7 +3,7 @@ import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Alert, Linking, Pressable, Share, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 
-import { pickAvatar } from '../../services/avatar';
+import { cropAvatar, pickPhoto, type PickedPhoto } from '../../services/avatar';
 import { BACKGROUND_SUPPORTED } from '../../services/backgroundLocation';
 import { clearLastError, lastError } from '../../services/crashGuard';
 import { TRAIL_CHOICES } from '../../lib/trail';
@@ -15,6 +15,7 @@ import { ROLES } from '../../lib/roles';
 import { cleanTag, TAG_MAX, withTag } from '../../lib/tag';
 import { Avatar, Button, Card, Eyebrow, Icon, KeyboardScroll, RoleIcon, tap, type IconName } from '../../ui/components';
 import { confirmDestructive } from '../../ui/confirm';
+import { AvatarCropper } from '../../ui/AvatarCropper';
 import { RadioCard } from '../../ui/RadioCard';
 import { RolePicker } from '../../ui/RolePicker';
 import { UpdatesCard } from '../../ui/UpdatesCard';
@@ -40,6 +41,7 @@ export default function SettingsScreen() {
   useEffect(() => setTag(s.tag), [s.tag]);
   const tagDirty = cleanTag(tag) !== s.tag;
   const [busy, setBusy] = useState(false);
+  const [cropping, setCropping] = useState<PickedPhoto | null>(null);
   const [rolesOpen, setRolesOpen] = useState(false);
   useEffect(() => setCallsign(s.callsign), [s.callsign]);
   const callsignDirty = callsign.trim() !== s.callsign;
@@ -60,8 +62,8 @@ export default function SettingsScreen() {
   const changeAvatar = () => {
     const pick = () =>
       run(async () => {
-        const uri = await pickAvatar();
-        if (uri) await s.setAvatar(uri);
+        const photo = await pickPhoto();
+        if (photo) setCropping(photo);
       });
     if (!s.avatar) return pick();
     Alert.alert('Аватар', undefined, [
@@ -394,6 +396,19 @@ export default function SettingsScreen() {
       <Text style={styles.version}>
         GRIMMAP v{Constants.expoConfig?.version ?? '—'}
       </Text>
+      {cropping && (
+        <AvatarCropper
+          photo={cropping}
+          busy={busy}
+          onCancel={() => setCropping(null)}
+          onDone={(rect) =>
+            run(async () => {
+              await s.setAvatar(await cropAvatar(cropping, rect));
+              setCropping(null);
+            })
+          }
+        />
+      )}
     </KeyboardScroll>
   );
 }

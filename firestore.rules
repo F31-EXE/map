@@ -237,8 +237,9 @@ service cloud.firestore {
         && request.resource.data.get('tiebreak', 'draw') in ['draw', 'time']
         // The match clock: started by a tech, the same countdown on every phone.
         && (request.resource.data.get('match', null) == null
-          || (request.resource.data.match.keys().hasOnly(['start', 'minutes', 'stoppedAt'])
+          || (request.resource.data.match.keys().hasOnly(['start', 'minutes', 'stoppedAt', 'pausedAt'])
             && request.resource.data.match.start is number
+            && (request.resource.data.match.get('pausedAt', null) == null || request.resource.data.match.pausedAt is number)
             && request.resource.data.match.minutes is int
             && request.resource.data.match.minutes >= 1 && request.resource.data.match.minutes <= 1440))
         && (request.resource.data.get('tickets', null) == null
@@ -458,6 +459,12 @@ service cloud.firestore {
             && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['lat', 'lng'])
             && request.resource.data.lat is number
             && request.resource.data.lng is number);
+        // A caption: the author, or a commander (e.g. naming points for a briefing).
+        allow update: if isMember(teamId)
+          && (resource.data.createdBy == request.auth.uid || canCommand(teamId))
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['label'])
+          && request.resource.data.label is string
+          && request.resource.data.label.size() <= 40;
         // Chain of command: your own markers, or those of anyone strictly below you.
         allow delete: if (isMember(teamId) || isSideCommanderOf(teamId))
           && (resource.data.createdBy == request.auth.uid

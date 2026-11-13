@@ -135,6 +135,7 @@ type Session = {
   deleteMarker: (m: TacMarker) => Promise<void>;
   /** Own markers only (personal, or placed by me in the squad). */
   moveMarker: (m: TacMarker, p: LatLng) => Promise<void>;
+  renameMarker: (m: TacMarker, label: string) => Promise<void>;
   voteMarker: (m: TacMarker, vote: 'stale' | 'done') => Promise<void>;
   /** Commanders: departure schedule on a respawn / dead-zone marker (null clears). */
   setMarkerWave: (m: TacMarker, wave: Wave | null) => Promise<void>;
@@ -827,6 +828,19 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     [teamId, personalMarkers, savePersonal, sendMark, fireAndReport]
   );
 
+  const renameMarker = useCallback(
+    async (m: TacMarker, label: string) => {
+      const clean = label.trim().slice(0, 40);
+      if (m.personal) {
+        await savePersonal(personalMarkers.map((x) => (x.id === m.id ? { ...x, label: clean } : x)));
+      } else if (teamId) {
+        sendMark({ ...m, label: clean });
+        fireAndReport(teams.renameTeamMarker(teamId, m.id, clean), 'Подпись метки не сохранилась');
+      }
+    },
+    [teamId, personalMarkers, savePersonal, sendMark, fireAndReport]
+  );
+
   const voteMarker = useCallback(
     async (m: TacMarker, vote: 'stale' | 'done') => {
       if (!teamId || !uid || m.personal) return;
@@ -1048,6 +1062,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       addPhotoMarker,
       deleteMarker,
       moveMarker,
+      renameMarker,
       voteMarker,
       setMarkerWave,
       setMarkerZone,
@@ -1104,6 +1119,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       addPhotoMarker,
       deleteMarker,
       moveMarker,
+      renameMarker,
       voteMarker,
       setMarkerWave,
       setMarkerZone,

@@ -2,6 +2,7 @@ import { router } from 'expo-router';
 import { useMemo, useState } from 'react';
 import { Alert, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
+import { bearingDegrees, distanceMeters, formatClock, formatDistance } from '../lib/geo';
 import { MARKER_KINDS } from '../lib/markerKinds';
 import type { Briefing, TacMarker } from '../lib/types';
 import * as teams from '../services/teams';
@@ -13,6 +14,43 @@ import { C, F, R } from '../ui/theme';
 /** Kinds that make sense as briefing points (not game objects or photos). */
 const pointable = (m: TacMarker) => Boolean(m.teamId) && !['hotzone', 'flag', 'ball', 'sector', 'photo'].includes(m.kind);
 
+const pointTitle = (m: TacMarker) => m.label || MARKER_KINDS[m.kind].title;
+
+/** What tells same-looking points apart: kind (when captioned), author, time, where from me. */
+function pointInfo(m: TacMarker, me: { lat: number; lng: number } | null): string {
+  const parts = [
+    m.label ? MARKER_KINDS[m.kind].title : null,
+    m.createdByName || null,
+    m.createdAt ? formatClock(m.createdAt) : null,
+    me ? `${formatDistance(distanceMeters(me, m))}, азимут ${Math.round(bearingDegrees(me, m))}°` : null,
+  ];
+  return parts.filter(Boolean).join(' · ');
+}
+
+/** A point's caption, edited in place (squad markers: the author or a commander). */
+function Caption({ m, onDone }: { m: TacMarker; onDone: () => void }) {
+  const s = useSession();
+  const [text, setText] = useState(m.label);
+  const save = () => {
+    if (text.trim() !== m.label) s.renameMarker(m, text).catch((e: Error) => Alert.alert('Не сохранилось', e.message));
+    onDone();
+  };
+  return (
+    <TextInput
+      value={text}
+      onChangeText={setText}
+      autoFocus
+      placeholder={MARKER_KINDS[m.kind].title}
+      placeholderTextColor={C.faint}
+      maxLength={40}
+      returnKeyType="done"
+      onSubmitEditing={save}
+      onBlur={save}
+      style={[styles.input, styles.captionInput]}
+    />
+  );
+}
+
 /**
  * Squad briefing: the commander writes the task, a time and the points that matter;
  * fighters read it and press «Прочитал», the commander sees who hasn't.
@@ -21,7 +59,7 @@ export default function BriefingScreen() {
   const s = useSession();
   const { requestView } = useOverlays();
   const brief = s.team?.briefing ?? null;
-  const [editing, setEditing] = useState(!brief && s.canCommand);
+  const [editing, setEditing] = useState(false);
 
   if (!s.teamId || !s.uid) {
     return (
@@ -30,7 +68,9 @@ export default function BriefingScreen() {
       </View>
     );
   }
-  if (editing) return <Editor brief={brief} onDone={() => setEditing(false)} />;
+  // No briefing yet: a commander goes straight to writing one (also when the squad
+  // loads after the screen opened).
+  if (editing || (!brief && s.canCommand)) return <Editor brief={brief} onDone={() => setEditing(false)} />;
   if (!brief) {
     return (
       <View style={styles.empty}>
@@ -48,9 +88,10 @@ export default function BriefingScreen() {
   const mine = s.members.find((m) => m.id === s.uid);
   const iRead = brief.by === s.uid || mine?.briefRead === brief.at;
 
+  const me = s.getLastFix();
   const show = (m: TacMarker) => {
     tap();
-    requestView({ lat: m.lat, lng: m.lng, zoom: 17 });
+    requestView({ lat: m.lat, lng: m.lng, zoom: 17, markerId: m.id });
     router.navigate('/');
   };
 
@@ -78,9 +119,14 @@ export default function BriefingScreen() {
             {points.map((m, i) => (
               <Pressable key={m.id} onPress={() => show(m)} style={({ pressed }) => [styles.point, i > 0 && styles.sep, pressed && { opacity: 0.6 }]}>
                 <Icon name={MARKER_KINDS[m.kind].icon} size={20} color={m.color ?? MARKER_KINDS[m.kind].color} />
-                <Text style={styles.pointText} numberOfLines={1}>
-                  {m.label || MARKER_KINDS[m.kind].title}
-                </Text>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.pointText} numberOfLines={1}>
+                    {pointTitle(m)}
+                  </Text>
+                  <Text style={styles.pointInfo} numberOfLines={1}>
+                    {pointInfo(m, me)}
+                  </Text>
+                </View>
                 <Icon name="map-search-outline" size={18} color={C.faint} />
               </Pressable>
             ))}
@@ -143,6 +189,8 @@ function Editor({ brief, onDone }: { brief: Briefing | null; onDone: () => void 
   const [time, setTime] = useState(brief?.time ?? '');
   const [points, setPoints] = useState<string[]>(brief?.points ?? []);
   const [busy, setBusy] = useState(false);
+  const [renaming, setRenaming] = useState<string | null>(null);
+  const me = s.getLastFix();
   const candidates = useMemo(
     () => s.markers.filter(pointable).sort((a, b) => b.createdAt - a.createdAt).slice(0, 60),
     [s.markers]
@@ -197,6 +245,9 @@ function Editor({ brief, onDone }: { brief: Briefing | null; onDone: () => void 
 
       <View style={{ gap: 8 }}>
         <Eyebrow style={{ paddingHorizontal: 4 }}>Точки на карте · {points.length ? `выбрано ${points.length}` : 'необязательно'}</Eyebrow>
+        <Text style={[styles.dim, { paddingHorizontal: 4, textAlign: 'left' }]}>
+          Карандаш — подписать точку («Вход Д2», «Сбор»): подпись увидят все на карте и в брифинге.
+        </Text>
         {candidates.length === 0 ? (
           <Text style={[styles.dim, { paddingHorizontal: 4 }]}>Поставьте метки отряда на карте — их можно будет добавить сюда.</Text>
         ) : (
@@ -214,9 +265,28 @@ function Editor({ brief, onDone }: { brief: Briefing | null; onDone: () => void 
                 >
                   <Icon name={on ? 'checkbox-marked' : 'checkbox-blank-outline'} size={22} color={on ? C.accent : C.faint} />
                   <Icon name={MARKER_KINDS[m.kind].icon} size={18} color={m.color ?? MARKER_KINDS[m.kind].color} />
-                  <Text style={styles.pointText} numberOfLines={1}>
-                    {m.label || MARKER_KINDS[m.kind].title}
-                  </Text>
+                  {renaming === m.id ? (
+                    <Caption m={m} onDone={() => setRenaming(null)} />
+                  ) : (
+                    <View style={{ flex: 1 }}>
+                      <Text style={[styles.pointText, !m.label && { color: C.dim }]} numberOfLines={1}>
+                        {pointTitle(m)}
+                      </Text>
+                      <Text style={styles.pointInfo} numberOfLines={1}>
+                        {pointInfo(m, me)}
+                      </Text>
+                    </View>
+                  )}
+                  <Pressable
+                    hitSlop={10}
+                    onPress={() => {
+                      tap();
+                      setRenaming(m.id);
+                    }}
+                    accessibilityLabel="Подписать метку"
+                  >
+                    <Icon name="pencil-outline" size={18} color={C.faint} />
+                  </Pressable>
                 </Pressable>
               );
             })}
@@ -246,7 +316,9 @@ const styles = StyleSheet.create({
   row: { flexDirection: 'row', gap: 10 },
   point: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 12 },
   sep: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: C.line },
-  pointText: { color: C.text, fontSize: 15, fontFamily: F.regular, flex: 1 },
+  pointText: { color: C.text, fontSize: 15, fontFamily: F.regular },
+  pointInfo: { color: C.faint, fontSize: 12, fontFamily: F.mono, marginTop: 2 },
+  captionInput: { flex: 1, paddingVertical: 6 },
   input: {
     color: C.text,
     fontSize: 15,

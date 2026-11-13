@@ -4,6 +4,10 @@ import { test } from 'node:test';
 import { insidePolygon } from '../src/lib/geofence.ts';
 import type { Ball } from '../src/lib/gameModes.ts';
 import {
+  addMatchMinutes,
+  MAX_MATCH_MINUTES,
+  pauseMatch,
+  resumeMatch,
   BALL_SPEED,
   ballCounts,
   ballPush,
@@ -249,4 +253,23 @@ test('flags are taken by standing at them', async () => {
   assert.equal(flagStep('a', { s: 'b', t: 0 }, null, 10).cap, null);
   // Another side starts over.
   assert.deepEqual(flagStep('a', { s: 'b', t: 0 }, 'c', 10).cap, { s: 'c', t: 10 });
+});
+
+test('pause freezes the clock, resume continues, added minutes extend it', () => {
+  const m = { start: 0, minutes: 10 };
+  const p = pauseMatch(m, 4 * 60_000);
+  const st = matchState(p, 9 * 60_000);
+  assert.equal(st.phase, 'paused');
+  assert.equal(st.phase === 'paused' && st.left, 6 * 60_000);
+  const r = resumeMatch(p, 9 * 60_000);
+  assert.equal(r.start, 5 * 60_000);
+  const run = matchState(r, 10 * 60_000);
+  assert.equal(run.phase === 'running' && run.left, 5 * 60_000);
+  assert.equal(run.phase === 'running' && run.minute, 5);
+  assert.equal(matchState(addMatchMinutes(r, 5), 16 * 60_000).phase, 'running');
+  assert.equal(matchState(r, 16 * 60_000).phase, 'over');
+  // Stopped while paused: the match ended at the pause.
+  const s = matchState({ ...p, stoppedAt: 7 * 60_000 }, 8 * 60_000);
+  assert.deepEqual(s, { phase: 'over', endedAt: 4 * 60_000 });
+  assert.equal(addMatchMinutes(m, 5000).minutes, MAX_MATCH_MINUTES);
 });

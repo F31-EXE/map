@@ -1948,55 +1948,73 @@
     }
   }
 
+  // The snail grid shows only close to the ground (like a camera ≤ 500 m up): further
+  // out its squares are just noise over the map. "Altitude" = the visible height of
+  // the screen in meters / 1.15 (a ~60° field of view).
+  var SNAIL_MAX_ALT_M = 500;
+  function snailAltitude(f) {
+    return (f.metersPerPx * map.getSize().y) / 1.15;
+  }
+
   function drawSnail(f) {
-    var px = SNAIL_SIZE / f.metersPerPx;
-    // Zoomed far out the squares would be a solid mesh.
-    if (px < 14) return;
+    var hint = gridHintEl();
+    if (snailAltitude(f) > SNAIL_MAX_ALT_M) {
+      hint.style.display = '';
+      return;
+    }
+    hint.style.display = 'none';
     var origin = snailUtmOrigin(f.zone);
     var o = origin || { e: 0, n: 0 };
-    var levels = [{ size: SNAIL_SIZE, style: { color: '#FFC83D', weight: 2, opacity: 0.85, interactive: false } }];
-    if (px / 3 >= 40) levels.push({ size: SNAIL_SIZE / 3, style: { color: '#FFC83D', weight: 1, opacity: 0.5, interactive: false } });
-    if (px / 9 >= 34) {
-      levels.push({ size: SNAIL_SIZE / 9, style: { color: '#FFFFFF', weight: 1, opacity: 0.3, dashArray: '3 5', interactive: false } });
-    }
-    // Lines: coarse last so they sit on top.
-    for (var li = levels.length - 1; li >= 0; li--) {
-      var st = levels[li].size;
+    // Big squares bold, their 3×3 snail cells as thin lines; no numbers in the cells
+    // (the crosshair's full «Б3-7-4» is in the bottom panel).
+    var levels = [
+      { size: SNAIL_SIZE / 3, style: { color: '#FFC83D', weight: 1, opacity: 0.45, interactive: false } },
+      { size: SNAIL_SIZE, style: { color: '#FFC83D', weight: 2, opacity: 0.85, interactive: false } },
+    ];
+    levels.forEach(function (lv) {
+      var st = lv.size;
       var e0 = o.e + Math.floor((f.minE - o.e) / st) * st;
       var n0 = o.n + Math.floor((f.minN - o.n) / st) * st;
       for (var e = e0; e <= f.maxE + st; e += st) {
-        L.polyline([fromUtm(e, f.minN - st, f.zone, f.south), fromUtm(e, f.maxN + st, f.zone, f.south)], levels[li].style).addTo(gridLayer);
+        L.polyline([fromUtm(e, f.minN - st, f.zone, f.south), fromUtm(e, f.maxN + st, f.zone, f.south)], lv.style).addTo(gridLayer);
       }
       for (var n = n0; n <= f.maxN + st; n += st) {
-        L.polyline([fromUtm(f.minE - st, n, f.zone, f.south), fromUtm(f.maxE + st, n, f.zone, f.south)], levels[li].style).addTo(gridLayer);
+        L.polyline([fromUtm(f.minE - st, n, f.zone, f.south), fromUtm(f.maxE + st, n, f.zone, f.south)], lv.style).addTo(gridLayer);
       }
-    }
-    // Square names in each square's NW corner; snail numbers in cell middles.
-    var finest = levels[levels.length - 1].size;
-    var cells = 0;
-    var e1 = o.e + Math.floor((f.minE - o.e) / finest) * finest;
-    var n1 = o.n + Math.floor((f.minN - o.n) / finest) * finest;
-    for (var ce = e1; ce <= f.maxE; ce += finest) {
-      for (var cn = n1; cn <= f.maxN + finest; cn += finest) {
-        if (++cells > 2500) return;
-        var mid = snailCell(ce + finest / 2, cn - finest / 2, origin);
-        var center = fromUtm(ce + finest / 2, cn - finest / 2, f.zone, f.south);
-        if (levels.length === 3) gridMarker(center, 'snail-num snail-num2', mid.s1 + '-' + mid.s2);
-        else if (levels.length === 2) gridMarker(center, 'snail-num', String(mid.s1));
-        // The NW corner of a big square gets its name. Default origins are multiples
-        // of the square size, so { 0, 0 } lines up with them.
-        var k = Math.round(SNAIL_SIZE / finest);
-        var ix = Math.round((ce - o.e) / finest);
-        var iy = Math.round((o.n - cn) / finest);
-        if (px >= 40 && ((ix % k) + k) % k === 0 && ((iy % k) + k) % k === 0) {
-          gridMarker(fromUtm(ce, cn, f.zone, f.south), 'snail-label', mid.name);
-        }
+    });
+    // One name per big square, in the middle of its visible part.
+    var S = SNAIL_SIZE;
+    var se0 = o.e + Math.floor((f.minE - o.e) / S) * S;
+    var sn0 = o.n + Math.floor((f.minN - o.n) / S) * S;
+    for (var ce = se0; ce < f.maxE; ce += S) {
+      for (var cn = sn0; cn < f.maxN; cn += S) {
+        var x0 = Math.max(ce, f.minE), x1 = Math.min(ce + S, f.maxE);
+        var y0 = Math.max(cn, f.minN), y1 = Math.min(cn + S, f.maxN);
+        if (x1 - x0 < 60 || y1 - y0 < 60) continue;
+        var cell = snailCell(ce + S / 2, cn + S / 2, origin);
+        // The letter in a plain sans font: in a monospace «З» reads as «3» («З6» → «36»).
+        var label = '<b>' + escapeHtml(cell.name.charAt(0)) + '</b>' + escapeHtml(cell.name.slice(1));
+        gridMarker(fromUtm((x0 + x1) / 2, (y0 + y1) / 2, f.zone, f.south), 'snail-label', label);
       }
     }
   }
 
+  var gridHint = null;
+  function gridHintEl() {
+    if (!gridHint) {
+      gridHint = document.createElement('div');
+      gridHint.className = 'grid-hint';
+      gridHint.textContent = 'Улитка — приблизьте карту';
+      gridHint.style.display = 'none';
+      map.getContainer().parentNode.appendChild(gridHint);
+    }
+    gridHint.style.top = gridTopInset + 8 + 'px';
+    return gridHint;
+  }
+
   function drawGrid() {
     gridLayer.clearLayers();
+    if (gridMode !== 'snail' && gridHint) gridHint.style.display = 'none';
     if (gridMode === 'off') return;
     var f = gridFrame();
     if (gridMode === 'snail') drawSnail(f);
@@ -2011,7 +2029,20 @@
     drawGrid();
     postView();
   }
-  map.on('moveend zoomend resize rotate', drawGridSoon);
+  map.on('moveend zoomend resize', drawGridSoon);
+  // Turning (by hand or following the compass) fires every frame; the lines turn with
+  // the map anyway, so rebuild a few times a second and once when it stops.
+  var gridTurnAt = 0;
+  var gridTurnTail = null;
+  map.on('rotate', function () {
+    if (gridMode === 'off') return;
+    clearTimeout(gridTurnTail);
+    var now = Date.now();
+    if (now - gridTurnAt > 400) {
+      gridTurnAt = now;
+      drawGridSoon();
+    } else gridTurnTail = setTimeout(drawGridSoon, 250);
+  });
   // Rotating fires many events; redraw once per frame at most.
   var gridFrameReq = null;
   function drawGridSoon() {

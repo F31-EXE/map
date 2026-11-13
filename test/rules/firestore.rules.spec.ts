@@ -552,6 +552,26 @@ describe('moving markers', () => {
   });
 });
 
+describe('captioning markers', () => {
+  beforeEach(async () => {
+    await createTeam(as('alice'), 'alice');
+    await join(as('bob'), 'bob');
+    await join(as('carol'), 'carol');
+    await setDoc(doc(as('bob'), 'teams', TEAM, 'markers', 'm1'), marker('bob'));
+  });
+  const caption = (by: string, data: Record<string, unknown>) => updateDoc(doc(as(by), 'teams', TEAM, 'markers', 'm1'), data);
+
+  test('the author and the commander caption it', async () => {
+    await assertSucceeds(caption('bob', { label: 'Вход Д2' }));
+    await assertSucceeds(caption('alice', { label: 'Сбор' }));
+  });
+  test('not another fighter, not too long, nothing but the caption', async () => {
+    await assertFails(caption('carol', { label: 'Моё' }));
+    await assertFails(caption('bob', { label: 'x'.repeat(41) }));
+    await assertFails(caption('alice', { label: 'Сбор', kind: 'friendly' }));
+  });
+});
+
 describe('chat relayed over Bluetooth', () => {
   beforeEach(async () => {
     await createTeam(as('alice'), 'alice');
@@ -785,6 +805,10 @@ describe('big games: techs, sides, players, game markers', () => {
     await assertSucceeds(updateDoc(doc(as('tom'), 'games', GAME), { match: { start: Date.now(), minutes: 30 } }));
     await assertFails(updateDoc(doc(as('bob'), 'games', GAME), { match: { start: 0, minutes: 30 } }));
     await assertFails(updateDoc(doc(as('tom'), 'games', GAME), { match: { start: 0, minutes: 0 } }));
+    // Pause and resume: a frozen clock is a number, nothing else.
+    await assertSucceeds(updateDoc(doc(as('tom'), 'games', GAME), { match: { start: 1, minutes: 30, pausedAt: 5 } }));
+    await assertSucceeds(updateDoc(doc(as('tom'), 'games', GAME), { match: { start: 4, minutes: 40, pausedAt: null } }));
+    await assertFails(updateDoc(doc(as('tom'), 'games', GAME), { match: { start: 4, minutes: 40, pausedAt: 'x' } }));
     await assertSucceeds(updateDoc(doc(as('tom'), 'games', GAME), { tiebreak: 'time' }));
     await assertFails(updateDoc(doc(as('tom'), 'games', GAME), { tiebreak: 'coin' }));
     await assertSucceeds(updateDoc(doc(as('bob'), 'games', GAME, 'players', 'bob'), { cell: 's5', cellAt: 3 }));

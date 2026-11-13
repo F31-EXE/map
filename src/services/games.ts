@@ -136,7 +136,7 @@ export function subscribeGame(gameId: string, onGame: (g: Game | null) => void, 
               tiebreak: d.tiebreak === 'time' ? 'time' : 'draw',
               match:
                 d.match && typeof d.match.start === 'number'
-                  ? { start: d.match.start, minutes: d.match.minutes, stoppedAt: d.match.stoppedAt ?? null }
+                  ? { start: d.match.start, minutes: d.match.minutes, stoppedAt: d.match.stoppedAt ?? null, pausedAt: d.match.pausedAt ?? null }
                   : null,
             }
           : null
