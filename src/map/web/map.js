@@ -357,14 +357,44 @@
         selfMarker.setIcon(selfIcon(p));
         coneAngle = null;
       }
-      selfMarker.setLatLng(ll);
-      selfAccuracy.setLatLng(ll);
       selfAccuracy.setRadius(p.accuracy || 0);
+      glideSelf(L.latLng(ll));
     }
     setHeading(p.heading);
     drawNav();
-    if (headingUp && p.heading != null) turnMap(360 - p.heading);
-    if (follow) map.panTo(ll, { animate: true });
+    if (headingUp && p.heading != null) smoothTurn(360 - p.heading);
+    // Fixes come about once a second: glide the map over the same second (linear), so
+    // consecutive fixes chain into one steady movement instead of a jump per fix.
+    if (follow) map.panTo(ll, { animate: true, duration: GLIDE_MS / 1000, easeLinearity: 1 });
+  }
+
+  // The own marker glides from fix to fix in step with the following map, instead of
+  // jumping ahead of it. Far jumps (a bad fix, a first fix after a while) are immediate.
+  var GLIDE_MS = 1000;
+  var glide = null;
+  function glideSelf(to) {
+    var from = selfMarker.getLatLng();
+    if (glide) cancelAnimationFrame(glide.req);
+    glide = null;
+    if (from.distanceTo(to) > 150 || document.hidden) {
+      selfMarker.setLatLng(to);
+      selfAccuracy.setLatLng(to);
+      return;
+    }
+    var g = { from: from, to: to, t0: performance.now(), req: 0 };
+    glide = g;
+    var step = function (now) {
+      if (glide !== g) return;
+      var t = Math.min(1, (now - g.t0) / GLIDE_MS);
+      var at = L.latLng(g.from.lat + (g.to.lat - g.from.lat) * t, g.from.lng + (g.to.lng - g.from.lng) * t);
+      selfMarker.setLatLng(at);
+      // The accuracy circle is a vector path: mid-zoom it would be drawn in the wrong place.
+      if (!zooming || t === 1) selfAccuracy.setLatLng(at);
+      if (navTarget && !zooming) drawNav();
+      if (t < 1) g.req = requestAnimationFrame(step);
+      else glide = null;
+    };
+    g.req = requestAnimationFrame(step);
   }
 
   // Own trail (breadcrumbs): where I walked in the last minutes.
@@ -435,6 +465,39 @@
     } finally {
       turningByCode = false;
     }
+  }
+
+  // Heading-up: the compass arrives in steps of a few degrees several times a second;
+  // the map eases toward the latest one every frame (shortest way round) so it turns
+  // smoothly instead of ticking.
+  var turnTarget = null;
+  var turnReq = 0;
+  var turnLast = 0;
+  function smoothTurn(b) {
+    turnTarget = ((b % 360) + 360) % 360;
+    if (turnReq) return;
+    turnLast = performance.now();
+    turnReq = requestAnimationFrame(turnFrame);
+  }
+  function stopTurn() {
+    if (turnReq) cancelAnimationFrame(turnReq);
+    turnReq = 0;
+    turnTarget = null;
+  }
+  function turnFrame(now) {
+    turnReq = 0;
+    if (!headingUp || turnTarget == null) return;
+    var cur = bearing();
+    var diff = ((((turnTarget - cur) % 360) + 540) % 360) - 180;
+    var dt = Math.min(100, Math.max(1, now - turnLast));
+    turnLast = now;
+    if (Math.abs(diff) < 0.1) {
+      turnMap(turnTarget);
+      return;
+    }
+    // Time-based easing (~150 ms to close most of the gap), so it's the same at any frame rate.
+    turnMap(cur + diff * (1 - Math.exp(-dt / 150)));
+    turnReq = requestAnimationFrame(turnFrame);
   }
 
   var bearingPostAt = 0;
@@ -1995,6 +2058,7 @@
     },
     setBearing: function (p) {
       headingUp = false;
+      stopTurn();
       turningByCode = true;
       try {
         map.setBearing((p && p.bearing) || 0);
@@ -2010,7 +2074,8 @@
     },
     setHeadingUp: function (p) {
       headingUp = !!(p && p.on);
-      if (headingUp && selfHeading != null) turnMap(360 - selfHeading);
+      if (!headingUp) stopTurn();
+      else if (selfHeading != null) smoothTurn(360 - selfHeading);
     },
     // Keeps the scale bar and attribution above the native bottom panel.
     setInsets: function (p) {
