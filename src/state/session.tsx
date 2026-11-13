@@ -44,10 +44,15 @@ import * as teams from '../services/teams';
 
 import { useMesh, type Mesh } from './useMesh';
 
-/** Re-send position at least this often so teammates can tell we're alive. */
-const HEARTBEAT_MS = 30_000;
-const MIN_INTERVAL_MS = 4_000;
-const MIN_MOVE_M = 3;
+/**
+ * Position writes are the bulk of the database load (the free Firebase plan allows
+ * 20 000 writes a day for everyone together; once it ran out every write in the app
+ * hung). A move under 10 m is GPS jitter of a phone lying still, which used to write
+ * every 4 s; now at most every 10 s while moving and once a minute standing still.
+ */
+const HEARTBEAT_MS = 60_000;
+const MIN_INTERVAL_MS = 10_000;
+const MIN_MOVE_M = 10;
 const NOT_A_MEMBER = 'Вы больше не состоите в этой команде';
 
 export type MarkerScope = 'team' | 'personal';
@@ -656,7 +661,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       pendingTracks.current = merged;
       flushTracks.current();
     });
-    const t = setInterval(() => flushTracks.current(), 20_000);
+    const t = setInterval(() => flushTracks.current(), 60_000);
     return () => clearInterval(t);
   }, []);
   // Signed in (or back from a refused upload): send what's waiting.

@@ -47,7 +47,8 @@ const REPORT_AT_MS = 30_000;
 /** Football: how often the referee rolls the balls. */
 const BALL_TICK_MS = 3000;
 /** Fighters' positions older than this don't push a ball. */
-const BALL_FRESH_MS = 60_000;
+// Standing fighters write their position once a minute: keep them counted between.
+const BALL_FRESH_MS = 90_000;
 
 export type GameScores = {
   /** Lives left per side (tickets mode). */
@@ -673,7 +674,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
       if (!isTech || !gameId || !uid) return;
       const now = Date.now();
       const last = lastTechSent.current;
-      if (last && now - last.at < 10_000) return;
+      if (last && now - last.at < 30_000) return;
       lastTechSent.current = { at: now, p };
       games.reportTech(gameId, uid, { lat: p.lat, lng: p.lng, heading: p.heading }).catch(() => {});
     },

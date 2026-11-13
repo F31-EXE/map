@@ -73,7 +73,7 @@ export function firestore(): Firestore {
 export function withTimeout<T>(p: Promise<T>, ms = 20_000): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const t = setTimeout(
-      () => reject(new Error('Сервер не отвечает. Проверьте интернет и попробуйте ещё раз')),
+      () => reject(new Error('Сервер не отвечает. Проверьте интернет; если он есть — сервер перегружен (дневной лимит базы), попробуйте позже')),
       ms
     );
     p.then(
