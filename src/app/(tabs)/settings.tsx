@@ -18,6 +18,7 @@ import { confirmDestructive } from '../../ui/confirm';
 import { RadioCard } from '../../ui/RadioCard';
 import { RolePicker } from '../../ui/RolePicker';
 import { UpdatesCard } from '../../ui/UpdatesCard';
+import { ConnectionCheck } from '../../ui/ConnectionCheck';
 import { C, F, R } from '../../ui/theme';
 
 const VOLUMES = [0.25, 0.5, 0.75, 1];
@@ -388,6 +389,7 @@ export default function SettingsScreen() {
       </Card>
 
       <UpdatesCard />
+      <ConnectionCheck />
 
       <Text style={styles.version}>
         GRIMMAP v{Constants.expoConfig?.version ?? '—'}
