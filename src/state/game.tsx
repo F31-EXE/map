@@ -36,6 +36,7 @@ import * as teams from '../services/teams';
 
 import { useSession } from './session';
 import { useSide } from './side';
+import { withTimeout } from '../lib/firebase';
 
 /** A tech counts as online (and may referee) if their position is this fresh. */
 const TECH_ONLINE_MS = 3 * 60_000;
@@ -702,7 +703,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
         await saveJson(KEYS.techShowAll, v);
       },
       createGame: async (name) => {
-        const id = await games.createGame(requireUid(), callsign || 'Игротех', name.trim() || 'Игра');
+        const id = await withTimeout(games.createGame(requireUid(), callsign || 'Игротех', name.trim() || 'Игра'));
         setTechGameId(id);
         await saveJson(KEYS.techGame, id);
       },

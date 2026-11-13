@@ -11,7 +11,7 @@ import {
   type ReactNode,
 } from 'react';
 
-import { firebaseAuth, isFirebaseConfigured } from '../lib/firebase';
+import { firebaseAuth, isFirebaseConfigured, withTimeout } from '../lib/firebase';
 import { distanceMeters } from '../lib/geo';
 import { isOrder, isVotedOut } from '../lib/markerKinds';
 import { mergeMeshMarkers, mergeMeshMembers } from '../lib/mesh';
@@ -464,7 +464,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     async (name: string, typed?: string) => {
       const cs = typed?.trim() ? typed.trim().slice(0, 24) : requireCallsign();
       if (typed?.trim()) await setCallsign(cs);
-      const id = await teams.createTeam(requireUid(), cs, role, name.trim() || 'Команда');
+      const id = await withTimeout(teams.createTeam(requireUid(), cs, role, name.trim() || 'Команда'));
       await persistTeamId(id);
     },
     [requireUid, requireCallsign, role, persistTeamId, setCallsign]
@@ -474,7 +474,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     async (code: string, typed?: string) => {
       const cs = typed?.trim() ? typed.trim().slice(0, 24) : requireCallsign();
       if (typed?.trim()) await setCallsign(cs);
-      const id = await teams.joinTeam(requireUid(), cs, role, code);
+      const id = await withTimeout(teams.joinTeam(requireUid(), cs, role, code));
       await persistTeamId(id);
     },
     [requireUid, requireCallsign, role, persistTeamId, setCallsign]

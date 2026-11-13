@@ -2,7 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getApp, getApps, initializeApp, type FirebaseApp } from 'firebase/app';
 import * as authModule from 'firebase/auth';
 import { connectAuthEmulator, getAuth, initializeAuth, type Auth, type Persistence } from 'firebase/auth';
-import { connectFirestoreEmulator, getFirestore, type Firestore } from 'firebase/firestore';
+import { connectFirestoreEmulator, getFirestore, initializeFirestore, type Firestore } from 'firebase/firestore';
 import { Platform } from 'react-native';
 
 const config = {
@@ -52,8 +52,39 @@ export function firebaseAuth(): Auth {
 
 export function firestore(): Firestore {
   if (!db) {
-    db = getFirestore(ensureApp());
+    // Phones: Firestore's streaming channel doesn't always come up in React Native
+    // (on iPhones writes hung forever, «creating a team» spun endlessly); long polling
+    // works everywhere. Browsers keep the default.
+    db =
+      Platform.OS === 'web'
+        ? getFirestore(ensureApp())
+        : initializeFirestore(ensureApp(), { experimentalForceLongPolling: true });
     if (emulatorHost) connectFirestoreEmulator(db, emulatorHost, 8080);
   }
   return db;
+}
+
+/**
+ * A server write the user waits for (create a squad, a side, a game): Firestore keeps
+ * an unacknowledged write pending forever, so the button spun endlessly without a
+ * connection. Gives up waiting after `ms` with a readable message (the write may
+ * still go through later).
+ */
+export function withTimeout<T>(p: Promise<T>, ms = 20_000): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const t = setTimeout(
+      () => reject(new Error('Сервер не отвечает. Проверьте интернет и попробуйте ещё раз')),
+      ms
+    );
+    p.then(
+      (v) => {
+        clearTimeout(t);
+        resolve(v);
+      },
+      (e) => {
+        clearTimeout(t);
+        reject(e);
+      }
+    );
+  });
 }

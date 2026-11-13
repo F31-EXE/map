@@ -17,6 +17,7 @@ import type { Member, OrderKind, Side, TacMarker, Team } from '../lib/types';
 import * as sides from '../services/sides';
 import * as teams from '../services/teams';
 import { useSession } from './session';
+import { withTimeout } from '../lib/firebase';
 
 export type Squad = Team & {
   /** Color the side commander sees it in (local override or the squad's own). */
@@ -238,7 +239,7 @@ export function SideProvider({ children }: { children: ReactNode }) {
 
   const createSide = useCallback(
     async (name: string) => {
-      const id = await sides.createSide(requireUid(), name.trim() || 'Сторона');
+      const id = await withTimeout(sides.createSide(requireUid(), name.trim() || 'Сторона'));
       setSideId(id);
       await saveJson(KEYS.sideId, id);
     },
