@@ -8,7 +8,7 @@ name: Firestore rules
 on:
   push:
     branches: [claude/friendly-pasteur-su6kfi, main]
-    paths: [firestore.rules, firebase.json, test/rules/**, scripts/deploy-rules.mjs, .github/workflows/firestore-rules.yml]
+    paths: [firestore.rules, firebase.json, test/rules/**, scripts/deploy-rules.mjs, scripts/firestore-check.mjs, .github/workflows/firestore-rules.yml]
   workflow_dispatch:
 
 permissions:
@@ -49,3 +49,12 @@ jobs:
           printf '%s' "$SERVICE_ACCOUNT" > "$key"
           trap 'rm -f "$key"' EXIT
           GOOGLE_APPLICATION_CREDENTIALS="$key" node scripts/deploy-rules.mjs airsoftcalendar
+      - name: Check the live database (test write, usage)
+        env:
+          SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: |
+          if [ -z "$SERVICE_ACCOUNT" ]; then exit 0; fi
+          key="$RUNNER_TEMP/sa.json"
+          printf '%s' "$SERVICE_ACCOUNT" > "$key"
+          trap 'rm -f "$key"' EXIT
+          GOOGLE_APPLICATION_CREDENTIALS="$key" node scripts/firestore-check.mjs airsoftcalendar
