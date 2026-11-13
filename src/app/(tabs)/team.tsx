@@ -42,6 +42,7 @@ export default function TeamScreen() {
   const headerHeight = useHeaderHeight();
   const { busy, run } = useAction();
   const [teamName, setTeamName] = useState('');
+  const [typedCallsign, setTypedCallsign] = useState('');
   const [code, setCode] = useState('');
   const [mode, setMode] = useState<'join' | 'create'>('join');
   const [copied, setCopied] = useState(false);
@@ -69,11 +70,11 @@ export default function TeamScreen() {
 
   return (
     <KeyboardScroll contentContainerStyle={styles.content} headerOffset={headerHeight}>
-      {!s.callsign && (
+      {!s.callsign && inTeam && (
         <Pressable onPress={() => router.navigate('/settings')}>
           <Card style={[styles.hint]}>
             <Icon name="account-edit-outline" size={22} color={C.warn} />
-            <Text style={[styles.text, { flex: 1 }]}>Сначала задайте позывной и роль во вкладке «Настройки».</Text>
+            <Text style={[styles.text, { flex: 1 }]}>Задайте позывной и роль во вкладке «Настройки».</Text>
             <Icon name="chevron-right" size={20} color={C.faint} />
           </Card>
         </Pressable>
@@ -95,7 +96,22 @@ export default function TeamScreen() {
           <Text style={styles.text}>{s.authError ?? 'Подключаемся к серверу…'}</Text>
         </Card>
       ) : !inTeam ? (
+        <>
         <Card style={{ gap: 16 }}>
+          {!s.callsign && (
+            <View style={{ gap: 6 }}>
+              <Text style={styles.text}>Ваш позывной — так вас увидит отряд:</Text>
+              <TextInput
+                value={typedCallsign}
+                onChangeText={setTypedCallsign}
+                placeholder="Например: Гром"
+                placeholderTextColor={C.faint}
+                maxLength={24}
+                style={styles.input}
+                selectionColor={C.accent}
+              />
+            </View>
+          )}
           <View style={styles.segment}>
             {(['join', 'create'] as const).map((m) => (
               <Pressable key={m} onPress={() => setMode(m)} style={[styles.segmentItem, mode === m && styles.segmentActive]}>
@@ -125,9 +141,18 @@ export default function TeamScreen() {
                 icon="login"
                 disabled={code.length < 6}
                 busy={busy === 'join'}
-                onPress={() => run('join', () => s.joinTeam(code))}
+                onPress={() => run('join', () => s.joinTeam(code, typedCallsign))}
               />
-              <Button title="Сканировать QR отряда" icon="qrcode-scan" kind="secondary" onPress={() => router.push('/scan')} />
+              <Button
+                title="Сканировать QR отряда"
+                icon="qrcode-scan"
+                kind="secondary"
+                onPress={async () => {
+                  // The scanner joins right away: it needs the callsign already saved.
+                  if (!s.callsign && typedCallsign.trim()) await s.setCallsign(typedCallsign);
+                  router.push('/scan');
+                }}
+              />
             </>
           ) : (
             <>
@@ -147,11 +172,15 @@ export default function TeamScreen() {
                 title="Создать команду"
                 icon="flag-plus"
                 busy={busy === 'create'}
-                onPress={() => run('create', () => s.createTeam(teamName))}
+                onPress={() => run('create', () => s.createTeam(teamName, typedCallsign))}
               />
             </>
           )}
         </Card>
+
+        {/* A game tech doesn't need a squad to run a big game. */}
+        <GameLinkCard />
+        </>
       ) : (
         <>
           {/* My game state */}

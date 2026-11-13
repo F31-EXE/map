@@ -80,8 +80,9 @@ type Session = {
   isOwner: boolean;
   /** Owner, or granted command rights: may place orders. */
   canCommand: boolean;
-  createTeam: (name: string) => Promise<void>;
-  joinTeam: (code: string) => Promise<void>;
+  /** `callsign`: typed right in the form when none is set yet (saved as the callsign). */
+  createTeam: (name: string, callsign?: string) => Promise<void>;
+  joinTeam: (code: string, callsign?: string) => Promise<void>;
   leaveTeam: () => Promise<void>;
   kickMember: (memberId: string) => Promise<void>;
   setMemberCanCommand: (memberId: string, value: boolean) => Promise<void>;
@@ -460,19 +461,23 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, [teamId, uid, avatar]);
 
   const createTeam = useCallback(
-    async (name: string) => {
-      const id = await teams.createTeam(requireUid(), requireCallsign(), role, name.trim() || 'Команда');
+    async (name: string, typed?: string) => {
+      const cs = typed?.trim() ? typed.trim().slice(0, 24) : requireCallsign();
+      if (typed?.trim()) await setCallsign(cs);
+      const id = await teams.createTeam(requireUid(), cs, role, name.trim() || 'Команда');
       await persistTeamId(id);
     },
-    [requireUid, requireCallsign, role, persistTeamId]
+    [requireUid, requireCallsign, role, persistTeamId, setCallsign]
   );
 
   const joinTeam = useCallback(
-    async (code: string) => {
-      const id = await teams.joinTeam(requireUid(), requireCallsign(), role, code);
+    async (code: string, typed?: string) => {
+      const cs = typed?.trim() ? typed.trim().slice(0, 24) : requireCallsign();
+      if (typed?.trim()) await setCallsign(cs);
+      const id = await teams.joinTeam(requireUid(), cs, role, code);
       await persistTeamId(id);
     },
-    [requireUid, requireCallsign, role, persistTeamId]
+    [requireUid, requireCallsign, role, persistTeamId, setCallsign]
   );
 
   const leaveTeam = useCallback(async () => {
