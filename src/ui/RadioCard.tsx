@@ -161,10 +161,15 @@ function RadioPicker({
   onPick: (d: RadioDevice) => void;
 }) {
   const [found, setFound] = useState<RadioDevice[]>([]);
+  const [showAll, setShowAll] = useState(false);
+  const [slow, setSlow] = useState(false);
+  const [round, setRound] = useState(0);
   const { scan } = radio;
   useEffect(() => {
     if (!visible) return;
     setFound([]);
+    setSlow(false);
+    const hint = setTimeout(() => setSlow(true), 8000);
     let stop: (() => void) | null = null;
     let cancelled = false;
     scan((d) => setFound((cur) => (cur.some((x) => x.id === d.id) ? cur : [...cur, d]))).then((s) => {
@@ -176,9 +181,14 @@ function RadioPicker({
     return () => {
       cancelled = true;
       clearTimeout(t);
+      clearTimeout(hint);
       stop?.();
     };
-  }, [visible, scan]);
+  }, [visible, scan, round]);
+
+  const radios = found.filter((d) => !d.other);
+  const others = found.filter((d) => d.other).sort((a, b) => (b.rssi ?? -999) - (a.rssi ?? -999));
+  const shown = showAll ? [...radios, ...others] : radios;
 
   return (
     <Sheet visible={visible} onClose={onClose}>
@@ -188,13 +198,14 @@ function RadioPicker({
         телефон спросит PIN-код: он появится на экране рации, а если экрана нет или PIN фиксированный — 123456.
       </Text>
       {radio.error && <Text style={[styles.sub, { color: C.danger }]}>{radio.error}</Text>}
-      {found.length === 0 ? (
+      {shown.length === 0 && (
         <View style={styles.searching}>
           <Icon name="bluetooth-audio" size={20} color={C.dim} />
           <Text style={styles.sub}>Ищу рации поблизости…</Text>
         </View>
-      ) : (
-        found.map((d) => (
+      )}
+      {shown.length > 0 &&
+        shown.map((d) => (
           <Pressable
             key={d.id}
             onPress={() => {
@@ -203,14 +214,40 @@ function RadioPicker({
             }}
             style={({ pressed }) => [styles.found, pressed && { opacity: 0.7 }]}
           >
-            <Icon name="radio-handheld" size={22} color={C.accent} />
-            <Text style={[styles.device, { flex: 1 }]} numberOfLines={1}>
-              {d.name}
-            </Text>
+            <Icon name={d.other ? 'bluetooth' : 'radio-handheld'} size={22} color={d.other ? C.dim : C.accent} />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.device} numberOfLines={1}>
+                {d.name}
+              </Text>
+              {d.connected && <Text style={styles.nodeSub}>уже подключена к телефону</Text>}
+            </View>
             {d.rssi != null && <Text style={styles.nodeSub}>{d.rssi} dBm</Text>}
           </Pressable>
-        ))
+        ))}
+      {slow && radios.length === 0 && (
+        <View style={styles.tips}>
+          <Text style={styles.tipsTitle}>Не находится? Проверьте:</Text>
+          <Text style={styles.sub}>• Рацию не держит приложение Meshtastic или другой телефон: подключённая рация не видна. Отключитесь там (или закройте приложение) и нажмите «Искать снова».</Text>
+          <Text style={styles.sub}>• Включена геолокация (GPS) телефона и разрешён доступ к местоположению: без этого Android не показывает Bluetooth-устройства.</Text>
+          <Text style={styles.sub}>• В рации включён Bluetooth (Meshtastic: Config → Bluetooth → Enabled) и она рядом, не дальше пары метров.</Text>
+          <Text style={styles.sub}>• Рация видна в списке ниже под другим именем — откройте «Все устройства».</Text>
+        </View>
       )}
+      <View style={styles.row}>
+        <Button
+          title="Искать снова"
+          icon="refresh"
+          kind="secondary"
+          style={{ flex: 1 }}
+          onPress={() => setRound((r) => r + 1)}
+        />
+        <Button
+          title={showAll ? 'Только рации' : `Все устройства${others.length ? ` · ${others.length}` : ''}`}
+          kind="ghost"
+          style={{ flex: 1 }}
+          onPress={() => setShowAll((v) => !v)}
+        />
+      </View>
     </Sheet>
   );
 }
@@ -226,6 +263,8 @@ const styles = StyleSheet.create({
   nodeName: { color: C.text, fontSize: 14, fontFamily: F.regular, flex: 1 },
   nodeSub: { color: C.faint, fontSize: 12, fontFamily: F.mono },
   sheetTitle: { color: C.text, fontSize: 22, fontFamily: F.bold },
+  tips: { gap: 6, padding: 12, borderRadius: R.md, backgroundColor: C.elevated, borderWidth: 1, borderColor: C.line },
+  tipsTitle: { color: C.text, fontSize: 14, fontFamily: F.semibold },
   searching: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 12 },
   found: {
     flexDirection: 'row',

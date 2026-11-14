@@ -8,7 +8,7 @@ import { PermissionsAndroid, Platform } from 'react-native';
 import type { BleManager, Device, Subscription } from 'react-native-ble-plx';
 
 import { fromBase64, toBase64 } from '../lib/base64';
-import { MT_FROM_NUM, MT_FROM_RADIO, MT_SERVICE, MT_TO_RADIO, payloadForMtu } from '../lib/meshtastic';
+import { looksLikeMeshtastic, MT_FROM_NUM, MT_FROM_RADIO, MT_SERVICE, MT_TO_RADIO, payloadForMtu } from '../lib/meshtastic';
 
 import { RadioSession, type RadioDevice, type RadioListener } from './radioSession';
 
@@ -52,7 +52,9 @@ export async function requestRadioPermissions(): Promise<boolean> {
   if (Platform.OS !== 'android') return true;
   const P = PermissionsAndroid.PERMISSIONS;
   const api = typeof Platform.Version === 'number' ? Platform.Version : 0;
-  const wanted = api >= 31 ? [P.BLUETOOTH_SCAN, P.BLUETOOTH_CONNECT] : [P.ACCESS_FINE_LOCATION];
+  // The manifest doesn't say «never for location», so Android 12+ also hands scan
+  // results only to apps holding location (and with location switched on).
+  const wanted = api >= 31 ? [P.BLUETOOTH_SCAN, P.BLUETOOTH_CONNECT, P.ACCESS_FINE_LOCATION] : [P.ACCESS_FINE_LOCATION];
   const res = await PermissionsAndroid.requestMultiple(wanted);
   return wanted.every((p) => res[p] === PermissionsAndroid.RESULTS.GRANTED);
 }
@@ -78,7 +80,13 @@ export async function bluetoothReady(): Promise<boolean> {
   });
 }
 
-/** Radios advertising the Meshtastic service, as they turn up. Returns a stop function. */
+/**
+ * Radios nearby, as they turn up, plus any already connected to the phone (the Meshtastic
+ * app keeps its radio connected, and a connected radio stops advertising; Android lets
+ * a second app use the same link). Scans unfiltered: some phones drop 128-bit UUID
+ * filters, so radios are recognised by `looksLikeMeshtastic`; other named devices come
+ * with `other: true` for the «all devices» list. Returns a stop function.
+ */
 export function scanRadios(onFound: (d: RadioDevice) => void, onError: (e: string) => void): () => void {
   const m = getManager();
   if (!m) {
@@ -86,14 +94,26 @@ export function scanRadios(onFound: (d: RadioDevice) => void, onError: (e: strin
     return () => {};
   }
   const seen = new Set<string>();
-  m.startDeviceScan([MT_SERVICE], null, async (err, d) => {
+  m.connectedDevices([MT_SERVICE])
+    .then((list) => {
+      for (const d of list) {
+        if (seen.has(d.id)) continue;
+        seen.add(d.id);
+        onFound({ id: d.id, name: d.localName || d.name || 'Meshtastic', rssi: null, connected: true });
+      }
+    })
+    .catch(() => {});
+  m.startDeviceScan(null, { allowDuplicates: false, scanMode: ble?.ScanMode.LowLatency }, (err, d) => {
     if (err) {
       onError(err.message);
       return;
     }
     if (!d || seen.has(d.id)) return;
+    const name = d.localName || d.name || null;
+    const radio = looksLikeMeshtastic(name, d.serviceUUIDs);
+    if (!radio && !name) return;
     seen.add(d.id);
-    onFound({ id: d.id, name: d.localName || d.name || 'Meshtastic', rssi: d.rssi ?? null });
+    onFound({ id: d.id, name: name || 'Meshtastic', rssi: d.rssi ?? null, other: !radio });
   }).catch((e: Error) => onError(e.message));
   return () => {
     m.stopDeviceScan().catch(() => {});

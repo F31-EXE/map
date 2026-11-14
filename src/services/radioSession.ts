@@ -14,7 +14,16 @@ import {
 } from '../lib/meshtastic';
 
 /** A radio the user picked. `transport` is set on the web (Bluetooth or USB cable). */
-export type RadioDevice = { id: string; name: string; rssi: number | null; transport?: 'ble' | 'usb' };
+export type RadioDevice = {
+  id: string;
+  name: string;
+  rssi: number | null;
+  transport?: 'ble' | 'usb';
+  /** Found among devices already connected to the phone (e.g. by the Meshtastic app). */
+  connected?: boolean;
+  /** Not recognised as a radio: listed only under «Все устройства». */
+  other?: boolean;
+};
 
 export type RadioState = 'off' | 'connecting' | 'syncing' | 'ready';
 

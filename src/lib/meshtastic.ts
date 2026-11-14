@@ -14,6 +14,19 @@ export const MT_FROM_RADIO = '2c55e69e-4993-11ed-b878-0242ac120002';
 /** Notifies when FromRadio has something new. */
 export const MT_FROM_NUM = 'ed9da18c-a800-4f66-a670-aa7547e34453';
 
+/**
+ * A scanned Bluetooth device is a Meshtastic radio: it advertises the Meshtastic service,
+ * or carries the firmware's default name («Meshtastic_1a2b», «<short name>_1a2b») or a
+ * known board's name. Some phones drop 128-bit UUID scan filters, so the app scans
+ * unfiltered and decides here.
+ */
+export function looksLikeMeshtastic(name: string | null | undefined, serviceUUIDs: string[] | null | undefined): boolean {
+  if (serviceUUIDs?.some((u) => u.toLowerCase() === MT_SERVICE)) return true;
+  const n = (name ?? '').trim();
+  if (!n) return false;
+  return /meshtastic|heltec|t114|t-?beam|t-?echo|rak4631|wismesh|station\s?g/i.test(n) || /_[0-9a-f]{4}$/i.test(n);
+}
+
 export const PORT = { text: 1, position: 3, nodeInfo: 4, admin: 6, telemetry: 67, private: 256 } as const;
 export const BROADCAST = 0xffffffff;
 /** Data.payload limit (Constants.DATA_PAYLOAD_LEN). */
