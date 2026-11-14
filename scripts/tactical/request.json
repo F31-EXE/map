@@ -1,8 +1,9 @@
 {
   "link": "56.638184, 60.668019",
-  "name": "Лес 56.638 60.668",
+  "name": "Лес · 56.638, 60.668",
   "size_km": "2",
   "zoom": 17,
   "source": "yandex",
-  "grid": "snail"
+  "grid": "snail",
+  "origin": "app"
 }

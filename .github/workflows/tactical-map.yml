@@ -35,6 +35,11 @@ on:
         type: choice
         options: [snail, none]
         default: snail
+      origin:
+        description: 'Начало сетки: app — как в приложении (5-км блоки), corner — А1 в левом верхнем углу'
+        type: choice
+        options: [app, corner]
+        default: app
 
 permissions:
   contents: write
@@ -61,15 +66,16 @@ jobs:
           ZOOM: ${{ inputs.zoom }}
           SOURCE: ${{ inputs.source }}
           GRID: ${{ inputs.grid }}
+          ORIGIN: ${{ inputs.origin }}
         run: |
           if [ "$EVENT" = push ]; then
             r=scripts/tactical/request.json
             get() { python -c "import json,sys;print(json.load(open('$r')).get(sys.argv[1], sys.argv[2]))" "$1" "$2"; }
             LINK=$(get link ''); NAME=$(get name ''); SIZE=$(get size_km auto)
-            ZOOM=$(get zoom 17); SOURCE=$(get source yandex); GRID=$(get grid snail)
+            ZOOM=$(get zoom 17); SOURCE=$(get source yandex); GRID=$(get grid snail); ORIGIN=$(get origin app)
           fi
           python scripts/tactical/make_kmz.py --link "$LINK" --name "$NAME" --size-km "$SIZE" \
-            --zoom "$ZOOM" --source "$SOURCE" --grid "$GRID" --out out
+            --zoom "$ZOOM" --source "$SOURCE" --grid "$GRID" --origin "${ORIGIN:-app}" --out out
       - uses: actions/upload-artifact@v4
         with:
           name: tactical-map

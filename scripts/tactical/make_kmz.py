@@ -155,14 +155,21 @@ def font(size, bold=True):
     return ImageFont.load_default()
 
 
-def draw_snail(img, to_px, lat, lng, bbox):
-    """Bold 500 m squares, thin 3×3 cells, one name per square (letter white, number amber)."""
+def draw_snail(img, to_px, lat, lng, bbox, origin=None):
+    """Bold 500 m squares, thin 3×3 cells, one name per square (letter white, number amber).
+
+    `origin` (lat, lng): square А1's north-west corner, like a squad's grid origin in the
+    app. Without it every square is named inside its own 5 km UTM block, as the app does.
+    """
     zone = int((lng + 180) // 6) + 1
     utm = Transformer.from_crs('EPSG:4326', f'EPSG:{32600 + zone if lat >= 0 else 32700 + zone}', always_xy=True)
     geo = Transformer.from_crs(f'EPSG:{32600 + zone if lat >= 0 else 32700 + zone}', 'EPSG:4326', always_xy=True)
-    ce, cn = utm.transform(lng, lat)
-    oe = math.floor(ce / SNAIL_BLOCK) * SNAIL_BLOCK
-    on = math.ceil(cn / SNAIL_BLOCK) * SNAIL_BLOCK
+    if origin:
+        oe, on = utm.transform(origin[1], origin[0])
+    else:
+        ce, cn = utm.transform(lng, lat)
+        oe = math.floor(ce / SNAIL_BLOCK) * SNAIL_BLOCK
+        on = math.ceil(cn / SNAIL_BLOCK) * SNAIL_BLOCK
     s, w, n, e = bbox
     corners = [utm.transform(x, y) for x, y in ((w, s), (w, n), (e, n), (e, s))]
     min_e, max_e = min(c[0] for c in corners), max(c[0] for c in corners)
@@ -204,8 +211,15 @@ def draw_snail(img, to_px, lat, lng, bbox):
             x0, x1 = max(ee, min_e), min(ee + SNAIL_SIZE, max_e)
             y0, y1 = max(nn, min_n), min(nn + SNAIL_SIZE, max_n)
             if x1 - x0 > 120 and y1 - y0 > 120:
-                col = int(round((ee - oe) / SNAIL_SIZE))
-                row = int(round((on - (nn + SNAIL_SIZE)) / SNAIL_SIZE))
+                if origin:
+                    be, bn = oe, on
+                else:
+                    # The block this square lies in (map.js snailOriginFor).
+                    mid_e, mid_n = ee + SNAIL_SIZE / 2, nn + SNAIL_SIZE / 2
+                    be = math.floor(mid_e / SNAIL_BLOCK) * SNAIL_BLOCK
+                    bn = math.ceil(mid_n / SNAIL_BLOCK) * SNAIL_BLOCK
+                col = int(math.floor((ee + SNAIL_SIZE / 2 - be) / SNAIL_SIZE))
+                row = int(math.floor((bn - (nn + SNAIL_SIZE / 2)) / SNAIL_SIZE))
                 letter = LETTERS[col % len(LETTERS)]
                 number = str(row + 1 if row >= 0 else row)
                 cx, cy = px((x0 + x1) / 2, (y0 + y1) / 2)
@@ -254,6 +268,9 @@ def main():
     ap.add_argument('--zoom', type=int, default=17)
     ap.add_argument('--source', choices=list(SOURCES), default='yandex')
     ap.add_argument('--grid', choices=['snail', 'none'], default='snail')
+    # app: squares named like the app without a squad origin (5 km UTM blocks);
+    # corner: А1 starts at the picture's north-west corner (set the same А1 in the app).
+    ap.add_argument('--origin', choices=['app', 'corner'], default='app')
     ap.add_argument('--name', default='')
     ap.add_argument('--out', default='out')
     a = ap.parse_args()
@@ -307,9 +324,16 @@ def main():
 
     name = a.name.strip() or f'Полигон {lat:.4f} {lng:.4f}'
     note = ''
+    origin_mark = None
     if a.grid == 'snail':
-        zone, oe, on = draw_snail(img, to_px, lat, lng, (s_box, w_box, n_box, e_box))
-        note = f'Сетка «улитка» 500 м, отсчёт от угла 5-км квадрата UTM {zone}N ({int(oe)} E, {int(on)} N) — как в GrimMap без своего начала.'
+        corner = (n_box, w_box) if a.origin == 'corner' else None
+        zone, oe, on = draw_snail(img, to_px, lat, lng, (s_box, w_box, n_box, e_box), corner)
+        if corner:
+            note = (f'Сетка «улитка» 500 м, А1 в левом верхнем углу снимка ({n_box:.6f}, {w_box:.6f}). '
+                    'В GrimMap: Сетка → «А1 от перекрестия» на метке «А1».')
+            origin_mark = (n_box, w_box)
+        else:
+            note = f'Сетка «улитка» 500 м по 5-км квадратам UTM {zone}N — как в GrimMap без своего начала.'
     meters_per_px = (size_km * 1000) / img.width
     draw_frame(img, meters_per_px, name, attribution)
 
@@ -317,6 +341,13 @@ def main():
     jpg = io.BytesIO()
     img.save(jpg, 'JPEG', quality=84, optimize=True, progressive=True)
     safe = re.sub(r'[^\w\-]+', '_', name, flags=re.UNICODE).strip('_')[:60] or 'tactical'
+    mark = ''
+    if origin_mark:
+        mark = f'''
+  <Placemark>
+    <name>А1 — начало сетки</name>
+    <Point><coordinates>{origin_mark[1]:.7f},{origin_mark[0]:.7f},0</coordinates></Point>
+  </Placemark>'''
     kml = f'''<?xml version="1.0" encoding="UTF-8"?>
 <kml xmlns="http://www.opengis.net/kml/2.2">
 <Document>
@@ -332,7 +363,7 @@ def main():
       <east>{e_box:.7f}</east>
       <west>{w_box:.7f}</west>
     </LatLonBox>
-  </GroundOverlay>
+  </GroundOverlay>{mark}
 </Document>
 </kml>
 '''
