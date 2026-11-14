@@ -1,0 +1,103 @@
+# Tactical picture (KMZ): satellite image of a playing area with the snail grid drawn on
+# it, for GrimMap («Карты полигона» → import) and other map apps. Actions → Tactical map
+# (KMZ) → Run workflow: a Yandex Maps link (short ones and VK-wrapped ones too) or
+# «lat, lng». The file goes to the release `tactical-maps` (a direct download link, shown
+# in the run summary) and to the run's artifacts. A push that changes
+# scripts/tactical/request.json builds the map described there (works from any branch,
+# before this workflow is on the default branch).
+name: Tactical map (KMZ)
+
+on:
+  push:
+    paths:
+      - scripts/tactical/request.json
+  workflow_dispatch:
+    inputs:
+      link:
+        description: 'Ссылка Яндекс Карт или координаты «56.638184, 60.668019»'
+        required: true
+      name:
+        description: 'Название (подпись на карте и имя файла)'
+        default: ''
+      size_km:
+        description: 'Сторона квадрата, км (auto — по масштабу ссылки, иначе 2)'
+        default: auto
+      zoom:
+        description: 'Детальность снимка (16–18; 17 ≈ 1 м на пиксель)'
+        default: '17'
+      source:
+        description: 'Снимок'
+        type: choice
+        options: [yandex, esri]
+        default: yandex
+      grid:
+        description: 'Сетка'
+        type: choice
+        options: [snail, none]
+        default: snail
+
+permissions:
+  contents: write
+
+env:
+  TAG: tactical-maps
+
+jobs:
+  kmz:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install pillow pyproj requests
+      - name: Build the KMZ
+        env:
+          EVENT: ${{ github.event_name }}
+          LINK: ${{ inputs.link }}
+          NAME: ${{ inputs.name }}
+          SIZE: ${{ inputs.size_km }}
+          ZOOM: ${{ inputs.zoom }}
+          SOURCE: ${{ inputs.source }}
+          GRID: ${{ inputs.grid }}
+        run: |
+          if [ "$EVENT" = push ]; then
+            r=scripts/tactical/request.json
+            get() { python -c "import json,sys;print(json.load(open('$r')).get(sys.argv[1], sys.argv[2]))" "$1" "$2"; }
+            LINK=$(get link ''); NAME=$(get name ''); SIZE=$(get size_km auto)
+            ZOOM=$(get zoom 17); SOURCE=$(get source yandex); GRID=$(get grid snail)
+          fi
+          python scripts/tactical/make_kmz.py --link "$LINK" --name "$NAME" --size-km "$SIZE" \
+            --zoom "$ZOOM" --source "$SOURCE" --grid "$GRID" --out out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tactical-map
+          path: out/
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --latest=false \
+            --title "Тактические карты (KMZ)" \
+            --notes "Спутниковые снимки полигонов с сеткой «улитка» для GrimMap и других карт. Снимки © Яндекс / © Esri."
+          file=$(python -c "import json;print(json.load(open('out/info.json'))['file'])")
+          # Release asset names are ASCII-safe: GitHub replaces other characters anyway.
+          stamp=$(date -u +%Y%m%d-%H%M)
+          asset="map-${stamp}.kmz"
+          cp "out/$file" "out/$asset"
+          cp "out/${file%.kmz}.preview.jpg" "out/map-${stamp}.preview.jpg"
+          gh release upload "$TAG" "out/$asset" "out/map-${stamp}.preview.jpg" --clobber
+          url="https://github.com/${{ github.repository }}/releases/download/$TAG/$asset"
+          {
+            echo "## Готово"
+            echo
+            echo "KMZ: $url"
+            echo
+            echo "Превью: https://github.com/${{ github.repository }}/releases/download/$TAG/map-${stamp}.preview.jpg"
+            echo
+            echo '```json'
+            cat out/info.json
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "KMZ: $url"
