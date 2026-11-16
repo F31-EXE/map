@@ -755,6 +755,7 @@
     flushDeferred();
     renderMortar();
     drawNav();
+    if (analysisData) drawReplay();
     var now = Date.now();
     Object.keys(zoneShapes).forEach(function (id) {
       drawZone(zoneShapes[id], now, true);
@@ -762,7 +763,7 @@
   }
 
   // Messages that redraw vector layers wait for the zoom to finish (latest one per type).
-  var DEFER_WHILE_ZOOMING = { setSelf: 1, setMarkers: 1, setMortar: 1, setNav: 1, setTrail: 1, setAnalysis: 1 };
+  var DEFER_WHILE_ZOOMING = { setSelf: 1, setMarkers: 1, setMortar: 1, setNav: 1, setTrail: 1, setAnalysis: 1, setReplay: 1 };
   var deferred = {};
   var deferredOrder = [];
   function flushDeferred() {
@@ -1165,20 +1166,156 @@
   });
 
   // ---------------------------------------------------------------------------
-  // Game analysis: recorded tracks and a time-weighted heatmap.
+  // Game analysis: recorded tracks and a time-weighted heatmap, with playback.
   // ---------------------------------------------------------------------------
+
+  // leaflet.heat draws in screen pixels on a canvas inside the turning pane, so with the
+  // map turned it got turned twice and slid off. This one draws in layer pixels (the
+  // pane's own, unturned frame) on a canvas big enough to cover the screen at any bearing.
+  var RotHeat = L.HeatLayer
+    ? L.HeatLayer.extend({
+        _reset: function () {
+          var size = this._map.getSize();
+          var side = Math.ceil(Math.sqrt(size.x * size.x + size.y * size.y));
+          var center = this._map.latLngToLayerPoint(this._map.getCenter());
+          this._origin = center.subtract([side / 2, side / 2]).round();
+          this._originLatLng = this._map.layerPointToLatLng(this._origin);
+          L.DomUtil.setPosition(this._canvas, this._origin);
+          if (this._heat._width !== side) this._canvas.width = this._heat._width = side;
+          if (this._heat._height !== side) this._canvas.height = this._heat._height = side;
+          this._canvas.style.width = side + 'px';
+          this._canvas.style.height = side + 'px';
+          this._redraw();
+        },
+        _redraw: function () {
+          if (!this._map || !this._origin) return;
+          var r = this._heat._r;
+          var side = this._heat._width;
+          var maxZoom = this.options.maxZoom === undefined ? this._map.getMaxZoom() : this.options.maxZoom;
+          // Each sample adds a little: busy places turn red, a single pass stays blue-green.
+          var v = 0.12 / Math.pow(2, Math.max(0, Math.min(maxZoom - this._map.getZoom(), 12)));
+          var data = [];
+          for (var i = 0; i < this._latlngs.length; i++) {
+            var p = this._map.latLngToLayerPoint(this._latlngs[i]).subtract(this._origin);
+            if (p.x < -r || p.y < -r || p.x > side + r || p.y > side + r) continue;
+            data.push([Math.round(p.x), Math.round(p.y), v]);
+          }
+          this._heat.max(1).data(data).draw(this.options.minOpacity);
+          this._frame = null;
+        },
+        _animateZoom: function (e) {
+          if (!this._originLatLng) return;
+          var scale = this._map.getZoomScale(e.zoom);
+          var pos = this._map._latLngToNewLayerPoint(this._originLatLng, e.zoom, e.center);
+          L.DomUtil.setTransform(this._canvas, pos, scale);
+        },
+      })
+    : null;
+
   var analysisLayer = L.layerGroup().addTo(map);
+  var replayLayer = L.layerGroup().addTo(map);
   var analysisFitted = false;
+  var analysisData = null;
+  // Playback: time shown (null = whole game) and the fighter picked (null = everyone).
+  var replay = { t: null, sel: null };
+  var replayLines = {};
+  var replayDots = {};
+
+  function replayIcon(t) {
+    return L.divIcon({
+      className: 'replay-icon',
+      html:
+        '<div class="replay-dot" style="background:' + escapeHtml(t.color) + '"></div>' +
+        '<div class="replay-name">' + escapeHtml(t.callsign || '') + '</div>',
+      iconSize: [0, 0],
+    });
+  }
+
+  // Points of a segment up to time t, with the last one interpolated to t.
+  function upTo(seg, t) {
+    if (t == null) return seg;
+    var out = [];
+    for (var i = 0; i < seg.length; i++) {
+      var p = seg[i];
+      if (p[2] <= t) {
+        out.push(p);
+        continue;
+      }
+      if (i > 0) {
+        var q = seg[i - 1];
+        var k = (t - q[2]) / Math.max(1, p[2] - q[2]);
+        out.push([q[0] + (p[0] - q[0]) * k, q[1] + (p[1] - q[1]) * k, t]);
+      }
+      break;
+    }
+    return out;
+  }
+
+  function drawReplay() {
+    if (zooming) return;
+    replayLayer.clearLayers();
+    replayLines = {};
+    replayDots = {};
+    var a = analysisData;
+    if (!a) return;
+    var playing = replay.t != null;
+    (a.tracks || []).forEach(function (t) {
+      var picked = !replay.sel || replay.sel === t.uid;
+      if (!a.showTracks && !playing && !(replay.sel && picked)) return;
+      var faded = replay.sel && !picked;
+      var last = null;
+      t.segments.forEach(function (seg) {
+        var pts = upTo(seg, replay.t);
+        if (!pts.length) return;
+        last = pts[pts.length - 1];
+        var ll = pts.map(function (p) { return [p[0], p[1]]; });
+        if (ll.length === 1) {
+          if (!playing) {
+            L.circleMarker(ll[0], { radius: 4, color: '#0B0F0C', weight: 2, fillColor: t.color, fillOpacity: faded ? 0.3 : 1, opacity: faded ? 0.3 : 1, interactive: false }).addTo(replayLayer);
+          }
+          return;
+        }
+        if (!faded) L.polyline(ll, { color: '#0B0F0C', weight: picked && replay.sel ? 7 : 5, opacity: 0.5, interactive: false }).addTo(replayLayer);
+        L.polyline(ll, {
+          color: t.color,
+          weight: picked && replay.sel ? 4 : 2.5,
+          opacity: faded ? 0.25 : 0.95,
+          interactive: false,
+        }).addTo(replayLayer);
+      });
+      // Where the fighter is at the time shown (only while playing).
+      if (playing && last && (!replay.sel || picked)) {
+        var gone = replay.t - last[2] > 120000;
+        var mk = L.marker([last[0], last[1]], { icon: replayIcon(t), opacity: gone ? 0.45 : 1, zIndexOffset: picked && replay.sel ? 900 : 0 });
+        mk.on('click', function () { post('replayPick', { uid: t.uid }); });
+        mk.addTo(replayLayer);
+        replayDots[t.uid] = mk;
+      }
+    });
+  }
+
+  function fitTracks(filter) {
+    var a = analysisData;
+    if (!a) return;
+    var bounds = L.latLngBounds([]);
+    (a.tracks || []).forEach(function (t) {
+      if (filter && t.uid !== filter) return;
+      t.segments.forEach(function (seg) { seg.forEach(function (p) { bounds.extend([p[0], p[1]]); }); });
+    });
+    if (!filter) (a.heat || []).forEach(function (p) { bounds.extend(p); });
+    if (bounds.isValid()) map.fitBounds(bounds, { padding: [60, 60], maxZoom: 17 });
+  }
 
   function setAnalysis(a) {
     analysisLayer.clearLayers();
+    analysisData = a || null;
     if (!a) {
       analysisFitted = false;
+      replayLayer.clearLayers();
       return;
     }
-    var bounds = L.latLngBounds([]);
-    if (a.showHeat && a.heat && a.heat.length && L.heatLayer) {
-      L.heatLayer(a.heat, {
+    if (a.showHeat && a.heat && a.heat.length && RotHeat) {
+      new RotHeat(a.heat, {
         radius: 24,
         blur: 20,
         maxZoom: 17,
@@ -1186,29 +1323,19 @@
         gradient: { 0.2: '#1e3a8a', 0.4: '#22d3ee', 0.6: '#a3e635', 0.8: '#facc15', 1: '#ef4444' },
       }).addTo(analysisLayer);
     }
-    (a.tracks || []).forEach(function (t) {
-      t.segments.forEach(function (seg) {
-        if (!seg.length) return;
-        if (seg.length === 1) {
-          // A lone fix between long gaps: a dot, so the player still shows up.
-          if (a.showTracks) {
-            L.circleMarker(seg[0], { radius: 4, color: '#0B0F0C', weight: 2, fillColor: t.color, fillOpacity: 1, interactive: false }).addTo(analysisLayer);
-          }
-          bounds.extend(seg[0]);
-          return;
-        }
-        if (a.showTracks) {
-          L.polyline(seg, { color: '#0B0F0C', weight: 5, opacity: 0.5, interactive: false }).addTo(analysisLayer);
-          L.polyline(seg, { color: t.color, weight: 2.5, opacity: 0.95, interactive: false }).addTo(analysisLayer);
-        }
-        seg.forEach(function (p) { bounds.extend(p); });
-      });
-    });
-    (a.heat || []).forEach(function (p) { bounds.extend(p); });
-    if (!analysisFitted && bounds.isValid()) {
+    drawReplay();
+    if (!analysisFitted) {
       analysisFitted = true;
-      map.fitBounds(bounds, { padding: [40, 40], maxZoom: 17 });
+      fitTracks(null);
     }
+  }
+
+  function setReplay(p) {
+    var sel = (p && p.sel) || null;
+    var changedSel = sel !== replay.sel;
+    replay = { t: p && p.t != null ? p.t : null, sel: sel };
+    drawReplay();
+    if (changedSel && sel && p.fit !== false) fitTracks(sel);
   }
 
   function setMarkers(all) {
@@ -2122,6 +2249,7 @@
       }
     },
     setAnalysis: setAnalysis,
+    setReplay: setReplay,
     setGrid: setGrid,
     setOffline: setOffline,
     setVectorRegions: setVectorRegions,

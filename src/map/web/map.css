@@ -644,3 +644,27 @@ body,
 .member-icon.sos .member-pin {
   box-shadow: 0 0 0 2px #ff3b30, 0 0 14px 4px rgba(255, 59, 48, 0.8);
 }
+
+/* Game replay: each fighter's spot at the time shown, with the callsign. */
+.replay-dot {
+  position: absolute;
+  left: -8px;
+  top: -8px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2px solid #0b0f0c;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.85);
+}
+.replay-name {
+  position: absolute;
+  left: 12px;
+  top: -9px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(5, 12, 8, 0.8);
+  color: #fff;
+  font: 600 11px/1.3 system-ui, -apple-system, Roboto, sans-serif;
+  white-space: nowrap;
+  pointer-events: none;
+}

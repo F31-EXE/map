@@ -1,6 +1,6 @@
 import { router, useLocalSearchParams } from 'expo-router';
-import { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, FlatList, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, Alert, FlatList, PanResponder, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { formatClock, formatDistance } from '../lib/geo';
 import { TEAM_COLORS } from '../lib/roles';
@@ -89,6 +89,11 @@ function RecordingView({ id }: { id: string }) {
   const [showHeat, setShowHeat] = useState(true);
   const [showTracks, setShowTracks] = useState(true);
   const [baseLayer, setBaseLayer] = useState<BaseLayerId>('yandex-sat');
+  // Playback: the moment shown (null = the whole game), running or not, how fast.
+  const [t, setT] = useState<number | null>(null);
+  const [playing, setPlaying] = useState(false);
+  const [speed, setSpeed] = useState(30);
+  const [sel, setSel] = useState<string | null>(null);
 
   useEffect(() => {
     loadJson<BaseLayerId>(KEYS.baseLayer, 'yandex-sat').then(setBaseLayer);
@@ -112,8 +117,10 @@ function RecordingView({ id }: { id: string }) {
   const analysis = useMemo(
     () => ({
       tracks: colored.map((t) => ({
+        uid: t.uid,
+        callsign: t.callsign,
         color: t.color,
-        segments: splitSegments(t.points).map((seg) => seg.map((p) => [p.lat, p.lng] as [number, number])),
+        segments: splitSegments(t.points).map((seg) => seg.map((p) => [p.lat, p.lng, p.t] as [number, number, number])),
       })),
       heat: colored.flatMap((t) => resampleByTime(t.points).map((p) => [p.lat, p.lng] as [number, number])),
       showHeat,
@@ -121,6 +128,46 @@ function RecordingView({ id }: { id: string }) {
     }),
     [colored, showHeat, showTracks]
   );
+
+  // The game's time span: first to last point (the recording's own times as a fallback).
+  const span = useMemo(() => {
+    let a = Infinity;
+    let b = -Infinity;
+    for (const tr of colored) for (const p of tr.points) {
+      if (p.t < a) a = p.t;
+      if (p.t > b) b = p.t;
+    }
+    if (!Number.isFinite(a)) return rec ? { a: rec.startedAt, b: rec.endedAt ?? rec.startedAt } : null;
+    return { a, b: Math.max(b, a + 1000) };
+  }, [colored, rec]);
+
+  useEffect(() => {
+    if (!playing || !span) return;
+    const step = 100;
+    const timer = setInterval(() => {
+      setT((cur) => {
+        const next = (cur ?? span.a) + step * speed;
+        if (next >= span.b) {
+          setPlaying(false);
+          return span.b;
+        }
+        return next;
+      });
+    }, step);
+    return () => clearInterval(timer);
+  }, [playing, speed, span]);
+
+  const play = () => {
+    tap();
+    if (!span) return;
+    if (playing) return setPlaying(false);
+    if (t == null || t >= span.b) setT(span.a);
+    setPlaying(true);
+  };
+  const pick = (uid: string) => {
+    tap();
+    setSel((cur) => (cur === uid ? null : uid));
+  };
 
   return (
     <View style={{ flex: 1 }}>
@@ -135,6 +182,8 @@ function RecordingView({ id }: { id: string }) {
         markers={[]}
         overlays={overlays}
         analysis={tracks ? analysis : null}
+        replay={{ t, sel }}
+        onReplayPick={pick}
       />
 
       <Glass radius={R.lg} style={styles.topCard}>
@@ -162,21 +211,137 @@ function RecordingView({ id }: { id: string }) {
               'Чтобы маршрут писался с погасшим экраном, у бойцов должна быть включена «Работа в фоне».'}
           </Text>
         ) : (
-          <ScrollView style={{ maxHeight: 150 }}>
-            {colored.map((t) => (
-              <View key={t.uid} style={styles.legendRow}>
-                <View style={[styles.legendDot, { backgroundColor: t.color }]} />
-                <Text style={styles.legendName} numberOfLines={1}>
-                  {t.callsign}
-                </Text>
-                <Text style={styles.legendStat}>
-                  {formatDistance(t.stats.distance)} · {formatDuration(t.stats.duration)} · {t.points.length} т.
-                </Text>
-              </View>
-            ))}
-          </ScrollView>
+          <>
+            {span && (
+              <Timeline
+                span={span}
+                t={t}
+                playing={playing}
+                speed={speed}
+                onPlay={play}
+                onSeek={(v) => {
+                  setPlaying(false);
+                  setT(v);
+                }}
+                onSpeed={setSpeed}
+                onWhole={() => {
+                  tap();
+                  setPlaying(false);
+                  setT(null);
+                }}
+              />
+            )}
+            <Text style={styles.pickHint}>
+              {sel ? 'Путь выбранного бойца. Нажмите ещё раз, чтобы снова видеть всех.' : 'Нажмите на бойца — покажу его путь.'}
+            </Text>
+            <ScrollView style={{ maxHeight: 130 }}>
+              {colored.map((tr) => (
+                <Pressable
+                  key={tr.uid}
+                  onPress={() => pick(tr.uid)}
+                  style={[styles.legendRow, sel === tr.uid && styles.legendSel, sel && sel !== tr.uid && { opacity: 0.5 }]}
+                >
+                  <View style={[styles.legendDot, { backgroundColor: tr.color }]} />
+                  <Text style={styles.legendName} numberOfLines={1}>
+                    {tr.callsign}
+                  </Text>
+                  <Text style={styles.legendStat}>
+                    {formatDistance(tr.stats.distance)} · {formatDuration(tr.stats.duration)} · {tr.points.length} т.
+                  </Text>
+                </Pressable>
+              ))}
+            </ScrollView>
+          </>
         )}
       </Glass>
+    </View>
+  );
+}
+
+const SPEEDS = [10, 30, 60, 120];
+
+/** Play / pause, the moment shown, a draggable bar, speed. */
+function Timeline({
+  span,
+  t,
+  playing,
+  speed,
+  onPlay,
+  onSeek,
+  onSpeed,
+  onWhole,
+}: {
+  span: { a: number; b: number };
+  t: number | null;
+  playing: boolean;
+  speed: number;
+  onPlay: () => void;
+  onSeek: (t: number) => void;
+  onSpeed: (s: number) => void;
+  onWhole: () => void;
+}) {
+  const [width, setWidth] = useState(1);
+  const spanRef = useRef(span);
+  spanRef.current = span;
+  const widthRef = useRef(width);
+  widthRef.current = width;
+  const seekRef = useRef(onSeek);
+  seekRef.current = onSeek;
+  const responder = useMemo(() => {
+    const at = (x: number) => {
+      const s = spanRef.current;
+      const k = Math.min(1, Math.max(0, x / widthRef.current));
+      seekRef.current(s.a + k * (s.b - s.a));
+    };
+    return PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      onPanResponderGrant: (e) => at(e.nativeEvent.locationX),
+      onPanResponderMove: (e) => at(e.nativeEvent.locationX),
+      onPanResponderTerminationRequest: () => false,
+    });
+  }, []);
+  const k = t == null ? 1 : (t - span.a) / (span.b - span.a);
+  return (
+    <View style={styles.timeline}>
+      <View style={styles.tlRow}>
+        <Pressable onPress={onPlay} style={styles.playBtn} accessibilityLabel={playing ? 'Пауза' : 'Воспроизвести'}>
+          <Icon name={playing ? 'pause' : 'play'} size={22} color={C.accentInk} />
+        </Pressable>
+        <Text style={styles.tlTime}>{t == null ? 'вся игра' : `${formatClock(t)} · +${formatDuration(t - span.a)}`}</Text>
+        {t != null && (
+          <Pressable onPress={onWhole} hitSlop={8}>
+            <Text style={styles.tlLink}>Вся игра</Text>
+          </Pressable>
+        )}
+      </View>
+      <View
+        style={styles.tlBar}
+        onLayout={(e) => setWidth(Math.max(1, e.nativeEvent.layout.width))}
+        {...responder.panHandlers}
+      >
+        <View style={styles.tlTrack} pointerEvents="none" />
+        <View style={[styles.tlFill, { width: `${Math.round(k * 100)}%` }]} pointerEvents="none" />
+        <View style={[styles.tlKnob, { left: Math.max(0, Math.min(width - 18, k * width - 9)) }]} pointerEvents="none" />
+      </View>
+      <View style={styles.tlRow}>
+        <Text style={styles.legendStat}>{formatClock(span.a)}</Text>
+        <View style={{ flex: 1 }} />
+        {SPEEDS.map((s) => (
+          <Pressable
+            key={s}
+            onPress={() => {
+              tap();
+              onSpeed(s);
+            }}
+            style={[styles.speed, s === speed && styles.toggleOn]}
+          >
+            <Text style={[styles.speedText, s === speed && { color: C.accentInk }]}>×{s}</Text>
+          </Pressable>
+        ))}
+        <View style={{ flex: 1 }} />
+        <Text style={styles.legendStat}>{formatClock(span.b)}</Text>
+      </View>
     </View>
   );
 }
@@ -240,4 +405,17 @@ const styles = StyleSheet.create({
   legendDot: { width: 12, height: 12, borderRadius: 6 },
   legendName: { color: C.text, fontSize: 14, fontFamily: F.semibold, flex: 1 },
   legendStat: { color: C.dim, fontSize: 12, fontFamily: F.mono },
+  legendSel: { backgroundColor: C.accentSoft, borderRadius: R.sm, paddingHorizontal: 6 },
+  pickHint: { color: C.faint, fontSize: 12, fontFamily: F.regular, marginVertical: 6 },
+  timeline: { gap: 8 },
+  tlRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  playBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: C.accent, alignItems: 'center', justifyContent: 'center' },
+  tlTime: { color: C.text, fontSize: 14, fontFamily: F.mono, flex: 1 },
+  tlLink: { color: C.accent, fontSize: 13, fontFamily: F.semibold },
+  tlBar: { height: 28, justifyContent: 'center' },
+  tlTrack: { position: 'absolute', left: 0, right: 0, height: 4, borderRadius: 2, backgroundColor: C.elevated },
+  tlFill: { position: 'absolute', left: 0, height: 4, borderRadius: 2, backgroundColor: C.accent },
+  tlKnob: { position: 'absolute', width: 18, height: 18, borderRadius: 9, backgroundColor: C.text, borderWidth: 3, borderColor: C.accent },
+  speed: { paddingHorizontal: 8, height: 26, borderRadius: R.pill, backgroundColor: C.elevated, justifyContent: 'center' },
+  speedText: { color: C.dim, fontSize: 12, fontFamily: F.mono },
 });

@@ -96,13 +96,16 @@ type Props = {
   onViewChanged?: (p: LatLng & { zoom: number; bounds?: Bounds; snail?: string | null }) => void;
   onFollowChanged?: (follow: boolean) => void;
   onOverlayError?: (id: string, message: string) => void;
-  /** Game analysis overlay: tracks as [lat, lng] segments, heat as [lat, lng] samples. */
+  /** Game analysis overlay: tracks as [lat, lng, t] segments, heat as [lat, lng] samples. */
   analysis?: {
-    tracks: { color: string; segments: [number, number][][] }[];
+    tracks: { uid: string; callsign: string; color: string; segments: [number, number, number][][] }[];
     heat: [number, number][];
     showTracks: boolean;
     showHeat: boolean;
   } | null;
+  /** Replay: the moment shown (null = the whole game) and the fighter picked. */
+  replay?: { t: number | null; sel: string | null } | null;
+  onReplayPick?: (uid: string) => void;
   /**
    * Mortar range circles, and in calculator mode the firing position whose line of fire
    * follows the crosshair (`r`: maximum range, the line turns red past it).
@@ -292,6 +295,12 @@ export function TacticalMap(props: Props) {
     if (ready) send({ type: 'setAnalysis', payload: analysis ?? null });
   }, [ready, generation, analysis, send]);
 
+  const replayT = props.replay?.t ?? null;
+  const replaySel = props.replay?.sel ?? null;
+  useEffect(() => {
+    if (ready) send({ type: 'setReplay', payload: { t: replayT, sel: replaySel } });
+  }, [ready, generation, replayT, replaySel, analysis, send]);
+
   const mortar = props.mortar;
   useEffect(() => {
     if (ready) send({ type: 'setMortar', payload: mortar ?? null });
@@ -389,6 +398,9 @@ export function TacticalMap(props: Props) {
           break;
         case 'markerMoved':
           props.onMarkerMoved?.(p.id, { lat: p.lat, lng: p.lng });
+          break;
+        case 'replayPick':
+          props.onReplayPick?.(p.uid);
           break;
         case 'memberTap':
           props.onMemberPress?.(p.id);
