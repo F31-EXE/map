@@ -191,6 +191,18 @@ export default function TeamScreen() {
 
           <BriefingCard />
 
+          {(s.role === 'radio' || s.canCommand) && (
+            <Card style={{ gap: 10 }}>
+              <Eyebrow>{s.role === 'radio' ? 'Связист' : 'Связь'}</Eyebrow>
+              <View style={{ flexDirection: 'row', gap: 10 }}>
+                <Button title="Связь отряда" icon="access-point-network" kind="secondary" style={{ flex: 1 }} onPress={() => router.push('/links')} />
+                {s.team?.sideId && (
+                  <Button title="Чат стороны" icon="forum-outline" kind="secondary" style={{ flex: 1 }} onPress={() => router.push('/side-chat')} />
+                )}
+              </View>
+            </Card>
+          )}
+
           <GameLinkCard />
 
           {/* Roster */}

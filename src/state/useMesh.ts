@@ -70,6 +70,8 @@ export type Mesh = {
   radio: Radio;
   /** Squadmates heard over the radio in the last 10 minutes. */
   radioPeers: number;
+  /** When each squadmate was last heard directly over Bluetooth/Wi-Fi and over the radio. */
+  heardAt: (uid: string) => { nearby: number | null; radio: number | null };
 };
 
 async function requestPermissions(): Promise<boolean> {
@@ -117,6 +119,7 @@ export function useMesh(me: {
   const outbox = useRef(new RadioOutbox());
   const radioRelayed = useRef(new Map<string, number>());
   const radioHeard = useRef(new Map<string, number>());
+  const nearbyHeard = useRef(new Map<string, number>());
   const lastRadioSelf = useRef<{ at: number; p: SelfPosition; status: MemberStatus } | null>(null);
   const onRadioPacket = useRef<(p: MtPacket) => void>(() => {});
   const radio = useRadio(teamId, (p) => onRadioPacket.current(p));
@@ -164,7 +167,11 @@ export function useMesh(me: {
     (list: Envelope[], own: boolean) => {
       if (!radioOnRef.current || !teamId) return;
       const now = Date.now();
+      // Markers and orders go on air only from signallers' and commanders' radios: the
+      // fighters' own marks reach them over Bluetooth first, so the air isn't flooded.
+      const marksOnAir = meRef.current.role === 'radio' || meRef.current.canCommand;
       for (const e of list) {
+        if ((e.kind === 'mark' || e.kind === 'vote') && !marksOnAir) continue;
         if (!own && e.kind === 'pos') {
           const last = radioRelayed.current.get(e.body.uid) ?? 0;
           if (now - last < radioPace().relayMs) continue;
@@ -243,7 +250,12 @@ export function useMesh(me: {
       mesh.addListener('onMessage', (e) => {
         const now = Date.now();
         const knownMarks = new Set(store.marks.keys());
-        const fresh = unpack(e.data).filter((env) => store.accept(env, now));
+        const all = unpack(e.data);
+        for (const env of all) {
+          const sender = env.kind === 'mark' ? env.body.createdBy : env.body.uid;
+          if (sender && sender !== uid) nearbyHeard.current.set(sender, now);
+        }
+        const fresh = all.filter((env) => store.accept(env, now));
         if (!fresh.length) return;
         for (const env of fresh) {
           if (env.kind === 'mark' && !env.body.deleted && !knownMarks.has(env.body.id) && env.body.createdBy !== uid) {
@@ -423,7 +435,13 @@ export function useMesh(me: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [version]);
 
+  const heardAt = useCallback(
+    (who: string) => ({ nearby: nearbyHeard.current.get(who) ?? null, radio: radioHeard.current.get(who) ?? null }),
+    []
+  );
+
   return {
+    heardAt,
     radio,
     radioPeers,
     available,

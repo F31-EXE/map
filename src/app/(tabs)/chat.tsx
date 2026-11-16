@@ -11,10 +11,12 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { router } from 'expo-router';
 import { useHeaderHeight } from 'expo-router/react-navigation';
 
 import { formatClock } from '../../lib/geo';
 import { MAX_MESSAGE, type ChatMessage } from '../../services/chat';
+import { sendSideMessage } from '../../services/sides';
 import { useChat } from '../../state/chat';
 import { useSession } from '../../state/session';
 import { Icon, tap } from '../../ui/components';
@@ -26,8 +28,24 @@ const QUICK = ['Контакт!', 'Ранен', 'Нужна помощь', 'Ид
 
 export default function ChatScreen() {
   const { messages, markRead, send } = useChat();
-  const { uid, teamId, teamColor, team, canCommand, pinMessage } = useSession();
+  const { uid, teamId, teamColor, team, canCommand, pinMessage, role, callsign } = useSession();
   const pinned = team?.pinned ?? null;
+  // Signallers and commanders of a squad on a side carry messages to the side chat.
+  const sideId = team?.sideId ?? null;
+  const canRelay = Boolean(sideId && uid && (role === 'radio' || canCommand));
+  const relayToSide = (m: ChatMessage) => {
+    if (!sideId || !uid) return;
+    sendSideMessage(sideId, {
+      uid,
+      callsign: m.callsign,
+      text: m.text,
+      teamId,
+      teamName: team?.name ?? null,
+      relayedFrom: m.uid === uid ? null : callsign || 'Связист',
+    })
+      .then(() => Alert.alert('Передано в чат стороны'))
+      .catch((e: Error) => Alert.alert('Не передалось', e.message));
+  };
   const headerHeight = useHeaderHeight();
   const [text, setText] = useState('');
   const list = useRef<FlatList<ChatMessage>>(null);
@@ -86,6 +104,20 @@ export default function ChatScreen() {
         </View>
       )}
 
+      {canRelay && (
+        <Pressable
+          style={styles.sideLink}
+          onPress={() => {
+            tap();
+            router.push('/side-chat');
+          }}
+        >
+          <Icon name="forum-outline" size={18} color={C.accent} />
+          <Text style={styles.sideLinkText}>Чат стороны · долгое нажатие на сообщение — передать туда</Text>
+          <Icon name="chevron-right" size={18} color={C.faint} />
+        </Pressable>
+      )}
+
       {/* Outside the list: an inverted FlatList flips its empty component too (on
           Android in both axes, so the text came out mirrored). */}
       {messages.length === 0 && (
@@ -108,13 +140,23 @@ export default function ChatScreen() {
           return (
             <Pressable
               style={[styles.bubbleRow, mine && { justifyContent: 'flex-end' }]}
-              disabled={!canCommand || item.pending}
+              disabled={!(canCommand || canRelay) || item.pending}
               delayLongPress={350}
-              onLongPress={() =>
-                confirmAction('Закрепить сообщение?', item.text, 'Закрепить', () =>
-                  pinMessage(item).catch((e: Error) => Alert.alert('Ошибка', e.message))
-                )
-              }
+              onLongPress={() => {
+                if (!canRelay) {
+                  confirmAction('Закрепить сообщение?', item.text, 'Закрепить', () =>
+                    pinMessage(item).catch((e: Error) => Alert.alert('Ошибка', e.message))
+                  );
+                  return;
+                }
+                Alert.alert('Сообщение', item.text, [
+                  { text: 'Отмена', style: 'cancel' },
+                  ...(canCommand
+                    ? [{ text: 'Закрепить', onPress: () => void pinMessage(item).catch((e: Error) => Alert.alert('Ошибка', e.message)) }]
+                    : []),
+                  { text: 'В чат стороны', onPress: () => relayToSide(item) },
+                ]);
+              }}
             >
               <View
                 style={[
@@ -184,6 +226,16 @@ export default function ChatScreen() {
 }
 
 const styles = StyleSheet.create({
+  sideLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: C.line,
+  },
+  sideLinkText: { color: C.dim, fontSize: 13, fontFamily: F.regular, flex: 1 },
   root: { flex: 1, backgroundColor: C.bg },
   listContent: { padding: 12, gap: 6, flexGrow: 1 },
   empty: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 10, padding: 32 },

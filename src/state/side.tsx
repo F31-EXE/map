@@ -30,9 +30,14 @@ export type Squad = Team & {
 export type OrderTarget = 'own' | 'all' | string;
 
 type SideState = {
-  /** The side I command, if any. */
+  /** The side I command (or serve at as an HQ signaller), if any. */
   side: Side | null;
+  /** The side's commander, or one of the deputies they named: the commander's rights. */
   isSideCommander: boolean;
+  /** HQ signaller named by the side commander (not the commander themselves). */
+  isDeputy: boolean;
+  /** Names / removes an HQ signaller (commander only). */
+  setDeputy: (uid: string, callsign: string | null) => Promise<void>;
   squads: Squad[];
   /** Side map filter: every fighter, or squad commanders only. */
   showAll: boolean;
@@ -78,7 +83,7 @@ export function SideProvider({ children }: { children: ReactNode }) {
   const session = useSession();
   const { uid, teamId, team, members, isOwner, teamColor, markers, callsign } = session;
 
-  const [sideId, setSideId] = useState<string | null>(null);
+  const [ownSideId, setSideId] = useState<string | null>(null);
   const [side, setSide] = useState<Side | null>(null);
   const [sideTeams, setSideTeams] = useState<Team[]>([]);
   const [sideMembers, setSideMembers] = useState<Record<string, Member[]>>({});
@@ -94,6 +99,11 @@ export function SideProvider({ children }: { children: ReactNode }) {
       setShowAllState(await loadJson<boolean>(KEYS.sideShowAll, true));
     })();
   }, []);
+
+  // An HQ signaller serves the side their squad is attached to, once the commander
+  // names them; the commander keeps the side id locally.
+  const deputyOf = mySquadSide && uid && mySquadSide.deputies?.[uid] ? mySquadSide.id : null;
+  const sideId = ownSideId ?? deputyOf;
 
   // Side commander: the side doc, attached squads, and each squad's roster and markers.
   useEffect(() => {
@@ -147,7 +157,16 @@ export function SideProvider({ children }: { children: ReactNode }) {
     return sides.subscribeSide(mySideId, setMySquadSide, () => {});
   }, [mySideId]);
 
-  const isSideCommander = Boolean(side && uid && side.ownerId === uid);
+  const isDeputy = Boolean(side && uid && side.ownerId !== uid && side.deputies?.[uid]);
+  const isSideCommander = Boolean(side && uid && (side.ownerId === uid || isDeputy));
+
+  const setDeputy = useCallback(
+    async (who: string, name: string | null) => {
+      if (!side || side.ownerId !== uid) throw new Error('Назначать связистов штаба может только командир стороны');
+      await sides.setDeputy(side.id, who, name);
+    },
+    [side, uid]
+  );
 
   const squads = useMemo<Squad[]>(
     () =>
@@ -313,16 +332,18 @@ export function SideProvider({ children }: { children: ReactNode }) {
         return {
           ownerId: sq.ownerId,
           sideOwnerId: side?.ownerId,
+          sideStaff: new Set(Object.keys(side?.deputies ?? {})),
           commanders: new Set(sq.members.filter((m) => m.canCommand).map((m) => m.id)),
         };
       }
       return {
         ownerId: team?.ownerId,
         sideOwnerId: mySquadSide?.ownerId,
+        sideStaff: new Set(Object.keys(mySquadSide?.deputies ?? {})),
         commanders: new Set(members.filter((m) => m.canCommand).map((m) => m.id)),
       };
     },
-    [teamId, squads, side?.ownerId, team?.ownerId, mySquadSide?.ownerId, members]
+    [teamId, squads, side?.ownerId, side?.deputies, team?.ownerId, mySquadSide?.ownerId, mySquadSide?.deputies, members]
   );
 
   const canDelete = useCallback(
@@ -353,6 +374,8 @@ export function SideProvider({ children }: { children: ReactNode }) {
     () => ({
       side,
       isSideCommander,
+      isDeputy,
+      setDeputy,
       squads,
       showAll,
       setShowAll,
@@ -375,6 +398,8 @@ export function SideProvider({ children }: { children: ReactNode }) {
     [
       side,
       isSideCommander,
+      isDeputy,
+      setDeputy,
       squads,
       showAll,
       setShowAll,

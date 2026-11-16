@@ -10,6 +10,8 @@ export type RankContext = {
   ownerId: string | null | undefined;
   /** Commander of the side the squad is attached to. */
   sideOwnerId: string | null | undefined;
+  /** HQ signallers the side commander named: same rank as the commander. */
+  sideStaff?: ReadonlySet<string>;
   /** Members holding command rights. */
   commanders: ReadonlySet<string>;
 };
@@ -17,6 +19,7 @@ export type RankContext = {
 export function rankOf(uid: string | null | undefined, ctx: RankContext): number {
   if (!uid) return 0;
   if (ctx.sideOwnerId && uid === ctx.sideOwnerId) return RANK.sideCommander;
+  if (ctx.sideStaff?.has(uid)) return RANK.sideCommander;
   if (ctx.ownerId && uid === ctx.ownerId) return RANK.squadCommander;
   if (ctx.commanders.has(uid)) return RANK.sergeant;
   return RANK.fighter;

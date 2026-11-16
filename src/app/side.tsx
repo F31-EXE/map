@@ -1,3 +1,4 @@
+import { router } from 'expo-router';
 import * as Clipboard from 'expo-clipboard';
 import { useHeaderHeight } from 'expo-router/react-navigation';
 import { useState } from 'react';
@@ -118,6 +119,23 @@ export default function SideScreen() {
         </View>
       </Card>
 
+      {side.isDeputy && (
+        <Card style={{ gap: 6 }}>
+          <View style={styles.inline}>
+            <Icon name="radio-tower" size={22} color={C.accent} />
+            <Text style={styles.cardTitle}>Вы связист штаба</Text>
+          </View>
+          <Text style={styles.text}>
+            Командир стороны дал вам свои права: вся карта стороны, приказы отрядам, брифинги, в большой игре — постройки
+            и удары. Снять с должности может только командир стороны.
+          </Text>
+        </Card>
+      )}
+
+      <Button title="Чат стороны" icon="forum-outline" kind="secondary" onPress={() => router.push('/side-chat')} />
+
+      {!side.isDeputy && <DeputiesCard run={run} />}
+
       <GameLinkCard />
 
       <Card style={styles.switchRow}>
@@ -150,6 +168,7 @@ export default function SideScreen() {
           side.squads.map((sq) => (
             <SquadCard
               key={sq.id}
+              canDrop={!side.isDeputy}
               sq={sq}
               now={now}
               editing={editing === sq.id}
@@ -169,24 +188,98 @@ export default function SideScreen() {
         )}
       </View>
 
-      <Button
-        title="Сложить полномочия"
-        kind="danger"
-        icon="flag-off-outline"
-        onPress={() =>
-          confirmDestructive(
-            'Сложить полномочия?',
-            'Сторона перестанет отображаться у вас. Отряды останутся привязанными к ней.',
-            'Сложить',
-            () => run(side.resign)
-          )
-        }
-      />
+      {!side.isDeputy && (
+        <Button
+          title="Сложить полномочия"
+          kind="danger"
+          icon="flag-off-outline"
+          onPress={() =>
+            confirmDestructive(
+              'Сложить полномочия?',
+              'Сторона перестанет отображаться у вас. Отряды останутся привязанными к ней.',
+              'Сложить',
+              () => run(side.resign)
+            )
+          }
+        />
+      )}
     </KeyboardScroll>
   );
 }
 
+/**
+ * HQ signallers: the commander names fighters of the side's squads (signallers first);
+ * they get the commander's rights and keep the side running while the commander is busy.
+ */
+function DeputiesCard({ run }: { run: (fn: () => Promise<unknown>) => Promise<void> }) {
+  const side = useSide();
+  const [picking, setPicking] = useState(false);
+  const deputies = Object.entries(side.side?.deputies ?? {});
+  const candidates = side.squads
+    .flatMap((sq) => sq.members.map((m) => ({ m, sq })))
+    .filter(({ m }) => !side.side?.deputies?.[m.id] && m.id !== side.side?.ownerId)
+    .sort((a, b) => Number(b.m.role === 'radio') - Number(a.m.role === 'radio') || a.m.callsign.localeCompare(b.m.callsign));
+  return (
+    <Card style={{ gap: 10 }}>
+      <Eyebrow>Связисты штаба · {deputies.length}</Eyebrow>
+      <Text style={styles.sub}>
+        Получают ваши права: ведут сторону, пока вы на связи с оргами или отошли. Видят всю карту, отдают приказы.
+      </Text>
+      {deputies.map(([id, name]) => (
+        <View key={id} style={styles.squadRow}>
+          <Icon name="radio-tower" size={20} color={C.accent} />
+          <Text style={[styles.cardTitle, { flex: 1 }]} numberOfLines={1}>
+            {name}
+          </Text>
+          <Pressable
+            hitSlop={8}
+            onPress={() =>
+              confirmDestructive(`Снять ${name} со связи штаба?`, 'Права командира стороны у него пропадут.', 'Снять', () =>
+                run(() => side.setDeputy(id, null))
+              )
+            }
+            accessibilityLabel={`Снять ${name}`}
+          >
+            <Icon name="account-remove-outline" size={20} color={C.dim} />
+          </Pressable>
+        </View>
+      ))}
+      {picking ? (
+        candidates.length === 0 ? (
+          <Text style={styles.sub}>В отрядах стороны пока некого назначить.</Text>
+        ) : (
+          candidates.slice(0, 40).map(({ m, sq }) => (
+            <Pressable
+              key={`${sq.id}/${m.id}`}
+              onPress={() => {
+                tap();
+                setPicking(false);
+                run(() => side.setDeputy(m.id, m.callsign || 'Связист'));
+              }}
+              style={({ pressed }) => [styles.squadRow, pressed && { opacity: 0.6 }]}
+            >
+              <Icon name={m.role === 'radio' ? 'radio-tower' : 'account'} size={20} color={m.role === 'radio' ? C.accent : C.dim} />
+              <Text style={[styles.text, { flex: 1 }]} numberOfLines={1}>
+                {m.callsign} · {sq.name}
+                {m.role === 'radio' ? ' · связист' : ''}
+              </Text>
+              <Icon name="plus" size={20} color={C.accent} />
+            </Pressable>
+          ))
+        )
+      ) : null}
+      <Button
+        title={picking ? 'Отмена' : 'Назначить связиста штаба'}
+        icon={picking ? 'close' : 'account-plus-outline'}
+        kind="secondary"
+        onPress={() => setPicking((v) => !v)}
+      />
+    </Card>
+  );
+}
+
 function SquadCard({
+  canDrop,
   sq,
   now,
   editing,
@@ -194,6 +287,7 @@ function SquadCard({
   onColor,
   onDrop,
 }: {
+  canDrop: boolean;
   sq: Squad;
   now: number;
   editing: boolean;
@@ -221,9 +315,11 @@ function SquadCard({
             {lastSeen ? ` · ${timeAgo(lastSeen)}` : ''}
           </Text>
         </View>
-        <Pressable hitSlop={6} style={styles.iconButton} onPress={onDrop} accessibilityLabel="Отключить отряд">
-          <Icon name="link-variant-off" size={18} color={C.dim} />
-        </Pressable>
+        {canDrop && (
+          <Pressable hitSlop={6} style={styles.iconButton} onPress={onDrop} accessibilityLabel="Отключить отряд">
+            <Icon name="link-variant-off" size={18} color={C.dim} />
+          </Pressable>
+        )}
       </View>
       {editing && (
         <View style={styles.palette}>

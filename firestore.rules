@@ -52,10 +52,16 @@ service cloud.firestore {
     function isSideOwner(sideId) {
       return signedIn() && sideId is string && get(sidePath(sideId)).data.ownerId == request.auth.uid;
     }
-    // Commander of the side this squad is attached to.
+    // The side's command post: its commander and the deputies (HQ signallers) they named.
+    function isSideStaff(sideId) {
+      return signedIn() && sideId is string
+        && (get(sidePath(sideId)).data.ownerId == request.auth.uid
+          || get(sidePath(sideId)).data.get('deputies', {}).keys().hasAny([request.auth.uid]));
+    }
+    // Command post of the side this squad is attached to.
     function isSideCommanderOf(teamId) {
       let t = get(teamPath(teamId)).data;
-      return isSideOwner(t.get('sideId', null));
+      return isSideStaff(t.get('sideId', null));
     }
     function gamePath(gameId) {
       return /databases/$(database)/documents/games/$(gameId);
@@ -89,7 +95,8 @@ service cloud.firestore {
       let t = get(teamPath(teamId)).data;
       let sideId = t.get('sideId', null);
       let m = memberPath(teamId, uid);
-      return sideId != null && get(sidePath(sideId)).data.ownerId == uid ? 4
+      return sideId != null && (get(sidePath(sideId)).data.ownerId == uid
+          || get(sidePath(sideId)).data.get('deputies', {}).keys().hasAny([uid])) ? 4
         : t.ownerId == uid ? 3
         : exists(m) && get(m).data.get('canCommand', false) == true ? 2
         : 1;
@@ -194,8 +201,11 @@ service cloud.firestore {
       allow update: if signedIn() && (
         // The commander renames the side, or joins it to a game with the game's side code / leaves.
         (resource.data.ownerId == request.auth.uid
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'gameId', 'gameCode', 'claim'])
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'gameId', 'gameCode', 'claim', 'deputies'])
           && request.resource.data.name.size() <= 40
+          // Deputies: { uid: callsign }, a handful at most.
+          && (request.resource.data.get('deputies', null) == null
+            || (request.resource.data.deputies is map && request.resource.data.deputies.size() <= 10))
           && (request.resource.data.get('gameId', null) == null
             || request.resource.data.get('gameCode', null) == get(gamePath(request.resource.data.gameId)).data.sideCode))
         // Taking command of a side a tech made: knowing its claim code.
@@ -210,6 +220,22 @@ service cloud.firestore {
           && request.resource.data.gameId == null)
       );
       allow delete: if false;
+
+      // Side chat: the command post, squad commanders and signallers. The side id is
+      // only known to the side's squads; writers are staff or members of an attached squad.
+      match /messages/{msgId} {
+        allow read: if signedIn();
+        allow create: if signedIn()
+          && request.resource.data.uid == request.auth.uid
+          && request.resource.data.callsign is string && request.resource.data.callsign.size() <= 40
+          && request.resource.data.text is string
+          && request.resource.data.text.size() > 0 && request.resource.data.text.size() <= 1000
+          && (isSideStaff(sideId)
+            || (request.resource.data.teamId is string
+              && isMember(request.resource.data.teamId)
+              && get(teamPath(request.resource.data.teamId)).data.get('sideId', null) == sideId));
+        allow delete: if signedIn() && (resource.data.uid == request.auth.uid || isSideStaff(sideId));
+      }
     }
 
     match /gameCodes/{code} {
@@ -319,10 +345,10 @@ service cloud.firestore {
     }
 
     match /teams/{teamId} {
-      allow get: if isMember(teamId) || isSideOwner(resource.data.get('sideId', null))
+      allow get: if isMember(teamId) || isSideStaff(resource.data.get('sideId', null))
         || isTechOfSide(resource.data.get('sideId', null));
-      // The side commander (and the game's techs) list squads with where('sideId', '==', side).
-      allow list: if isSideOwner(resource.data.get('sideId', null)) || isTechOfSide(resource.data.get('sideId', null));
+      // The side's command post (and the game's techs) list squads with where('sideId', '==', side).
+      allow list: if isSideStaff(resource.data.get('sideId', null)) || isTechOfSide(resource.data.get('sideId', null));
       allow create: if signedIn()
         && request.resource.data.ownerId == request.auth.uid
         && request.resource.data.name is string

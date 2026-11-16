@@ -68,6 +68,8 @@ export default function RootLayout() {
                 <Stack.Screen name="maps" options={{ title: 'Карты полигона' }} />
                 <Stack.Screen name="regions" options={{ title: 'Схемы регионов' }} />
                 <Stack.Screen name="side" options={{ title: 'Командование стороной' }} />
+                <Stack.Screen name="side-chat" options={{ title: 'Чат стороны' }} />
+                <Stack.Screen name="links" options={{ title: 'Связь отряда' }} />
                 <Stack.Screen name="game" options={{ title: 'Большая игра' }} />
                 <Stack.Screen name="scan" options={{ title: 'Сканировать QR', presentation: 'modal' }} />
                 <Stack.Screen name="join" options={{ title: 'Приглашение' }} />

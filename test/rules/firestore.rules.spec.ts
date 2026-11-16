@@ -9,6 +9,7 @@ import {
   arrayUnion,
   collection,
   deleteDoc,
+  deleteField,
   doc,
   getDoc,
   getDocs,
@@ -289,6 +290,32 @@ describe('sides', () => {
   test('squad leader detaches', async () => {
     await attach('alice');
     await assertSucceeds(updateDoc(doc(as('alice'), 'teams', TEAM), { sideId: null, sideCode: null }));
+  });
+  test('the commander names an HQ signaller, who then commands like them; others cannot', async () => {
+    await attach('alice');
+    await assertFails(updateDoc(doc(as('bob'), 'sides', SIDE), { 'deputies.bob': 'Тень' }));
+    await assertSucceeds(updateDoc(doc(as('sam'), 'sides', SIDE), { 'deputies.bob': 'Тень' }));
+    // Rank 4: lists the side's squads, sends side orders, deletes the squad leader's marker.
+    await assertSucceeds(getDocs(query(collection(as('bob'), 'teams'), where('sideId', '==', SIDE))));
+    await assertSucceeds(sideOrder('bob', 's9'));
+    await setDoc(doc(as('alice'), 'teams', TEAM, 'markers', 'a1'), marker('alice'));
+    await assertSucceeds(deleteDoc(doc(as('bob'), 'teams', TEAM, 'markers', 'a1')));
+    // Only the commander renames the side or drops squads.
+    await assertFails(updateDoc(doc(as('bob'), 'sides', SIDE), { name: 'Моя' }));
+    await assertFails(updateDoc(doc(as('bob'), 'teams', TEAM), { sideId: null, sideCode: null }));
+    await assertSucceeds(updateDoc(doc(as('sam'), 'sides', SIDE), { 'deputies.bob': deleteField() }));
+    await assertFails(sideOrder('bob', 's10'));
+  });
+  test('side chat: staff and members of attached squads write as themselves; strangers do not', async () => {
+    const msg = (by: string, extra: Record<string, unknown> = {}) =>
+      setDoc(doc(collection(as(by), 'sides', SIDE, 'messages')), { uid: by, callsign: 'X', text: 'Приём', createdAt: 1, ...extra });
+    await assertSucceeds(msg('sam'));
+    await assertFails(msg('bob', { teamId: TEAM }));
+    await attach('alice');
+    await assertSucceeds(msg('bob', { teamId: TEAM }));
+    await assertFails(msg('mallory', { teamId: TEAM }));
+    await assertFails(msg('bob', { teamId: TEAM, uid: 'alice' }));
+    await assertFails(msg('bob', { teamId: TEAM, text: '' }));
   });
 });
 
