@@ -33,3 +33,11 @@ test('game invites: tech, side into game, claiming a side', async () => {
     assert.deepEqual(parseInvite(inviteUrl(inv)), inv);
   }
 });
+
+test('HQ and direction invites carry the side (and the direction)', () => {
+  const hq = { kind: 'hq' as const, code: 'HQ1234', sideId: 'abcDEF12' };
+  assert.deepEqual(parseInvite(inviteUrl(hq)), hq);
+  const dir = { kind: 'dir' as const, code: 'DIR111', sideId: 'abcDEF12', dirId: 'd7' };
+  assert.deepEqual(parseInvite(inviteUrl(dir)), dir);
+  assert.equal(parseInvite('grimmap://join?dir=DIR111&sid=x'), null);
+});

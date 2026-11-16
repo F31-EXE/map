@@ -10,6 +10,7 @@ import { TEAM_COLORS } from '../lib/roles';
 import { STALE_MS } from '../map/TacticalMap';
 import { useSession } from '../state/session';
 import { useSide, type Squad } from '../state/side';
+import type { DeputyPerm } from '../lib/types';
 import { Button, Card, Eyebrow, Icon, KeyboardScroll, tap } from '../ui/components';
 import { confirmDestructive } from '../ui/confirm';
 import { GameLinkCard } from '../ui/GameLinkCard';
@@ -43,6 +44,32 @@ export default function SideScreen() {
           <Text style={styles.text}>Командование стороной работает только с подключением к серверу.</Text>
         </Card>
       </View>
+    );
+  }
+
+  if (!side.isSideCommander && side.isDirCommander && side.side && side.myDirection) {
+    return <DirectionView run={run} busy={busy} />;
+  }
+  if (!side.isSideCommander && side.inHq && side.side) {
+    return (
+      <KeyboardScroll contentContainerStyle={styles.content} headerOffset={headerHeight}>
+        <Card style={{ gap: 12 }}>
+          <View style={styles.inline}>
+            <Icon name="account-clock-outline" size={26} color={C.accent} />
+            <Text style={styles.title}>Штаб «{side.side.name}»</Text>
+          </View>
+          <Text style={styles.text}>
+            Вы в штабе стороны. Роль — заместитель или командир направления — даст командир стороны или его заместитель.
+          </Text>
+        </Card>
+        <Button title="Чат стороны" icon="forum-outline" kind="secondary" onPress={() => router.push('/side-chat')} />
+        <Button
+          title="Выйти из штаба"
+          kind="danger"
+          icon="logout"
+          onPress={() => confirmDestructive('Выйти из штаба?', side.side!.name, 'Выйти', () => run(side.leaveHq))}
+        />
+      </KeyboardScroll>
     );
   }
 
@@ -122,19 +149,21 @@ export default function SideScreen() {
       {side.isDeputy && (
         <Card style={{ gap: 6 }}>
           <View style={styles.inline}>
-            <Icon name="account-star" size={22} color={C.accent} />
+            <Text style={styles.stars}>★★</Text>
             <Text style={styles.cardTitle}>Вы заместитель командира стороны</Text>
           </View>
           <Text style={styles.text}>
-            Командир стороны дал вам свои права: вся карта стороны, приказы отрядам, брифинги, в большой игре — постройки
-            и удары. Снять с должности может только командир стороны.
+            Видите всю карту стороны. Ваши права:{' '}
+            {PERMS.filter((p) => side.can(p.k)).map((p) => p.title.toLowerCase()).join(', ') || 'только просмотр'}. Права
+            меняет командир стороны.
           </Text>
         </Card>
       )}
 
       <Button title="Чат стороны" icon="forum-outline" kind="secondary" onPress={() => router.push('/side-chat')} />
 
-      {!side.isDeputy && <DeputiesCard run={run} />}
+      {(side.isSideOwner || side.can('directions')) && <HqCard run={run} />}
+      <DirectionsCard run={run} />
 
       <GameLinkCard />
 
@@ -168,7 +197,7 @@ export default function SideScreen() {
           side.squads.map((sq) => (
             <SquadCard
               key={sq.id}
-              canDrop={!side.isDeputy}
+              canDrop={side.can('squads')}
               sq={sq}
               now={now}
               editing={editing === sq.id}
@@ -207,75 +236,308 @@ export default function SideScreen() {
   );
 }
 
+const PERMS: { k: DeputyPerm; title: string }[] = [
+  { k: 'orders', title: 'Приказы отрядам' },
+  { k: 'game', title: 'Игра: стройка и удары' },
+  { k: 'squads', title: 'Отключать отряды' },
+  { k: 'directions', title: 'Штаб и направления' },
+];
+const ALL_PERMS = PERMS.map((p) => p.k);
+
+const newDirId = () => `d${Date.now().toString(36)}${Math.floor(Math.random() * 1296).toString(36)}`;
+
 /**
- * Deputies of the side commander: the commander names fighters of the side's squads;
- * they get the commander's rights and keep the side running while the commander is busy.
+ * The side's HQ: invite people with a QR, then give each a role — deputy (with rights,
+ * the commander only) or direction commander (the commander, or a deputy with the right).
  */
-function DeputiesCard({ run }: { run: (fn: () => Promise<unknown>) => Promise<void> }) {
+function HqCard({ run }: { run: (fn: () => Promise<unknown>) => Promise<void> }) {
   const side = useSide();
-  const [picking, setPicking] = useState(false);
-  const deputies = Object.entries(side.side?.deputies ?? {});
-  const candidates = side.squads
-    .flatMap((sq) => sq.members.map((m) => ({ m, sq })))
-    .filter(({ m }) => !side.side?.deputies?.[m.id] && m.id !== side.side?.ownerId)
-    .sort((a, b) => a.sq.name.localeCompare(b.sq.name) || a.m.callsign.localeCompare(b.m.callsign));
+  const s = side.side!;
+  const [code, setCode] = useState<string | null>(s.hqCode ?? null);
+  const [showQr, setShowQr] = useState(false);
+  const [open, setOpen] = useState<string | null>(null);
+  const dirs = Object.entries(s.directions ?? {});
+  const people = side.hq.filter((h) => h.uid !== s.ownerId);
+
+  const makeDirCmd = (uid: string, name: string, dirId: string) => {
+    const next = { ...(s.directions ?? {}) };
+    // One direction per commander.
+    for (const [id, d] of Object.entries(next)) if (d.cmd === uid) next[id] = { ...d, cmd: null, cmdName: null };
+    next[dirId] = { ...next[dirId], cmd: uid, cmdName: name };
+    return run(() => side.saveDirections(next));
+  };
+  const dropDirCmd = (uid: string) => {
+    const next = { ...(s.directions ?? {}) };
+    for (const [id, d] of Object.entries(next)) if (d.cmd === uid) next[id] = { ...d, cmd: null, cmdName: null };
+    return run(() => side.saveDirections(next));
+  };
+
   return (
     <Card style={{ gap: 10 }}>
-      <Eyebrow>Заместители КС · {deputies.length}</Eyebrow>
+      <Eyebrow>Штаб · {people.length}</Eyebrow>
       <Text style={styles.sub}>
-        Получают ваши права: ведут сторону, пока вы на связи с оргами или отошли. Видят всю карту, отдают приказы.
+        Пригласите людей в штаб по QR, затем дайте роль: заместитель КС (★★, права выбираете вы) или командир направления
+        (★, ведёт несколько отрядов).
       </Text>
-      {deputies.map(([id, name]) => (
-        <View key={id} style={styles.squadRow}>
-          <Icon name="account-star" size={20} color={C.accent} />
-          <Text style={[styles.cardTitle, { flex: 1 }]} numberOfLines={1}>
-            {name}
-          </Text>
-          <Pressable
-            hitSlop={8}
-            onPress={() =>
-              confirmDestructive(`Снять заместителя ${name}?`, 'Права командира стороны у него пропадут.', 'Снять', () =>
-                run(() => side.setDeputy(id, null))
-              )
-            }
-            accessibilityLabel={`Снять ${name}`}
-          >
-            <Icon name="account-remove-outline" size={20} color={C.dim} />
-          </Pressable>
-        </View>
-      ))}
-      {picking ? (
-        candidates.length === 0 ? (
-          <Text style={styles.sub}>В отрядах стороны пока некого назначить.</Text>
-        ) : (
-          candidates.slice(0, 40).map(({ m, sq }) => (
-            <Pressable
-              key={`${sq.id}/${m.id}`}
-              onPress={() => {
-                tap();
-                setPicking(false);
-                run(() => side.setDeputy(m.id, m.callsign || 'Заместитель'));
-              }}
-              style={({ pressed }) => [styles.squadRow, pressed && { opacity: 0.6 }]}
-            >
-              <Icon name="account" size={20} color={C.dim} />
-              <Text style={[styles.text, { flex: 1 }]} numberOfLines={1}>
-                {m.callsign} · {sq.name}
-              </Text>
-              <Icon name="plus" size={20} color={C.accent} />
-            </Pressable>
-          ))
-        )
-      ) : null}
       <Button
-        title={picking ? 'Отмена' : 'Назначить заместителя'}
-        icon={picking ? 'close' : 'account-plus-outline'}
+        title={showQr ? 'Скрыть QR штаба' : 'Пригласить в штаб'}
+        icon="qrcode"
         kind="secondary"
-        onPress={() => setPicking((v) => !v)}
+        onPress={() =>
+          run(async () => {
+            if (!showQr && !code) setCode(await side.hqCode());
+            setShowQr((v) => !v);
+          })
+        }
       />
+      {showQr && code && (
+        <View style={{ alignItems: 'center', gap: 8 }}>
+          <QrCode value={inviteUrl({ kind: 'hq', code, sideId: s.id })} size={200} />
+          <Text style={styles.sub}>Сканировать в GrimMap: «Сканировать QR». Человек попадёт в штаб без роли.</Text>
+        </View>
+      )}
+      {people.map((h) => {
+        const stars = side.starsOf(h.uid);
+        const dep = s.deputies?.[h.uid];
+        const dirOf = dirs.find(([, d]) => d.cmd === h.uid);
+        return (
+          <View key={h.uid} style={styles.person}>
+            <Pressable style={styles.squadRow} onPress={() => setOpen(open === h.uid ? null : h.uid)}>
+              <Text style={styles.stars}>{stars ? '★'.repeat(stars) : '·'}</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.cardTitle} numberOfLines={1}>
+                  {h.callsign}
+                </Text>
+                <Text style={styles.sub} numberOfLines={1}>
+                  {dep ? 'заместитель КС' : dirOf ? `командир направления «${dirOf[1].name}»` : 'без роли'}
+                </Text>
+              </View>
+              <Icon name={open === h.uid ? 'chevron-up' : 'chevron-down'} size={20} color={C.dim} />
+            </Pressable>
+            {open === h.uid && (
+              <View style={{ gap: 8 }}>
+                {side.isSideOwner && (
+                  <View style={styles.chipRow}>
+                    <RoleChip
+                      on={Boolean(dep)}
+                      text="★★ Заместитель"
+                      onPress={() =>
+                        run(async () => {
+                          if (dep) await side.setDeputy(h.uid, null);
+                          else {
+                            if (dirOf) await dropDirCmd(h.uid);
+                            await side.setDeputy(h.uid, { name: h.callsign, perms: ALL_PERMS });
+                          }
+                        })
+                      }
+                    />
+                  </View>
+                )}
+                {dep && side.isSideOwner && (
+                  <View style={styles.chipRow}>
+                    {PERMS.map((p) => {
+                      const on = dep.perms.includes(p.k);
+                      return (
+                        <RoleChip
+                          key={p.k}
+                          on={on}
+                          small
+                          text={p.title}
+                          onPress={() =>
+                            run(() =>
+                              side.setDeputy(h.uid, {
+                                name: dep.name,
+                                perms: on ? dep.perms.filter((x) => x !== p.k) : [...dep.perms, p.k],
+                              })
+                            )
+                          }
+                        />
+                      );
+                    })}
+                  </View>
+                )}
+                {!dep && (
+                  <View style={styles.chipRow}>
+                    {dirs.map(([id, d]) => (
+                      <RoleChip
+                        key={id}
+                        on={d.cmd === h.uid}
+                        text={`★ ${d.name}`}
+                        onPress={() => (d.cmd === h.uid ? dropDirCmd(h.uid) : makeDirCmd(h.uid, h.callsign, id))}
+                      />
+                    ))}
+                    {dirs.length === 0 && <Text style={styles.sub}>Создайте направление ниже, чтобы назначить командира.</Text>}
+                  </View>
+                )}
+              </View>
+            )}
+          </View>
+        );
+      })}
     </Card>
   );
 }
+
+/** Directions: each led by its commander, with the squads that joined it by its QR. */
+function DirectionsCard({ run }: { run: (fn: () => Promise<unknown>) => Promise<void> }) {
+  const side = useSide();
+  const s = side.side!;
+  const [name, setName] = useState('');
+  const [qr, setQr] = useState<string | null>(null);
+  const dirs = Object.entries(s.directions ?? {});
+  const canEdit = side.can('directions');
+  if (!dirs.length && !canEdit) return null;
+  return (
+    <Card style={{ gap: 10 }}>
+      <Eyebrow>Направления · {dirs.length}</Eyebrow>
+      {dirs.map(([id, d]) => {
+        const squads = side.squads.filter((sq) => sq.dirId === id);
+        return (
+          <View key={id} style={styles.person}>
+            <View style={styles.squadRow}>
+              <Text style={styles.stars}>★</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.cardTitle} numberOfLines={1}>
+                  {d.name}
+                </Text>
+                <Text style={styles.sub} numberOfLines={2}>
+                  {d.cmdName ? `командир: ${d.cmdName}` : 'командир не назначен'} ·{' '}
+                  {squads.length ? squads.map((sq) => sq.name).join(', ') : 'отрядов нет'}
+                </Text>
+              </View>
+              <Pressable hitSlop={8} onPress={() => setQr(qr === id ? null : id)} accessibilityLabel="QR направления">
+                <Icon name="qrcode" size={20} color={C.dim} />
+              </Pressable>
+              {canEdit && (
+                <Pressable
+                  hitSlop={8}
+                  onPress={() =>
+                    confirmDestructive(`Убрать направление «${d.name}»?`, 'Отряды останутся на стороне.', 'Убрать', () =>
+                      run(async () => {
+                        const { [id]: _, ...rest } = s.directions ?? {};
+                        await side.saveDirections(rest);
+                        await Promise.all(squads.map((sq) => side.releaseSquad(sq.id).catch(() => {})));
+                      })
+                    )
+                  }
+                  accessibilityLabel="Убрать направление"
+                >
+                  <Icon name="delete-outline" size={20} color={C.dim} />
+                </Pressable>
+              )}
+            </View>
+            {qr === id && (
+              <View style={{ alignItems: 'center', gap: 8 }}>
+                <QrCode value={inviteUrl({ kind: 'dir', code: d.code, sideId: s.id, dirId: id })} size={200} />
+                <Text style={styles.sub}>Командир отряда сканирует — отряд входит в сторону и в это направление.</Text>
+              </View>
+            )}
+          </View>
+        );
+      })}
+      {canEdit && (
+        <>
+          <TextInput
+            value={name}
+            onChangeText={setName}
+            placeholder="Новое направление, например «Север»"
+            placeholderTextColor={C.faint}
+            maxLength={30}
+            style={styles.input}
+            selectionColor={C.accent}
+          />
+          <Button
+            title="Создать направление"
+            icon="sign-direction-plus"
+            kind="secondary"
+            onPress={() =>
+              run(async () => {
+                if (!name.trim()) throw new Error('Введите название направления');
+                await side.saveDirections({
+                  ...(s.directions ?? {}),
+                  [newDirId()]: { name: name.trim(), cmd: null, cmdName: null, code: randomInviteCode() },
+                });
+                setName('');
+              })
+            }
+          />
+        </>
+      )}
+    </Card>
+  );
+}
+
+/** A direction commander's own screen: the QR for squad leaders and the squads. */
+function DirectionView({ run, busy }: { run: (fn: () => Promise<unknown>) => Promise<void>; busy: boolean }) {
+  const side = useSide();
+  const headerHeight = useHeaderHeight();
+  const s = side.side!;
+  const d = side.myDirection!;
+  const now = Date.now();
+  return (
+    <KeyboardScroll contentContainerStyle={styles.content} headerOffset={headerHeight}>
+      <Card style={{ gap: 14, alignItems: 'center' }}>
+        <View style={{ alignSelf: 'stretch' }}>
+          <Eyebrow>★ Командир направления · {s.name}</Eyebrow>
+          <Text style={styles.title}>{d.name}</Text>
+          <Text style={styles.sub}>
+            {side.squads.length} отр. · {side.squads.reduce((n, sq) => n + sq.members.length, 0)} бойцов
+          </Text>
+        </View>
+        <QrCode value={inviteUrl({ kind: 'dir', code: d.code, sideId: s.id, dirId: d.id })} size={200} />
+        <Text style={styles.text}>Командир отряда сканирует этот код — отряд входит в ваше направление.</Text>
+      </Card>
+      <Button title="Чат стороны" icon="forum-outline" kind="secondary" onPress={() => router.push('/side-chat')} />
+      <View style={{ gap: 10 }}>
+        <Eyebrow style={{ paddingHorizontal: 4 }}>Отряды направления</Eyebrow>
+        {side.squads.length === 0 ? (
+          <Card>
+            <Text style={styles.text}>Пока ни один отряд не вошёл в направление.</Text>
+          </Card>
+        ) : (
+          side.squads.map((sq) => (
+            <SquadCard
+              key={sq.id}
+              canDrop
+              sq={sq}
+              now={now}
+              editing={false}
+              onEdit={() => {}}
+              onColor={() => {}}
+              onDrop={() =>
+                confirmDestructive('Отпустить отряд из направления?', `${sq.name} останется на стороне.`, 'Отпустить', () =>
+                  run(() => side.releaseSquad(sq.id))
+                )
+              }
+            />
+          ))
+        )}
+      </View>
+      {busy && <Text style={styles.sub}>…</Text>}
+    </KeyboardScroll>
+  );
+}
+
+function RoleChip({ on, text, small, onPress }: { on: boolean; text: string; small?: boolean; onPress: () => void }) {
+  return (
+    <Pressable
+      onPress={() => {
+        tap();
+        onPress();
+      }}
+      style={[styles.roleChip, on && styles.roleChipOn, small && { height: 30 }]}
+    >
+      <Text style={[styles.roleChipText, on && { color: C.accentInk }, small && { fontSize: 12 }]}>{text}</Text>
+    </Pressable>
+  );
+}
+
+const randomInviteCode = () => {
+  const A = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let out = '';
+  for (let i = 0; i < 6; i++) out += A[Math.floor(Math.random() * A.length)];
+  return out;
+};
 
 function SquadCard({
   canDrop,
@@ -391,4 +653,18 @@ const styles = StyleSheet.create({
   },
   colorDotActive: { borderColor: C.text },
   resetDot: { backgroundColor: C.elevated, borderColor: C.line },
+  stars: { color: '#FFC83D', fontSize: 16, fontFamily: F.bold, minWidth: 30 },
+  person: { gap: 8, paddingVertical: 6, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: C.line },
+  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  roleChip: {
+    paddingHorizontal: 12,
+    height: 34,
+    borderRadius: R.pill,
+    borderWidth: 1,
+    borderColor: C.line,
+    backgroundColor: C.elevated,
+    justifyContent: 'center',
+  },
+  roleChipOn: { backgroundColor: C.accent, borderColor: C.accent },
+  roleChipText: { color: C.text, fontSize: 13, fontFamily: F.semibold },
 });

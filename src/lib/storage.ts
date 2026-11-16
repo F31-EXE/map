@@ -58,6 +58,8 @@ export const KEYS = {
   techShowAll: 'tacmap.techShowAll',
   /** Downloaded offline schematic regions (see src/services/vectorRegions.ts). */
   vectorRegions: 'tacmap.vectorRegions',
+  // Side whose HQ I joined with its code.
+  hqSide: 'tacmap.hqSide',
 } as const;
 
 export async function loadJson<T>(key: string, fallback: T): Promise<T> {

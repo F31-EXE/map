@@ -9,13 +9,16 @@
  *   grimmap://join?game=T3CH42           (game tech)
  *   grimmap://join?gameside=S1DE42       (side commander → game)
  *   grimmap://join?claim=ABCDEF123456&sid=<sideId>
+ *   grimmap://join?hq=HQCODE&sid=<sideId>              (into the side's HQ; the commander gives roles)
+ *   grimmap://join?dir=DIRCOD&sid=<sideId>&d=<dirId>    (a squad, by its leader, into a direction)
  *
  * Scanned with the in-app scanner, or with the phone's camera, which opens the app on
  * the /join route. A bare 6-character code is read as a squad code.
  */
 export type Invite =
   | { kind: 'team' | 'side' | 'game' | 'gameside'; code: string }
-  | { kind: 'claim'; code: string; sideId: string };
+  | { kind: 'claim' | 'hq'; code: string; sideId: string }
+  | { kind: 'dir'; code: string; sideId: string; dirId: string };
 
 export function normalizeCode(code: string): string {
   return code.toUpperCase().replace(/[^A-Z0-9]/g, '');
@@ -23,7 +26,8 @@ export function normalizeCode(code: string): string {
 
 export function inviteUrl(invite: Invite): string {
   const base = `grimmap://join?${invite.kind}=${encodeURIComponent(invite.code)}`;
-  return invite.kind === 'claim' ? `${base}&sid=${encodeURIComponent(invite.sideId)}` : base;
+  if (invite.kind === 'dir') return `${base}&sid=${encodeURIComponent(invite.sideId)}&d=${encodeURIComponent(invite.dirId)}`;
+  return invite.kind === 'claim' || invite.kind === 'hq' ? `${base}&sid=${encodeURIComponent(invite.sideId)}` : base;
 }
 
 export function parseInvite(text: string): Invite | null {
@@ -39,6 +43,11 @@ export function parseInvite(text: string): Invite | null {
     const claim = normalizeCode(params.get('claim') ?? '');
     const sid = (params.get('sid') ?? '').replace(/[^A-Za-z0-9]/g, '');
     if (claim.length >= 4 && sid) return { kind: 'claim', code: claim, sideId: sid };
+    const hq = normalizeCode(params.get('hq') ?? '');
+    if (hq.length >= 4 && sid) return { kind: 'hq', code: hq, sideId: sid };
+    const dir = normalizeCode(params.get('dir') ?? '');
+    const d = (params.get('d') ?? '').replace(/[^A-Za-z0-9]/g, '');
+    if (dir.length >= 4 && sid && d) return { kind: 'dir', code: dir, sideId: sid, dirId: d };
     for (const key of ['team', 'side', 'game', 'gameside'] as const) {
       const code = normalizeCode(params.get(key) ?? '');
       if (code.length >= 4) return { kind: key, code };

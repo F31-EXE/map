@@ -291,7 +291,7 @@ describe('sides', () => {
     await attach('alice');
     await assertSucceeds(updateDoc(doc(as('alice'), 'teams', TEAM), { sideId: null, sideCode: null }));
   });
-  test('the commander names an HQ signaller, who then commands like them; others cannot', async () => {
+  test('the commander names a deputy, who then commands like them; others cannot', async () => {
     await attach('alice');
     await assertFails(updateDoc(doc(as('bob'), 'sides', SIDE), { 'deputies.bob': 'Тень' }));
     await assertSucceeds(updateDoc(doc(as('sam'), 'sides', SIDE), { 'deputies.bob': 'Тень' }));
@@ -300,11 +300,49 @@ describe('sides', () => {
     await assertSucceeds(sideOrder('bob', 's9'));
     await setDoc(doc(as('alice'), 'teams', TEAM, 'markers', 'a1'), marker('alice'));
     await assertSucceeds(deleteDoc(doc(as('bob'), 'teams', TEAM, 'markers', 'a1')));
-    // Only the commander renames the side or drops squads.
+    // Only the commander renames the side; a deputy stored the old way has every right, dropping squads too.
     await assertFails(updateDoc(doc(as('bob'), 'sides', SIDE), { name: 'Моя' }));
-    await assertFails(updateDoc(doc(as('bob'), 'teams', TEAM), { sideId: null, sideCode: null }));
     await assertSucceeds(updateDoc(doc(as('sam'), 'sides', SIDE), { 'deputies.bob': deleteField() }));
     await assertFails(sideOrder('bob', 's10'));
+  });
+  test('chain of command: HQ by invite, deputies with rights, direction commanders with their squads', async () => {
+    // The commander opens the HQ; dep joins it with the HQ code, a stranger without.
+    await assertSucceeds(updateDoc(doc(as('sam'), 'sides', SIDE), { hqCode: 'HQ1234' }));
+    await assertFails(setDoc(doc(as('dep'), 'sides', SIDE, 'hq', 'dep'), { callsign: 'Зам', code: 'WRONG1' }));
+    await assertSucceeds(setDoc(doc(as('dep'), 'sides', SIDE, 'hq', 'dep'), { callsign: 'Зам', code: 'HQ1234' }));
+    await assertSucceeds(setDoc(doc(as('dan'), 'sides', SIDE, 'hq', 'dan'), { callsign: 'Дан', code: 'HQ1234' }));
+    // HQ people report their own position (everyone on the side sees their stars), nobody else's.
+    await assertSucceeds(updateDoc(doc(as('dan'), 'sides', SIDE, 'hq', 'dan'), { lat: 55.7, lng: 37.6, updatedAt: 1 }));
+    await assertFails(updateDoc(doc(as('dep'), 'sides', SIDE, 'hq', 'dan'), { lat: 55.7 }));
+    await assertFails(updateDoc(doc(as('dan'), 'sides', SIDE, 'hq', 'dan'), { code: 'OTHER1' }));
+    await assertSucceeds(getDocs(collection(as('alice'), 'sides', SIDE, 'hq')));
+    // Only the commander names deputies; this one may set up directions but not order squads.
+    await assertFails(updateDoc(doc(as('dep'), 'sides', SIDE), { 'deputies.dep': { name: 'Зам', perms: ['orders'] } }));
+    await assertSucceeds(updateDoc(doc(as('sam'), 'sides', SIDE), { 'deputies.dep': { name: 'Зам', perms: ['directions'] } }));
+    await assertFails(updateDoc(doc(as('dep'), 'sides', SIDE), { name: 'Моя' }));
+    await assertSucceeds(
+      updateDoc(doc(as('dep'), 'sides', SIDE), {
+        directions: { d1: { name: 'Север', cmd: 'dan', cmdName: 'Дан', code: 'DIR111' } },
+        dirCmds: ['dan'],
+      })
+    );
+    // The squad leader joins the side and the direction with the direction's code.
+    await assertFails(updateDoc(doc(as('alice'), 'teams', TEAM), { sideId: SIDE, sideCode: SIDE_CODE, dirId: 'd1', dirCode: 'NOPE11' }));
+    await assertSucceeds(updateDoc(doc(as('alice'), 'teams', TEAM), { sideId: SIDE, sideCode: SIDE_CODE, dirId: 'd1', dirCode: 'DIR111' }));
+    // The direction commander sees and commands their squads (rank 4 > squad leader 3).
+    const mine = query(collection(as('dan'), 'teams'), where('sideId', '==', SIDE), where('dirId', '==', 'd1'));
+    await assertSucceeds(getDocs(mine));
+    await assertSucceeds(getDocs(collection(as('dan'), 'teams', TEAM, 'members')));
+    await assertSucceeds(sideOrder('dan', 'o1'));
+    await setDoc(doc(as('alice'), 'teams', TEAM, 'markers', 'a1'), marker('alice'));
+    await assertSucceeds(deleteDoc(doc(as('dan'), 'teams', TEAM, 'markers', 'a1')));
+    // The deputy without the 'orders' right can't order squads; the commander's order stays out of dan's reach.
+    await assertFails(sideOrder('dep', 'o2'));
+    await sideOrder('sam', 'o3');
+    await assertFails(deleteDoc(doc(as('dan'), 'teams', TEAM, 'markers', 'o3')));
+    // He lets the squad go from his direction; it stays on the side.
+    await assertSucceeds(updateDoc(doc(as('dan'), 'teams', TEAM), { dirId: null, dirCode: null }));
+    await assertFails(getDocs(collection(as('dan'), 'teams', TEAM, 'members')));
   });
   test('side chat: staff and members of attached squads write as themselves; strangers do not', async () => {
     const msg = (by: string, extra: Record<string, unknown> = {}) =>

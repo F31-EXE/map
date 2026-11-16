@@ -496,15 +496,19 @@ export default function TeamScreen() {
       {s.firebaseEnabled && s.uid && (
         <Pressable onPress={() => router.push('/side')}>
           <Card style={styles.sideEntry}>
-            <View style={[styles.switchIcon, side.isSideCommander && { backgroundColor: C.accentSoft }]}>
-              <Icon name="flag-variant" size={22} color={side.isSideCommander ? C.accent : C.dim} />
+            <View style={[styles.switchIcon, (side.isSideCommander || side.inHq) && { backgroundColor: C.accentSoft }]}>
+              <Icon name="flag-variant" size={22} color={side.isSideCommander || side.inHq ? C.accent : C.dim} />
             </View>
             <View style={{ flex: 1 }}>
               <Text style={styles.cardTitle}>Командование стороной</Text>
               <Text style={styles.sub}>
                 {side.isSideCommander
                   ? `«${side.side?.name ?? ''}» · ${side.squads.length} отр.`
-                  : 'Объединить отряды и командовать ими'}
+                  : side.isDirCommander && side.myDirection
+                    ? `★ Направление «${side.myDirection.name}» · ${side.squads.length} отр.`
+                    : side.inHq
+                      ? `Штаб «${side.side?.name ?? ''}» · ждите роль`
+                      : 'Объединить отряды и командовать ими'}
               </Text>
             </View>
             <Icon name="chevron-right" size={20} color={C.faint} />

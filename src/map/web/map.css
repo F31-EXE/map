@@ -211,6 +211,24 @@ body,
   align-items: center;
   justify-content: center;
 }
+.member-stars {
+  position: absolute;
+  left: 50%;
+  top: -15px;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 0;
+  padding: 1px 3px;
+  border-radius: 8px;
+  background: #0b0f0c;
+  border: 1px solid #ffc83d;
+  pointer-events: none;
+}
+.member-stars svg {
+  width: 11px;
+  height: 11px;
+  fill: #ffc83d;
+}
 .member-badge svg {
   width: 10px;
   height: 10px;
@@ -448,6 +466,7 @@ body,
 .lod-dot .member-pin svg,
 .lod-dot .member-dir,
 .lod-dot .member-badge,
+.lod-dot .member-stars,
 .lod-dot .member-halo,
 .lod-dot .order-ring {
   visibility: hidden;

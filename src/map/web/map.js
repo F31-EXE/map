@@ -570,6 +570,8 @@
   var membersLayer = L.layerGroup().addTo(map);
   var memberMarkers = {};
 
+  // Squad commanders: a chevron; stars are kept for the side's chain of command.
+  var CHEVRON_PATH = 'M12,4L3,12.5L5.1,14.6L12,8.2L18.9,14.6L21,12.5L12,4M12,11L3,19.5L5.1,21.6L12,15.2L18.9,21.6L21,19.5L12,11Z';
   var STAR_PATH = 'M12,17.27L18.18,21L16.54,13.97L22,9.24L14.81,8.62L12,2L9.19,8.62L2,9.24L7.45,13.97L5.82,21L12,17.27Z';
   var SKULL_PATH =
     'M12,2A9,9 0 0,0 3,11C3,14.03 4.53,16.82 7,18.47V22H9V19H11V22H13V19H15V22H17V18.46C19.47,16.81 21,14 21,11A9,9 0 0,0 12,2' +
@@ -606,8 +608,13 @@
         (m.low
           ? '<div class="member-low" title="Скоро сядет батарея"><svg viewBox="0 0 24 24"><path d="' + LOW_BATTERY_PATH + '" fill="#0B0F0C"/></svg></div>'
           : '') +
-        (m.commander
-          ? '<div class="member-badge"><svg viewBox="0 0 24 24"><path d="' + STAR_PATH + '" fill="#0B0F0C"/></svg></div>'
+        (m.stars
+          ? '<div class="member-stars">' +
+            new Array(m.stars + 1).join('<svg viewBox="0 0 24 24"><path d="' + STAR_PATH + '"/></svg>') +
+            '</div>'
+          : '') +
+        (m.commander && !m.stars
+          ? '<div class="member-badge"><svg viewBox="0 0 24 24"><path d="' + CHEVRON_PATH + '" fill="#0B0F0C"/></svg></div>'
           : '') +
         '<div class="chip">' + escapeHtml(m.callsign) +
         (m.roleTitle ? '<span class="chip-role"> · ' + escapeHtml(m.roleTitle) + '</span>' : '') +
@@ -631,7 +638,7 @@
   }
 
   function memberKey(m) {
-    return JSON.stringify([m.callsign, m.color, m.stale, m.rolePath, m.roleTitle, m.commander, m.status, m.tech, m.low, m.sos]);
+    return JSON.stringify([m.callsign, m.color, m.stale, m.rolePath, m.roleTitle, m.commander, m.stars, m.status, m.tech, m.low, m.sos]);
   }
 
   function setMembers(list) {

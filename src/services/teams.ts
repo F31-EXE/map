@@ -248,6 +248,7 @@ export function subscribeTeam(
               ownerId: d.ownerId,
               color: d.color ?? DEFAULT_TEAM_COLOR,
               sideId: typeof d.sideId === 'string' ? d.sideId : null,
+              dirId: typeof d.dirId === 'string' ? d.dirId : null,
               recordingId: typeof d.recordingId === 'string' ? d.recordingId : null,
               pinned: d.pinned && typeof d.pinned.text === 'string' ? (d.pinned as PinnedMessage) : null,
               factions: parseFactions(d.factions),

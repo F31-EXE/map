@@ -21,6 +21,8 @@ export type Team = {
   color: string;
   /** Side this squad is attached to, if any. */
   sideId: string | null;
+  /** Direction of that side the squad joined (its commander leads several squads). */
+  dirId?: string | null;
   /** Movement recording in progress, if any. */
   recordingId?: string | null;
   /** Chat message pinned by a commander. */
@@ -54,8 +56,26 @@ export type Side = {
   gameId?: string | null;
   /** Made by a game tech: the code a commander uses to take it over. */
   claim?: string | null;
-  /** Deputies the commander named: { uid: callsign }; they get the commander's rights. */
-  deputies?: Record<string, string>;
+  /** Deputies the commander named, with the rights the commander gave each. */
+  deputies?: Record<string, Deputy>;
+  /** Directions: a commander over several squads (squads join one with its code). */
+  directions?: Record<string, Direction>;
+  /** Code people join the side's HQ with (then the commander gives roles). */
+  hqCode?: string | null;
+};
+
+/** What a deputy may do besides seeing the whole side: */
+export type DeputyPerm = 'orders' | 'game' | 'squads' | 'directions';
+export type Deputy = { name: string; perms: DeputyPerm[] };
+export type Direction = { name: string; cmd: string | null; cmdName: string | null; code: string };
+/** Someone in a side's HQ (joined with the HQ code), with their last position. */
+export type HqPerson = {
+  uid: string;
+  callsign: string;
+  lat: number | null;
+  lng: number | null;
+  heading: number | null;
+  updatedAt: number | null;
 };
 
 /** A big game run by game techs (organizers), above sides. */
@@ -136,6 +156,8 @@ export type Member = {
   charging?: boolean;
   /** Meshtastic radio battery %, 101 = on external power. */
   radioBattery?: number | null;
+  /** Side hierarchy stars: 3 side commander, 2 deputy, 1 direction commander. */
+  stars?: 0 | 1 | 2 | 3;
   /** Map label instead of callsign and role (side view: the squad's name on its commander). */
   mapLabel?: string;
   /** A game tech (organizer): drawn as an orange diamond. */

@@ -597,16 +597,16 @@ export default function MapScreen() {
   const actionsW = 64 + 52 + 52 + 14 + (inTeam ? 52 + 14 : 0) + (mortar.isMortar ? 52 + 14 : 0) + 14;
 
   // Side commander without a squad of their own: the pill shows the side instead.
-  const sideOnly = side.isSideCommander && !inTeam;
+  const sideOnly = side.commandsSquads && !inTeam;
   const online = allMembers.filter(
     (m) => m.id !== session.uid && m.updatedAt && now - m.updatedAt < STALE_MS
   ).length;
 
   const orderTargets: { id: OrderTarget; label: string; color?: string }[] = [
     ...(session.canCommand ? [{ id: 'own', label: 'Мой отряд', color: session.teamColor }] : []),
-    ...(side.isSideCommander
+    ...(side.commandsSquads
       ? [
-          { id: 'all', label: 'Командирам всех отрядов' },
+          { id: 'all', label: side.isSideCommander ? 'Командирам всех отрядов' : 'Всем отрядам направления' },
           ...side.squads.map((sq) => ({ id: sq.id, label: sq.name, color: sq.displayColor })),
         ]
       : []),
@@ -821,7 +821,7 @@ export default function MapScreen() {
 
   const hqGroups: HqGroup[] = game.isTech
     ? game.roster
-    : side.isSideCommander && side.side
+    : side.commandsSquads && side.side
       ? [
           {
             id: side.side.id,
@@ -944,7 +944,7 @@ export default function MapScreen() {
                     : inTeam
                       ? landscape
                         ? `${online}/${session.members.length}`
-                        : `${online} в сети · ${session.members.length} в составе${side.isSideCommander ? ' · сторона' : ''}`
+                        : `${online} в сети · ${session.members.length} в составе${side.commandsSquads ? ' · сторона' : ''}`
                       : 'Нажмите, чтобы собрать команду'}
                 </Text>
               </View>
@@ -1548,7 +1548,7 @@ export default function MapScreen() {
       <AddMarkerModal
         at={addAt}
         inTeam={inTeam}
-        canCommand={session.canCommand || side.isSideCommander}
+        canCommand={session.canCommand || side.commandsSquads}
         gameKind={gameKind}
         orderTargets={orderTargets}
         onCancel={() => setAddAt(null)}

@@ -20,7 +20,7 @@ import { firestore } from '../lib/firebase';
 import { normalizeCode } from '../lib/invite';
 import { DEFAULT_TEAM_COLOR } from '../lib/roles';
 import { newId } from '../lib/storage';
-import type { OrderKind, Side, Team } from '../lib/types';
+import type { Deputy, DeputyPerm, Direction, HqPerson, OrderKind, Side, Team } from '../lib/types';
 import { randomCode } from './teams';
 
 /*
@@ -60,7 +60,7 @@ export async function attachTeam(teamId: string, rawCode: string): Promise<void>
 
 /** Squad leader leaves the side, or the side commander drops a squad. */
 export async function detachTeam(teamId: string): Promise<void> {
-  await updateDoc(doc(firestore(), 'teams', teamId), { sideId: null, sideCode: null });
+  await updateDoc(doc(firestore(), 'teams', teamId), { sideId: null, sideCode: null, dirId: null, dirCode: null });
 }
 
 function toSide(id: string, d: Record<string, any>): Side {
@@ -71,18 +71,156 @@ function toSide(id: string, d: Record<string, any>): Side {
     ownerId: d.ownerId,
     gameId: typeof d.gameId === 'string' ? d.gameId : null,
     claim: typeof d.claim === 'string' ? d.claim : null,
-    deputies:
-      d.deputies && typeof d.deputies === 'object'
-        ? Object.fromEntries(Object.entries(d.deputies).filter(([, v]) => typeof v === 'string')) as Record<string, string>
-        : {},
+    deputies: parseDeputies(d.deputies),
+    directions: parseDirections(d.directions),
+    hqCode: typeof d.hqCode === 'string' ? d.hqCode : null,
   };
 }
 
-/** Names (or removes, `callsign` null) an HQ signaller with the commander's rights. */
-export async function setDeputy(sideId: string, uid: string, callsign: string | null): Promise<void> {
+const ALL_PERMS: DeputyPerm[] = ['orders', 'game', 'squads', 'directions'];
+
+/** Deputies: { uid: { name, perms } }; older entries were just a callsign (every right). */
+function parseDeputies(v: unknown): Record<string, Deputy> {
+  if (!v || typeof v !== 'object') return {};
+  const out: Record<string, Deputy> = {};
+  for (const [uid, x] of Object.entries(v as Record<string, unknown>)) {
+    if (typeof x === 'string') out[uid] = { name: x, perms: ALL_PERMS };
+    else if (x && typeof x === 'object') {
+      const o = x as { name?: unknown; perms?: unknown };
+      out[uid] = {
+        name: typeof o.name === 'string' ? o.name : 'Заместитель',
+        perms: Array.isArray(o.perms) ? (o.perms.filter((p) => ALL_PERMS.includes(p)) as DeputyPerm[]) : [],
+      };
+    }
+  }
+  return out;
+}
+
+function parseDirections(v: unknown): Record<string, Direction> {
+  if (!v || typeof v !== 'object') return {};
+  const out: Record<string, Direction> = {};
+  for (const [id, x] of Object.entries(v as Record<string, any>)) {
+    if (!x || typeof x !== 'object' || typeof x.code !== 'string') continue;
+    out[id] = {
+      name: typeof x.name === 'string' ? x.name : 'Направление',
+      cmd: typeof x.cmd === 'string' ? x.cmd : null,
+      cmdName: typeof x.cmdName === 'string' ? x.cmdName : null,
+      code: x.code,
+    };
+  }
+  return out;
+}
+
+/** Names (or removes, `d` null) a deputy with the given rights (the commander only). */
+export async function setDeputy(sideId: string, uid: string, d: Deputy | null): Promise<void> {
   await updateDoc(doc(firestore(), 'sides', sideId), {
-    [`deputies.${uid}`]: callsign == null ? deleteField() : callsign.slice(0, 24),
+    [`deputies.${uid}`]: d == null ? deleteField() : { name: d.name.slice(0, 24), perms: d.perms },
   });
+}
+
+/** The directions as a whole (with the list of their commanders the rules read). */
+export async function saveDirections(sideId: string, directions: Record<string, Direction>): Promise<void> {
+  const dirCmds = [...new Set(Object.values(directions).map((x) => x.cmd).filter((x): x is string => Boolean(x)))];
+  await updateDoc(doc(firestore(), 'sides', sideId), { directions, dirCmds });
+}
+
+/** The side's HQ code (made once by the commander). */
+export async function ensureHqCode(side: Side): Promise<string> {
+  if (side.hqCode) return side.hqCode;
+  const code = randomCode();
+  await updateDoc(doc(firestore(), 'sides', side.id), { hqCode: code });
+  return code;
+}
+
+/** Joins a side's HQ with its code (the commander gives a role after). */
+export async function joinHq(sideId: string, uid: string, callsign: string, rawCode: string): Promise<void> {
+  await setDoc(doc(firestore(), 'sides', sideId, 'hq', uid), {
+    callsign: (callsign || 'Штаб').slice(0, 24),
+    code: normalizeCode(rawCode),
+    at: Date.now(),
+  });
+}
+
+export async function leaveHq(sideId: string, uid: string): Promise<void> {
+  await deleteDoc(doc(firestore(), 'sides', sideId, 'hq', uid));
+}
+
+/** HQ people publish where they are, so the side sees its command on the map. */
+export async function reportHq(sideId: string, uid: string, p: { lat: number; lng: number; heading: number | null }) {
+  await updateDoc(doc(firestore(), 'sides', sideId, 'hq', uid), {
+    lat: p.lat,
+    lng: p.lng,
+    heading: p.heading ?? null,
+    updatedAt: Date.now(),
+  });
+}
+
+export function subscribeHq(sideId: string, on: (list: HqPerson[]) => void, onError: (e: Error) => void): Unsubscribe {
+  return onSnapshot(
+    collection(firestore(), 'sides', sideId, 'hq'),
+    (snap) =>
+      on(
+        snap.docs.map((d) => {
+          const x = d.data();
+          return {
+            uid: d.id,
+            callsign: String(x.callsign ?? ''),
+            lat: typeof x.lat === 'number' ? x.lat : null,
+            lng: typeof x.lng === 'number' ? x.lng : null,
+            heading: typeof x.heading === 'number' ? x.heading : null,
+            updatedAt: typeof x.updatedAt === 'number' ? x.updatedAt : null,
+          };
+        })
+      ),
+    onError
+  );
+}
+
+/** A squad leader joins the side and one of its directions with the direction's code. */
+export async function joinDirection(teamId: string, sideId: string, dirId: string, rawCode: string): Promise<void> {
+  const side = await getSide(sideId);
+  if (!side) throw new Error('Сторона не найдена');
+  const dir = side.directions?.[dirId];
+  if (!dir) throw new Error('Такого направления больше нет');
+  await updateDoc(doc(firestore(), 'teams', teamId), {
+    sideId,
+    sideCode: side.code,
+    dirId,
+    dirCode: normalizeCode(rawCode),
+  });
+}
+
+/** The direction commander lets a squad go (it stays on the side). */
+export async function leaveDirection(teamId: string): Promise<void> {
+  await updateDoc(doc(firestore(), 'teams', teamId), { dirId: null, dirCode: null });
+}
+
+/** A direction commander's squads. */
+export function subscribeDirectionTeams(
+  sideId: string,
+  dirId: string,
+  onTeams: (teams: Team[]) => void,
+  onError: (e: Error) => void
+): Unsubscribe {
+  return onSnapshot(
+    query(collection(firestore(), 'teams'), where('sideId', '==', sideId), where('dirId', '==', dirId)),
+    (snap) =>
+      onTeams(
+        snap.docs.map((d) => {
+          const x = d.data();
+          return {
+            id: d.id,
+            name: x.name,
+            code: x.code,
+            ownerId: x.ownerId,
+            color: x.color ?? DEFAULT_TEAM_COLOR,
+            sideId: x.sideId ?? null,
+            dirId: x.dirId ?? null,
+          } as Team;
+        })
+      ),
+    onError
+  );
 }
 
 /*

@@ -3,11 +3,14 @@ import { test } from 'node:test';
 
 import { canDeleteMarker, rankOf } from '../src/lib/ranks.ts';
 
-const ctx = { ownerId: 'cmd', sideOwnerId: 'side', commanders: new Set(['sgt']) };
+const ctx = { ownerId: 'cmd', sideOwnerId: 'side', commanders: new Set(['sgt']), sideStaff: new Set(['dep']), dirCmd: 'dir' };
 const m = (createdBy: string) => ({ createdBy });
 
 test('ranks follow the chain of command', () => {
-  assert.deepEqual(['side', 'cmd', 'sgt', 'pvt'].map((u) => rankOf(u, ctx)), [4, 3, 2, 1]);
+  assert.deepEqual(['side', 'dep', 'dir', 'cmd', 'sgt', 'pvt'].map((u) => rankOf(u, ctx)), [5, 5, 4, 3, 2, 1]);
+  // The direction commander is above the squad's commander, below the side's command post.
+  assert.equal(canDeleteMarker('dir', m('cmd'), ctx), true);
+  assert.equal(canDeleteMarker('dir', m('dep'), ctx), false);
 });
 
 test('own markers are always deletable', () => {

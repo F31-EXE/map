@@ -245,7 +245,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
 
   // Which game, and as whom: a tech, or a player through their squad's (or own) side.
   const squadSide = side.mySquadSide;
-  const commandedSide = side.isSideCommander ? side.side : null;
+  const commandedSide = side.commandsSquads ? side.side : null;
   const playerSide = squadSide?.gameId ? squadSide : commandedSide?.gameId ? commandedSide : null;
   const gameId = techGameId ?? playerSide?.gameId ?? null;
 
@@ -832,8 +832,8 @@ export function GameProvider({ children }: { children: ReactNode }) {
       income: mySideId ? (minuteIncome([mySideId], markers.filter((m) => m.kind === 'mine'))[mySideId] ?? 0) : 0,
       carry: players.find((x) => x.uid === uid)?.carry ?? 0,
       limit: mySideId ? carryLimit(mySideId, sites) : 0,
-      canBuild: Boolean(mySideId && (session.canCommand || (side.isSideCommander && side.side?.id === mySideId))),
-      isStaff: Boolean(mySideId && side.isSideCommander && side.side?.id === mySideId),
+      canBuild: Boolean(mySideId && (session.canCommand || (side.commandsSquads && side.side?.id === mySideId))),
+      isStaff: Boolean(mySideId && side.isSideCommander && side.can('game') && side.side?.id === mySideId),
       airReady: mySideId ? ready('b-air') : null,
       reconReady: mySideId ? ready('b-recon') : null,
       hqs: markers.filter((m) => m.kind === 'hq' && m.owner).map((m) => ({ owner: m.owner!, lat: m.lat, lng: m.lng })),

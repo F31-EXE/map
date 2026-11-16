@@ -50,7 +50,7 @@ export default function GameScreen() {
   return (
     <KeyboardScroll contentContainerStyle={styles.content} headerOffset={headerHeight}>
       {!g.game ? <NoGame busy={busy} run={run} /> : g.isTech ? <TechView busy={busy} run={run} /> : <PlayerView run={run} />}
-      {!g.isTech && side.isSideCommander && side.side && !side.side.gameId && <AttachSide busy={busy} run={run} />}
+      {!g.isTech && side.isSideOwner && side.side && !side.side.gameId && <AttachSide busy={busy} run={run} />}
     </KeyboardScroll>
   );
 }
@@ -176,7 +176,7 @@ function PlayerView({ run }: { run: Run }) {
         <Text style={styles.sub}>На карте игротехи — оранжевые ромбы.</Text>
       </Card>
       <Rules />
-      {side.isSideCommander && side.side?.gameId && (
+      {side.isSideOwner && side.side?.gameId && (
         <Button
           title="Вывести сторону из игры"
           kind="danger"

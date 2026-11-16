@@ -3,15 +3,17 @@
  * sergeant (member granted command rights) > fighter. You may delete your own markers
  * and those of anyone strictly below you. Mirrors `rank()` in firestore.rules.
  */
-export const RANK = { fighter: 1, sergeant: 2, squadCommander: 3, sideCommander: 4 } as const;
+export const RANK = { fighter: 1, sergeant: 2, squadCommander: 3, directionCommander: 4, sideCommander: 5 } as const;
 
 export type RankContext = {
   /** Squad creator. */
   ownerId: string | null | undefined;
   /** Commander of the side the squad is attached to. */
   sideOwnerId: string | null | undefined;
-  /** HQ signallers the side commander named: same rank as the commander. */
+  /** Deputies the side commander named: same rank as the commander. */
   sideStaff?: ReadonlySet<string>;
+  /** Commander of the direction the squad belongs to. */
+  dirCmd?: string | null;
   /** Members holding command rights. */
   commanders: ReadonlySet<string>;
 };
@@ -20,6 +22,7 @@ export function rankOf(uid: string | null | undefined, ctx: RankContext): number
   if (!uid) return 0;
   if (ctx.sideOwnerId && uid === ctx.sideOwnerId) return RANK.sideCommander;
   if (ctx.sideStaff?.has(uid)) return RANK.sideCommander;
+  if (ctx.dirCmd && uid === ctx.dirCmd) return RANK.directionCommander;
   if (ctx.ownerId && uid === ctx.ownerId) return RANK.squadCommander;
   if (ctx.commanders.has(uid)) return RANK.sergeant;
   return RANK.fighter;
@@ -39,5 +42,6 @@ export const RANK_TITLES: Record<number, string> = {
   1: 'боец',
   2: 'старшина',
   3: 'командир отряда',
-  4: 'командир стороны',
+  4: 'командир направления',
+  5: 'командир стороны',
 };

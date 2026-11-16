@@ -239,6 +239,7 @@ export function TacticalMap(props: Props) {
         rolePath: ROLES[m.role].path,
         roleTitle: m.tech ? 'Игротех' : m.mapLabel ? null : ROLES[m.role].title,
         commander: !m.tech && (m.leader ?? (m.canCommand || m.id === props.ownerId)),
+        stars: m.stars ?? 0,
         tech: Boolean(m.tech),
         low: lowPower(m),
         sos: Boolean(m.sos),

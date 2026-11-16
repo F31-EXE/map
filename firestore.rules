@@ -58,6 +58,31 @@ service cloud.firestore {
         && (get(sidePath(sideId)).data.ownerId == request.auth.uid
           || get(sidePath(sideId)).data.get('deputies', {}).keys().hasAny([request.auth.uid]));
     }
+    function sideData(sideId) {
+      return get(sidePath(sideId)).data;
+    }
+    // The commander, or a deputy given this right ('orders', 'game', 'squads'); deputies
+    // stored the old way (just a callsign) have every right.
+    function staffCan(sideId, perm) {
+      return signedIn() && sideId is string
+        && (sideData(sideId).ownerId == request.auth.uid
+          || (sideData(sideId).get('deputies', {}).keys().hasAny([request.auth.uid])
+            && (sideData(sideId).deputies[request.auth.uid] is string
+              || sideData(sideId).deputies[request.auth.uid].get('perms', []).hasAny([perm]))));
+    }
+    // Direction commander over a squad: the squad joined direction `dirId` of its side (with
+    // the direction's code), and side.directions[dirId].cmd is its commander.
+    function isDirCmdFor(sideId, dirId) {
+      return signedIn() && sideId is string && dirId is string
+        && sideData(sideId).get('directions', {}).get(dirId, {}).get('cmd', null) == request.auth.uid;
+    }
+    function isDirCmdOf(teamId) {
+      let t = get(teamPath(teamId)).data;
+      return isDirCmdFor(t.get('sideId', null), t.get('dirId', null));
+    }
+    function isDirCmdIn(sideId) {
+      return signedIn() && sideId is string && request.auth.uid in sideData(sideId).get('dirCmds', []);
+    }
     // Command post of the side this squad is attached to.
     function isSideCommanderOf(teamId) {
       let t = get(teamPath(teamId)).data;
@@ -82,7 +107,7 @@ service cloud.firestore {
     // SQUAD mode: the side's command post, or a commander of one of its squads in the game.
     function canBuild(gameId, sideId) {
       let player = get(/databases/$(database)/documents/games/$(gameId)/players/$(request.auth.uid));
-      return isSideStaff(sideId)
+      return staffCan(sideId, 'game') || isDirCmdIn(sideId)
         || (player.data.sideId == sideId
           && player.data.get('teamId', null) is string
           && canCommand(player.data.teamId));
@@ -93,18 +118,23 @@ service cloud.firestore {
     function isTechOfTeam(teamId) {
       return isTechOfSide(get(teamPath(teamId)).data.get('sideId', null));
     }
-    // Everyone above the squad: its side commander and the game's techs.
+    // Everyone above the squad: its side's command post, its direction commander, the game's techs.
     function oversees(teamId) {
-      return isSideCommanderOf(teamId) || isTechOfTeam(teamId);
+      return isSideCommanderOf(teamId) || isDirCmdOf(teamId) || isTechOfTeam(teamId);
     }
-    // 4 side commander, 3 squad creator, 2 member with command rights, 1 fighter.
-    // Mirrors src/lib/ranks.ts.
+    function sideOrNothing(sideId) {
+      return sideId != null ? get(sidePath(sideId)).data : {};
+    }
+    // 5 side commander and deputies, 4 direction commander, 3 squad creator,
+    // 2 member with command rights, 1 fighter. Mirrors src/lib/ranks.ts.
     function rank(teamId, uid) {
       let t = get(teamPath(teamId)).data;
       let sideId = t.get('sideId', null);
+      let sd = sideOrNothing(sideId);
       let m = memberPath(teamId, uid);
-      return sideId != null && (get(sidePath(sideId)).data.ownerId == uid
-          || get(sidePath(sideId)).data.get('deputies', {}).keys().hasAny([uid])) ? 4
+      return sideId != null && (sd.ownerId == uid || sd.get('deputies', {}).keys().hasAny([uid])) ? 5
+        : sideId != null && t.get('dirId', null) is string
+          && sd.get('directions', {}).get(t.dirId, {}).get('cmd', null) == uid ? 4
         : t.ownerId == uid ? 3
         : exists(m) && get(m).data.get('canCommand', false) == true ? 2
         : 1;
@@ -209,13 +239,22 @@ service cloud.firestore {
       allow update: if signedIn() && (
         // The commander renames the side, or joins it to a game with the game's side code / leaves.
         (resource.data.ownerId == request.auth.uid
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'gameId', 'gameCode', 'claim', 'deputies'])
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'gameId', 'gameCode', 'claim', 'deputies', 'directions', 'dirCmds', 'hqCode'])
+          && (request.resource.data.get('directions', null) == null
+            || (request.resource.data.directions is map && request.resource.data.directions.size() <= 12))
+          && (request.resource.data.get('dirCmds', null) == null
+            || (request.resource.data.dirCmds is list && request.resource.data.dirCmds.size() <= 12))
           && request.resource.data.name.size() <= 40
           // Deputies: { uid: callsign }, a handful at most.
           && (request.resource.data.get('deputies', null) == null
             || (request.resource.data.deputies is map && request.resource.data.deputies.size() <= 10))
           && (request.resource.data.get('gameId', null) == null
             || request.resource.data.get('gameCode', null) == get(gamePath(request.resource.data.gameId)).data.sideCode))
+        // A deputy with the 'directions' right sets up directions: their commanders and squads.
+        || (staffCan(sideId, 'directions')
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['directions', 'dirCmds'])
+          && request.resource.data.directions is map && request.resource.data.directions.size() <= 12
+          && request.resource.data.dirCmds is list && request.resource.data.dirCmds.size() <= 12)
         // Taking command of a side a tech made: knowing its claim code.
         || (resource.data.get('claim', null) != null
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['ownerId', 'claim', 'claimedWith'])
@@ -229,6 +268,23 @@ service cloud.firestore {
       );
       allow delete: if false;
 
+      // The side's HQ: people the commander invited with the HQ code (QR / link), whom
+      // the commander then gives roles (deputy, direction commander) on the side doc.
+      match /hq/{uid} {
+        // Read by the side's people (the HQ shows on their maps with stars); the side id is
+        // only known to them, as with the side chat.
+        allow read: if signedIn();
+        // HQ people publish where they are.
+        allow update: if signedIn() && uid == request.auth.uid
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['lat', 'lng', 'heading', 'updatedAt', 'callsign'])
+          && request.resource.data.callsign.size() <= 24;
+        allow create: if signedIn() && uid == request.auth.uid
+          && request.resource.data.callsign is string && request.resource.data.callsign.size() <= 24
+          && get(sidePath(sideId)).data.get('hqCode', null) != null
+          && request.resource.data.code == get(sidePath(sideId)).data.hqCode;
+        allow delete: if signedIn() && (uid == request.auth.uid || get(sidePath(sideId)).data.ownerId == request.auth.uid);
+      }
+
       // Side chat: the command post, squad commanders and signallers. The side id is
       // only known to the side's squads; writers are staff or members of an attached squad.
       match /messages/{msgId} {
@@ -238,7 +294,8 @@ service cloud.firestore {
           && request.resource.data.callsign is string && request.resource.data.callsign.size() <= 40
           && request.resource.data.text is string
           && request.resource.data.text.size() > 0 && request.resource.data.text.size() <= 1000
-          && (isSideStaff(sideId)
+          && (isSideStaff(sideId) || isDirCmdIn(sideId)
+            || exists(/databases/$(database)/documents/sides/$(sideId)/hq/$(request.auth.uid))
             || (request.resource.data.teamId is string
               && isMember(request.resource.data.teamId)
               && get(teamPath(request.resource.data.teamId)).data.get('sideId', null) == sideId));
@@ -322,9 +379,9 @@ service cloud.firestore {
             (request.resource.data.teamId is string
               && exists(memberPath(request.resource.data.teamId, uid))
               && get(teamPath(request.resource.data.teamId)).data.get('sideId', null) == request.resource.data.sideId)
-            // The side's commander.
+            // The side's commander, a deputy or a direction commander (HQ, no squad).
             || (request.resource.data.teamId == null
-              && get(sidePath(request.resource.data.sideId)).data.ownerId == uid)
+              && (isSideStaff(request.resource.data.sideId) || isDirCmdIn(request.resource.data.sideId)))
           )
           && (!('pts' in request.resource.data) || request.resource.data.pts is map)
           && (!('deaths' in request.resource.data) || request.resource.data.deaths is int);
@@ -361,7 +418,7 @@ service cloud.firestore {
             && request.resource.data.bld.seen.size() == 0)
           // SQUAD: the command post orders an air strike or a recon scan for its side.
           || (request.resource.data.kind in ['strike', 'scan']
-            && isSideStaff(request.resource.data.owner)
+            && staffCan(request.resource.data.owner, 'game')
             && get(sidePath(request.resource.data.owner)).data.get('gameId', null) == gameId
             && request.resource.data.lat is number && request.resource.data.lng is number
             && request.resource.data.hit.keys().hasOnly(['at'])
@@ -383,9 +440,12 @@ service cloud.firestore {
 
     match /teams/{teamId} {
       allow get: if isMember(teamId) || isSideStaff(resource.data.get('sideId', null))
+        || isDirCmdFor(resource.data.get('sideId', null), resource.data.get('dirId', null))
         || isTechOfSide(resource.data.get('sideId', null));
-      // The side's command post (and the game's techs) list squads with where('sideId', '==', side).
-      allow list: if isSideStaff(resource.data.get('sideId', null)) || isTechOfSide(resource.data.get('sideId', null));
+      // The side's command post (and the game's techs) list squads with where('sideId', '==', side);
+      // a direction commander lists theirs with where('sideId', ...) and where('dirId', ...).
+      allow list: if isSideStaff(resource.data.get('sideId', null)) || isTechOfSide(resource.data.get('sideId', null))
+        || isDirCmdFor(resource.data.get('sideId', null), resource.data.get('dirId', null));
       allow create: if signedIn()
         && request.resource.data.ownerId == request.auth.uid
         && request.resource.data.name is string
@@ -395,7 +455,12 @@ service cloud.firestore {
       // that side's code) or detach it; code and owner are fixed.
       allow update: if signedIn() && (
         (resource.data.ownerId == request.auth.uid
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'color', 'sideId', 'sideCode', 'factions'])
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'color', 'sideId', 'sideCode', 'factions', 'dirId', 'dirCode'])
+          // A direction: joined with its code, only inside the squad's side.
+          && (request.resource.data.get('dirId', null) == null
+            || (request.resource.data.get('sideId', null) is string
+              && request.resource.data.get('dirCode', null) != null
+              && request.resource.data.dirCode == sideData(request.resource.data.sideId).get('directions', {}).get(request.resource.data.dirId, {}).get('code', '')))
           && validFactions(request.resource.data.get('factions', null))
           && request.resource.data.name is string
           && request.resource.data.name.size() <= 40
@@ -411,8 +476,12 @@ service cloud.firestore {
           && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['briefing'])
             || validBriefing(request.resource.data.briefing)))
         // The side commander may drop a squad from the side, and nothing else.
-        || (isSideOwner(resource.data.get('sideId', null))
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['sideId', 'sideCode'])
+        // The direction commander lets a squad go from their direction.
+        || (isDirCmdFor(resource.data.get('sideId', null), resource.data.get('dirId', null))
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['dirId', 'dirCode'])
+          && request.resource.data.dirId == null)
+        || (staffCan(resource.data.get('sideId', null), 'squads')
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['sideId', 'sideCode', 'dirId', 'dirCode'])
           && request.resource.data.sideId == null
           && request.resource.data.sideCode == null)
       );
@@ -483,7 +552,7 @@ service cloud.firestore {
                 // Squad members; orders only from the squad's commanders.
                 (isMember(teamId) && (!isOrderKind(request.resource.data.kind) || canCommand(teamId)))
                 // The side commander sends orders to squad commanders.
-                || (isSideCommanderOf(teamId)
+                || ((staffCan(get(teamPath(teamId)).data.get('sideId', null), 'orders') || isDirCmdOf(teamId))
                   && isOrderKind(request.resource.data.kind)
                   && request.resource.data.get('audience', null) == 'commanders')
               ))
@@ -529,7 +598,7 @@ service cloud.firestore {
           && request.resource.data.label is string
           && request.resource.data.label.size() <= 40;
         // Chain of command: your own markers, or those of anyone strictly below you.
-        allow delete: if (isMember(teamId) || isSideCommanderOf(teamId))
+        allow delete: if (isMember(teamId) || isSideCommanderOf(teamId) || isDirCmdOf(teamId))
           && (resource.data.createdBy == request.auth.uid
             || rank(teamId, request.auth.uid) > rank(teamId, resource.data.createdBy));
       }
