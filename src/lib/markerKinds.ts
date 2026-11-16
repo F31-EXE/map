@@ -4,7 +4,16 @@ import {
   mdiAlertOctagon,
   mdiAutorenew,
   mdiArrowTopRightThick,
+  mdiAccessPointOff,
+  mdiAirplane,
+  mdiBinoculars,
+  mdiBomb,
   mdiCamera,
+  mdiCastle,
+  mdiPickaxe,
+  mdiRadar,
+  mdiTent,
+  mdiWarehouse,
   mdiFlag,
   mdiHexagonOutline,
   mdiTruck,
@@ -50,7 +59,16 @@ type KindDef = {
     | 'camera'
     | 'flag'
     | 'hexagon-outline'
-    | 'truck';
+    | 'truck'
+    | 'castle'
+    | 'pickaxe'
+    | 'tent'
+    | 'access-point-off'
+    | 'binoculars'
+    | 'airplane'
+    | 'warehouse'
+    | 'bomb'
+    | 'radar';
   /** Same icon as an SVG path, for markers drawn inside the map WebView. */
   path: string;
   color: string;
@@ -79,6 +97,15 @@ export const MARKER_KINDS: Record<MarkerKind, KindDef> = {
   flag: { title: 'Флаг', icon: 'flag', path: mdiFlag, color: '#F2F2F2' },
   sector: { title: 'Сектор', icon: 'hexagon-outline', path: mdiHexagonOutline, color: '#C3CCC6' },
   ball: { title: 'Конвой', icon: 'truck', path: mdiTruck, color: '#F2F2F2' },
+  hq: { title: 'Штаб стороны', icon: 'castle', path: mdiCastle, color: '#F2F2F2' },
+  mine: { title: 'Рудник', icon: 'pickaxe', path: mdiPickaxe, color: '#C3CCC6' },
+  'b-fob': { title: 'ФОБ', icon: 'tent', path: mdiTent, color: '#C3CCC6' },
+  'b-reb': { title: 'РЭБ', icon: 'access-point-off', path: mdiAccessPointOff, color: '#C3CCC6' },
+  'b-recon': { title: 'Пункт разведки', icon: 'binoculars', path: mdiBinoculars, color: '#C3CCC6' },
+  'b-air': { title: 'ВВП', icon: 'airplane', path: mdiAirplane, color: '#C3CCC6' },
+  'b-depot': { title: 'Склад', icon: 'warehouse', path: mdiWarehouse, color: '#C3CCC6' },
+  strike: { title: 'Авиаудар', icon: 'bomb', path: mdiBomb, color: '#FF4D4D' },
+  scan: { title: 'Разведка', icon: 'radar', path: mdiRadar, color: '#5CC8FF' },
   'order-move': { title: 'Двигаться сюда', icon: 'run-fast', path: mdiRunFast, color: '#B4E34A' },
   'order-attack': { title: 'Атаковать', icon: 'sword-cross', path: mdiSwordCross, color: '#FF4D4D' },
   'order-defend': { title: 'Оборонять', icon: 'shield-half-full', path: mdiShieldHalfFull, color: '#3D9BFF' },

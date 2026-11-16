@@ -192,6 +192,7 @@ export function subscribeGameSides(gameId: string, on: (s: GameSide[]) => void, 
           name: d.data().name ?? 'Сторона',
           color: d.data().color ?? SIDE_COLORS[0],
           tickets: typeof d.data().tickets === 'number' ? d.data().tickets : 0,
+          res: typeof d.data().res === 'number' ? d.data().res : null,
         }))
       ),
     onError
@@ -199,11 +200,12 @@ export function subscribeGameSides(gameId: string, on: (s: GameSide[]) => void, 
 }
 
 export async function setGameSide(gameId: string, s: GameSide): Promise<void> {
-  await setDoc(doc(firestore(), 'games', gameId, 'sides', s.id), {
-    name: s.name.slice(0, 40),
-    color: s.color,
-    tickets: s.tickets ?? 0,
-  });
+  // Merged: SQUAD mode keeps the side's bank (`res`) in the same doc.
+  await setDoc(
+    doc(firestore(), 'games', gameId, 'sides', s.id),
+    { name: s.name.slice(0, 40), color: s.color, tickets: s.tickets ?? 0 },
+    { merge: true }
+  );
 }
 
 /** Techs: the sides (with commanders and claim codes) playing in the game. */
@@ -237,6 +239,7 @@ export function subscribePlayers(gameId: string, on: (p: GamePlayer[]) => void, 
             deaths: typeof v.deaths === 'number' ? v.deaths : 0,
             cell: typeof v.cell === 'string' ? v.cell : null,
             cellAt: typeof v.cellAt === 'number' ? v.cellAt : null,
+            carry: typeof v.carry === 'number' ? v.carry : 0,
           };
         })
       ),
@@ -255,6 +258,16 @@ export async function registerPlayer(
   if (cur.exists() && cur.data().sideId === p.sideId && (cur.data().teamId ?? null) === p.teamId) return;
   if (cur.exists()) await deleteDoc(ref);
   await setDoc(ref, { ...p, callsign: p.callsign.slice(0, 24), pts: {}, deaths: 0 });
+}
+
+/** SQUAD referee: a side's bank. */
+export async function setSideRes(gameId: string, sideId: string, res: number): Promise<void> {
+  await updateDoc(doc(firestore(), 'games', gameId, 'sides', sideId), { res: Math.max(0, Math.round(res)) });
+}
+
+/** SQUAD referee: what a fighter carries. */
+export async function setCarry(gameId: string, uid: string, carry: number): Promise<void> {
+  await updateDoc(doc(firestore(), 'games', gameId, 'players', uid), { carry: Math.max(0, Math.round(carry)) });
 }
 
 export async function addDeath(gameId: string, uid: string): Promise<void> {

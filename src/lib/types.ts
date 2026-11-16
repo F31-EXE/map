@@ -84,7 +84,14 @@ export type GameTech = {
 };
 
 /** A side as the game sees it (score board), with its commander for techs. */
-export type GameSide = { id: string; name: string; color: string; tickets?: number };
+export type GameSide = {
+  id: string;
+  name: string;
+  color: string;
+  tickets?: number;
+  /** SQUAD mode: resources in the side's HQ (null before the first match). */
+  res?: number | null;
+};
 
 export type GamePlayer = {
   uid: string;
@@ -95,6 +102,8 @@ export type GamePlayer = {
   deaths: number;
   cell: string | null;
   cellAt: number | null;
+  /** SQUAD mode: resources in the fighter's pack. */
+  carry?: number;
 };
 
 export type Member = {
@@ -161,6 +170,16 @@ export type MarkerKind =
   | 'flag'
   | 'sector'
   | 'ball'
+  // SQUAD mode: HQs and mines (techs), buildings (side commanders), strikes and scans.
+  | 'hq'
+  | 'mine'
+  | 'b-fob'
+  | 'b-reb'
+  | 'b-recon'
+  | 'b-air'
+  | 'b-depot'
+  | 'strike'
+  | 'scan'
   | AdminKind
   | OrderKind;
 
@@ -211,6 +230,13 @@ export type TacMarker = {
   /** Territory sector: the last match minute the referee changed it in. */
   min?: number | null;
   log?: { s: string; t: number }[];
+  /** SQUAD building: cost, resources in it, built, sides that found it, ability cooldown. */
+  bld?: { cost: number; paid: number; built: boolean; seen: string[]; ready?: number | null } | null;
+  /** SQUAD mine: a side holding the majority there since `t`; captures blocked until `block`. */
+  mcap?: { s: string; t: number } | null;
+  block?: number | null;
+  /** SQUAD strike / scan order: when it lands, and the referee's outcome. */
+  hit?: { at: number; ok?: boolean; done?: boolean; void?: boolean; found?: LatLng[] } | null;
   /** Football ball (`owner` = its side, `points` = its arrow): how far it has rolled. */
   ball?: Ball | null;
   /** Placed by a game tech for the whole game (not a squad marker). */

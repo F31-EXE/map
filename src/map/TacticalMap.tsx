@@ -271,6 +271,17 @@ export function TacticalMap(props: Props) {
         movable: Boolean(isMovable?.(m)),
         wave: m.wave ?? null,
         zone: m.zone ?? null,
+        // SQUAD: a strike's blast, a scan's reach, a working REB's cover, a mine's capture zone.
+        ring:
+          m.kind === 'strike'
+            ? { r: 50, color: '#FF4D4D', dash: true }
+            : m.kind === 'scan'
+              ? { r: 150, color: '#5CC8FF', dash: true }
+              : m.kind === 'b-reb' && m.bld?.built
+                ? { r: 200, color: m.color ?? '#C3CCC6', dash: true }
+                : m.kind === 'mine'
+                  ? { r: 20, color: m.color ?? '#C3CCC6', dash: false }
+                  : null,
         ball:
           m.kind === 'ball'
             ? {

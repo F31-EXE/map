@@ -852,4 +852,46 @@ describe('big games: techs, sides, players, game markers', () => {
     // Claimed once: nobody else can take it.
     await assertFails(updateDoc(doc(as('carol'), 'sides', 'side2'), { ownerId: 'carol', claim: null, claimedWith: 'CLAIM7' }));
   });
+  test('SQUAD: squad commanders open empty building sites for their side; strikes come from the command post', async () => {
+    await attachSide();
+    await register('alice', TEAM);
+    await register('bob', TEAM);
+    await register('sam', null);
+    const site = (by: string, extra: Record<string, unknown> = {}) =>
+      setDoc(doc(collection(as(by), 'games', GAME, 'markers')), {
+        kind: 'b-fob',
+        label: 'ФОБ',
+        lat: 55,
+        lng: 37,
+        owner: SIDE,
+        bld: { cost: 300, paid: 0, built: false, seen: [] },
+        createdBy: by,
+        createdByName: by,
+        ...extra,
+      });
+    // The squad leader and the side commander may; a plain fighter may not.
+    await assertSucceeds(site('alice'));
+    await assertSucceeds(site('sam'));
+    await assertFails(site('bob'));
+    // No ready-made buildings, no sites for another side.
+    await assertFails(site('alice', { bld: { cost: 300, paid: 300, built: true, seen: [] } }));
+    await assertFails(site('alice', { owner: 'other' }));
+    // Strikes: the command post only.
+    const hit = (by: string) =>
+      setDoc(doc(collection(as(by), 'games', GAME, 'markers')), {
+        kind: 'strike',
+        label: 'x',
+        lat: 55,
+        lng: 37,
+        owner: SIDE,
+        hit: { at: 30_000 },
+        createdBy: by,
+        createdByName: by,
+      });
+    await assertSucceeds(hit('sam'));
+    await assertFails(hit('alice'));
+    // The referee (a tech) keeps the packs; fighters can't fill their own.
+    await assertSucceeds(updateDoc(doc(as('tom'), 'games', GAME, 'players', 'bob'), { carry: 50 }));
+    await assertFails(updateDoc(doc(as('bob'), 'games', GAME, 'players', 'bob'), { carry: 90 }));
+  });
 });

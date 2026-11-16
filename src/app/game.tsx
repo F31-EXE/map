@@ -317,7 +317,7 @@ function TechView({ busy, run }: { busy: boolean; run: Run }) {
     };
     // One mode per match: the winner is counted by the mode that is on the map, so the
     // previous mode's objects go away first.
-    const others = MODES.filter((m) => m.k !== k && count(m.k) > 0);
+    const others = MODES.filter((m) => family(m.k) !== family(k) && count(m.k) > 0);
     if (!others.length) return go();
     const names = others.map((m) => `«${m.title}»`).join(', ');
     confirmDestructive(
@@ -698,7 +698,26 @@ const MODES: { k: GamePlace; title: string; desc: string; icon: IconName; color:
     color: '#3D9BFF',
     done: (n) => `конвоев: ${n}`,
   },
+  {
+    k: 'hq',
+    title: 'SQUAD: штабы сторон',
+    desc: 'Экономика и стройка. У каждой стороны штаб с ресурсами (старт 200, +2/мин). Бойцы носят ресурсы, командиры строят ФОБ, РЭБ, разведку, ВВП и склад. Побеждает, у кого больше ресурсов в штабе и постройках. Поставьте штаб каждой стороне.',
+    icon: 'castle',
+    color: '#B4E34A',
+    done: (n) => `штабов: ${n}`,
+  },
+  {
+    k: 'mine',
+    title: 'SQUAD: рудники',
+    desc: 'Нейтральные точки: держите 90 с большинством в 20 м — рудник ваш и даёт +10 ресурсов в минуту. После авиаудара 3 мин не захватить.',
+    icon: 'pickaxe',
+    color: '#C3CCC6',
+    done: (n) => `рудников: ${n}`,
+  },
 ];
+
+/** Modes that go together (SQUAD's HQs and mines). */
+const family = (k: GamePlace) => (k === 'hq' || k === 'mine' ? 'squad' : k);
 
 function SideRow({
   s,

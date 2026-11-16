@@ -58,6 +58,7 @@ export function GameScore({ compact }: { compact?: boolean }) {
       )}
       {shown.map((s) => {
         const parts = [
+          sc.squad ? `ресурсы ${Math.floor(sc.squad[s.id] ?? 0)}` : null,
           sc.tickets ? `тикеты ${Math.max(0, sc.tickets[s.id] ?? 0)}` : null,
           hasSectors ? `территории ${sc.sectors[s.id] ?? 0}/9` : null,
           hasFlags ? `флаги ${sc.flags[s.id] ?? 0} · ${sc.flagMinutes[s.id] ?? 0} мин` : null,

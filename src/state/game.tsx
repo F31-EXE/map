@@ -30,6 +30,22 @@ import {
   zonePoints,
 } from '../lib/gameModes';
 import { hotState, type HotZone } from '../lib/hotzone';
+import {
+  abilityReady,
+  BUILDINGS,
+  carryLimit,
+  isBuilding,
+  minuteIncome,
+  placeError,
+  squadScore,
+  squadWinners,
+  START_RES,
+  STRIKE_RADIUS,
+  STRIKE_WARN_MS,
+  type BuildingKind,
+} from '../lib/squadMode';
+import { distanceMeters } from '../lib/geo';
+import { sitesOf, useSquadReferee } from './squadReferee';
 import type { Invite } from '../lib/invite';
 import { DEFAULT_ROLE } from '../lib/roles';
 import { KEYS, loadJson, saveJson } from '../lib/storage';
@@ -75,7 +91,31 @@ export type GameScores = {
   checkpointsTotal: Record<string, number>;
   /** The side whose convoy reached the enemy base first. */
   goal: string | null;
+  /** SQUAD mode: resources per side (bank + standing buildings), null without HQs. */
+  squad: Record<string, number> | null;
   winners: string[];
+};
+
+/** SQUAD mode as one player sees it. */
+export type SquadView = {
+  on: boolean;
+  /** My side's bank and income a minute. */
+  bank: number | null;
+  income: number;
+  /** What I carry and can carry. */
+  carry: number;
+  limit: number;
+  /** Squad commanders and the command post open building sites. */
+  canBuild: boolean;
+  /** The command post (side commander and HQ signallers) orders strikes and scans. */
+  isStaff: boolean;
+  /** Abilities: null without the building, else when it's ready (≤ now = ready). */
+  airReady: number | null;
+  reconReady: number | null;
+  /** HQ positions (buildings stay 200 m away from them). */
+  hqs: { owner: string; lat: number; lng: number }[];
+  /** Strikes on their way, for the warning (anyone within the radius). */
+  incoming: { id: string; lat: number; lng: number; at: number }[];
 };
 
 export type RosterSquad = { id: string; name: string; color: string; members: Member[] };
@@ -137,13 +177,21 @@ type GameState = {
   requestPlace: (k: GamePlace | null) => void;
   /** Removes every object of one mode from the map. */
   removeMode: (k: GamePlace) => Promise<void>;
+  squad: SquadView;
+  /** Techs: a side's HQ / a neutral mine (SQUAD). */
+  addHq: (at: LatLng, sideId: string) => Promise<void>;
+  addMine: (at: LatLng) => Promise<void>;
+  /** A squad commander or the command post opens a building site at `at`. */
+  placeBuilding: (kind: BuildingKind, at: LatLng) => Promise<void>;
+  /** The command post orders an air strike (lands in 30 s) or a recon scan at `at`. */
+  orderHit: (kind: 'strike' | 'scan', at: LatLng) => Promise<void>;
   /** Techs: publish my position (shown to everyone as an orange diamond). */
   reportPosition: (p: SelfPosition) => void;
   /** Any scanned or opened invite: game ones here, squad and side ones via the side. */
   acceptInvite: (invite: Invite) => Promise<string>;
 };
 
-export type GamePlace = 'sector' | 'flag' | 'hotzone' | 'ball';
+export type GamePlace = 'sector' | 'flag' | 'hotzone' | 'ball' | 'hq' | 'mine' | BuildingKind | 'strike' | 'scan';
 
 const Ctx = createContext<GameState | null>(null);
 
@@ -474,18 +522,34 @@ export function GameProvider({ children }: { children: ReactNode }) {
   }, [isTech, referee, uid, game?.match, gameId]);
   // Football referee: rolls each ball by who's around it, every few seconds.
   const fighters = useMemo(() => {
-    const out: { sideId: string; lat: number; lng: number; updatedAt?: number | null }[] = [];
+    const out: { uid: string; sideId: string; lat: number; lng: number; updatedAt?: number | null }[] = [];
     if (!isTech) return out;
     for (const sd of sideDocs) {
       for (const t of squads[sd.id] ?? []) {
         for (const m of squadMembers[t.id] ?? []) {
           if (m.lat == null || m.lng == null || m.status === 'dead') continue;
-          out.push({ sideId: sd.id, lat: m.lat, lng: m.lng, updatedAt: m.updatedAt });
+          out.push({ uid: m.id, sideId: sd.id, lat: m.lat, lng: m.lng, updatedAt: m.updatedAt });
         }
       }
     }
     return out;
   }, [isTech, sideDocs, squads, squadMembers]);
+  // SQUAD mode referee (one tech phone): income, packs, building, mines, strikes, scans.
+  const squadFighters = useCallback(() => {
+    const now = Date.now();
+    return fightersRef.current
+      .filter((f) => f.updatedAt != null && now - f.updatedAt < BALL_FRESH_MS)
+      .map((f) => ({ uid: f.uid, sideId: f.sideId, lat: f.lat, lng: f.lng }));
+  }, []);
+  useSquadReferee({
+    active: isTech && referee === uid,
+    gameId,
+    match: game?.match ?? null,
+    markers,
+    sides: gameSides,
+    players,
+    fighters: squadFighters,
+  });
   const fightersRef = useRef(fighters);
   fightersRef.current = fighters;
   const ballsRef = useRef(balls);
@@ -584,7 +648,12 @@ export function GameProvider({ children }: { children: ReactNode }) {
     }
     const convoy = convoyResult(ballList, gameSides.map((s) => s.id));
     const goal = ballList.some((b) => b.goal) ? convoy[0] : null;
+    const squadOn = markers.some((m) => m.kind === 'hq');
+    const sideIds = gameSides.map((x) => x.id);
+    const bank = Object.fromEntries(gameSides.map((x) => [x.id, x.res ?? 0]));
+    const squad = squadOn ? squadScore(sideIds, bank, sitesOf(markers)) : null;
     return {
+      squad,
       tickets: game?.tickets != null ? ticketsLeft(game.tickets, gameSides, players) : null,
       zone: zone ? zonePoints(players, zone.id) : {},
       zoneId: zone?.id ?? null,
@@ -600,7 +669,9 @@ export function GameProvider({ children }: { children: ReactNode }) {
         ? [goal]
         : ms.phase !== 'over'
           ? []
-          : ballList.length
+          : squad
+            ? squadWinners(squad)
+            : ballList.length
             ? convoy
             : sectors.length
               ? terr.winners
@@ -693,12 +764,110 @@ export function GameProvider({ children }: { children: ReactNode }) {
           const at = pointAlong(m.points, progress);
           return { ...m, lat: at.lat, lng: at.lng, color: sideColor(m.owner) };
         }
+        if (isBuilding(m.kind) && m.bld) {
+          // Enemy buildings stay hidden until found; sites are grey until built.
+          if (!isTech && m.owner !== mySideId && !(mySideId && m.bld.seen.includes(mySideId))) return null;
+          const def = BUILDINGS[m.kind];
+          return {
+            ...m,
+            label: m.bld.built ? def.short : `${def.short} ${Math.floor(m.bld.paid)}/${m.bld.cost}`,
+            color: m.bld.built ? sideColor(m.owner) : '#8A948E',
+          };
+        }
+        if (m.kind === 'hq') return { ...m, label: m.label || `Штаб · ${sideName(m.owner)}`, color: sideColor(m.owner) };
+        if (m.kind === 'mine') {
+          const blocked = m.block && Date.now() < m.block;
+          return { ...m, label: blocked ? 'Рудник · разрушен' : m.label || 'Рудник', color: m.owner ? sideColor(m.owner) : undefined };
+        }
+        if (m.kind === 'strike' || m.kind === 'scan') {
+          if (!m.hit || m.hit.void) return null;
+          // Strikes on their way are shown to everyone (safety); scans only to their side.
+          if (m.kind === 'scan' && !isTech && m.owner !== mySideId) return null;
+          if (m.kind === 'strike' && m.hit.done) return null;
+          return { ...m, label: m.kind === 'strike' ? 'АВИАУДАР' : 'Разведка' };
+        }
         return m.kind === 'flag' || m.kind === 'sector' ? { ...m, color: m.owner ? sideColor(m.owner) : undefined } : m;
-      }),
+      })
+        .filter((m): m is TacMarker => m != null)
+        // Fighters a recon scan found, for 2 minutes, as enemy marks.
+        .concat(
+          markers
+            .filter((m) => m.kind === 'scan' && m.hit?.done && (isTech || m.owner === mySideId) && Date.now() - m.hit.at < 120_000)
+            .flatMap((m) =>
+              (m.hit?.found ?? []).map((p, i) => ({
+                ...m,
+                id: `${m.id}/f${i}`,
+                kind: 'enemy' as const,
+                label: 'разведка',
+                lat: p.lat,
+                lng: p.lng,
+              }))
+            )
+        ),
     // ballClock re-runs this every 3 s while a convoy moves.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [markers, sideColor, ballClock, matchRunning]
+    [markers, sideColor, sideName, ballClock, matchRunning, isTech, mySideId]
   );
+
+  // SQUAD mode as this player sees it.
+  const squadOn = markers.some((m) => m.kind === 'hq');
+  const [squadClock, setSquadClock] = useState(0);
+  useEffect(() => {
+    if (!squadOn) return;
+    const t = setInterval(() => setSquadClock(Date.now()), 5000);
+    return () => clearInterval(t);
+  }, [squadOn]);
+  const squad = useMemo<SquadView>(() => {
+    const now = Date.now();
+    const sites = sitesOf(markers);
+    const mine = mySideId ? gameSides.find((x) => x.id === mySideId) : null;
+    const ready = (kind: 'b-recon' | 'b-air') => {
+      const own = sites.filter((x) => x.owner === mySideId && x.kind === kind && x.bld.built);
+      if (!own.length) return null;
+      return abilityReady(mySideId!, kind, sites, now) ? now : Math.min(...own.map((x) => x.bld.ready ?? 0));
+    };
+    return {
+      on: squadOn,
+      bank: mine?.res ?? null,
+      income: mySideId ? (minuteIncome([mySideId], markers.filter((m) => m.kind === 'mine'))[mySideId] ?? 0) : 0,
+      carry: players.find((x) => x.uid === uid)?.carry ?? 0,
+      limit: mySideId ? carryLimit(mySideId, sites) : 0,
+      canBuild: Boolean(mySideId && (session.canCommand || (side.isSideCommander && side.side?.id === mySideId))),
+      isStaff: Boolean(mySideId && side.isSideCommander && side.side?.id === mySideId),
+      airReady: mySideId ? ready('b-air') : null,
+      reconReady: mySideId ? ready('b-recon') : null,
+      hqs: markers.filter((m) => m.kind === 'hq' && m.owner).map((m) => ({ owner: m.owner!, lat: m.lat, lng: m.lng })),
+      incoming: markers
+        .filter((m) => m.kind === 'strike' && m.hit && !m.hit.done && !m.hit.void && m.hit.at > now - 5000)
+        .map((m) => ({ id: m.id, lat: m.lat, lng: m.lng, at: m.hit!.at })),
+    };
+    // squadClock refreshes cooldowns and strike timers.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [squadOn, markers, mySideId, gameSides, players, uid, session.canCommand, side.isSideCommander, side.side?.id, squadClock]);
+
+  // A strike coming down within its radius of me: buzz (the map shows the banner).
+  const warned = useRef(new Set<string>());
+  useEffect(() => {
+    const me = getLastFix();
+    if (!me) return;
+    for (const h of squad.incoming) {
+      if (warned.current.has(h.id) || distanceMeters(me, h) > STRIKE_RADIUS + 20) continue;
+      warned.current.add(h.id);
+      Vibration.vibrate([0, 800, 300, 800, 300, 800]);
+    }
+  }, [squad.incoming, getLastFix]);
+
+  // An enemy building found by my side: a buzz so whoever is near looks at the map.
+  const seenBuildings = useRef<Set<string> | null>(null);
+  useEffect(() => {
+    if (!mySideId) return;
+    const now = new Set(
+      markers.filter((m) => isBuilding(m.kind) && m.owner !== mySideId && m.bld?.seen.includes(mySideId)).map((m) => m.id)
+    );
+    const before = seenBuildings.current;
+    seenBuildings.current = now;
+    if (before && [...now].some((id) => !before.has(id))) Vibration.vibrate([0, 300, 150, 300]);
+  }, [markers, mySideId]);
 
   const requireUid = useCallback(() => {
     if (!uid) throw new Error('Нет подключения к серверу');
@@ -783,6 +952,19 @@ export function GameProvider({ children }: { children: ReactNode }) {
         await Promise.all(
           balls.map((b) => games.updateGameMarker(g.id, b.id, { ball: { progress: 0, at: start, push: 0, goal: null } }))
         );
+        // SQUAD: banks back to the start, empty packs, no buildings or strikes, neutral mines.
+        if (markers.some((m) => m.kind === 'hq')) {
+          await Promise.all([
+            ...gameSides.map((x) => games.setSideRes(g.id, x.id, START_RES)),
+            ...players.filter((x) => (x.carry ?? 0) > 0).map((x) => games.setCarry(g.id, x.uid, 0)),
+            ...markers
+              .filter((m) => isBuilding(m.kind) || m.kind === 'strike' || m.kind === 'scan')
+              .map((m) => games.deleteGameMarker(g.id, m.id)),
+            ...markers
+              .filter((m) => m.kind === 'mine')
+              .map((m) => games.updateGameMarker(g.id, m.id, { owner: null, mcap: null, block: null, log: [] })),
+          ]);
+        }
         await games.setMatch(g.id, { start, minutes: Math.round(minutes) });
       },
       stopMatch: async () => {
@@ -897,13 +1079,83 @@ export function GameProvider({ children }: { children: ReactNode }) {
       requestPlace,
       removeMode: async (k) => {
         const g = requireGame();
-        const of = markers.filter((m) => (k === 'hotzone' ? Boolean(m.zone) : m.kind === k));
+        const of = markers.filter((m) =>
+          k === 'hotzone'
+            ? Boolean(m.zone)
+            : k === 'hq'
+              ? // The SQUAD mode goes with its HQs: buildings and strikes too.
+                m.kind === 'hq' || isBuilding(m.kind) || m.kind === 'strike' || m.kind === 'scan'
+              : m.kind === k
+        );
         await Promise.all(of.map((m) => games.deleteGameMarker(g.id, m.id)));
       },
       captureFlag: async (m) => {
         if (!mySideId) throw new Error('Вы не в игре');
         if (m.owner === mySideId) return;
         await games.setHolder(requireGame().id, m, mySideId, Date.now());
+      },
+      squad,
+      addHq: async (at, sideId) => {
+        const g = requireGame();
+        // One HQ per side: a new one replaces the old.
+        await Promise.all(markers.filter((m) => m.kind === 'hq' && m.owner === sideId).map((m) => games.deleteGameMarker(g.id, m.id)));
+        await games.addGameMarker(g.id, {
+          kind: 'hq',
+          label: `Штаб · ${sideName(sideId)}`,
+          lat: at.lat,
+          lng: at.lng,
+          owner: sideId,
+          createdBy: requireUid(),
+          createdByName: callsign || 'Игротех',
+        });
+        if (gameSides.find((x) => x.id === sideId)?.res == null) await games.setSideRes(g.id, sideId, START_RES).catch(() => {});
+      },
+      addMine: async (at) => {
+        const g = requireGame();
+        const n = markers.filter((m) => m.kind === 'mine').length + 1;
+        await games.addGameMarker(g.id, {
+          kind: 'mine',
+          label: `Рудник ${n}`,
+          lat: at.lat,
+          lng: at.lng,
+          owner: null,
+          log: [],
+          createdBy: requireUid(),
+          createdByName: callsign || 'Игротех',
+        });
+      },
+      placeBuilding: async (kind, at) => {
+        const g = requireGame();
+        if (!mySideId || !squad.canBuild) throw new Error('Стройку открывают командиры отрядов и штаб стороны');
+        const err = placeError(at, squad.hqs);
+        if (err) throw new Error(err);
+        await games.addGameMarker(g.id, {
+          kind,
+          label: BUILDINGS[kind].short,
+          lat: at.lat,
+          lng: at.lng,
+          owner: mySideId,
+          bld: { cost: BUILDINGS[kind].cost, paid: 0, built: false, seen: [] },
+          createdBy: requireUid(),
+          createdByName: callsign || 'Командир',
+        });
+      },
+      orderHit: async (kind, at) => {
+        const g = requireGame();
+        if (!mySideId || !squad.isStaff) throw new Error('Удары и разведку заказывает штаб стороны');
+        const readyAt = kind === 'strike' ? squad.airReady : squad.reconReady;
+        if (readyAt == null) throw new Error(kind === 'strike' ? 'Сначала постройте ВВП' : 'Сначала постройте пункт разведки');
+        if (readyAt > Date.now()) throw new Error(`Будет готово через ${Math.ceil((readyAt - Date.now()) / 60_000)} мин`);
+        await games.addGameMarker(g.id, {
+          kind,
+          label: kind === 'strike' ? 'АВИАУДАР' : 'Разведка',
+          lat: at.lat,
+          lng: at.lng,
+          owner: mySideId,
+          hit: { at: Date.now() + (kind === 'strike' ? STRIKE_WARN_MS : 0) },
+          createdBy: requireUid(),
+          createdByName: callsign || 'Штаб',
+        });
       },
       reportPosition,
       acceptInvite: async (invite) => {
@@ -956,6 +1208,8 @@ export function GameProvider({ children }: { children: ReactNode }) {
       reportPosition,
       placeRequest,
       markers,
+      squad,
+      gameSides,
     ]
   );
 

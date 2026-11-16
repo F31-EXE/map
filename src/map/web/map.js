@@ -1338,9 +1338,29 @@
     if (changedSel && sel && p.fit !== false) fitTracks(sel);
   }
 
+  // Rings around game objects (SQUAD strikes, scans, REBs, mines): rebuilt with the markers.
+  var ringLayer = L.layerGroup().addTo(map);
+  function setRings(list) {
+    ringLayer.clearLayers();
+    list.forEach(function (m) {
+      if (!m.ring) return;
+      L.circle([m.lat, m.lng], {
+        radius: m.ring.r,
+        color: m.ring.color,
+        weight: 2,
+        opacity: 0.9,
+        dashArray: m.ring.dash ? '8 6' : null,
+        fillColor: m.ring.color,
+        fillOpacity: m.kind === 'strike' ? 0.18 : 0.06,
+        interactive: false,
+      }).addTo(ringLayer);
+    });
+  }
+
   function setMarkers(all) {
     setArrows(all.filter(function (m) { return m.points; }));
     setZones(all.filter(function (m) { return m.zone; }));
+    setRings(all);
     var list = all.filter(function (m) { return !m.points; });
     syncKeyed(
       tacMarkers,

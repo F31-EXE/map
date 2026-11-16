@@ -79,6 +79,14 @@ service cloud.firestore {
       return isTech(gameId) || isPlayer(gameId);
     }
     // A tech of the game this side plays in.
+    // SQUAD mode: the side's command post, or a commander of one of its squads in the game.
+    function canBuild(gameId, sideId) {
+      let player = get(/databases/$(database)/documents/games/$(gameId)/players/$(request.auth.uid));
+      return isSideStaff(sideId)
+        || (player.data.sideId == sideId
+          && player.data.get('teamId', null) is string
+          && canCommand(player.data.teamId));
+    }
     function isTechOfSide(sideId) {
       return sideId is string && isTech(get(sidePath(sideId)).data.get('gameId', null));
     }
@@ -322,10 +330,14 @@ service cloud.firestore {
           && (!('deaths' in request.resource.data) || request.resource.data.deaths is int);
         // Own score: points per control zone, deaths for tickets; and the territory
         // sector the fighter stood in during the last match minute (the tech counts them).
-        allow update: if signedIn() && uid == request.auth.uid
+        allow update: if (signedIn() && uid == request.auth.uid
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['callsign', 'pts', 'deaths', 'cell', 'cellAt'])
           && request.resource.data.pts is map && request.resource.data.pts.size() <= 50
-          && request.resource.data.deaths is int;
+          && request.resource.data.deaths is int)
+          // SQUAD mode: the referee (a tech) keeps the resources each fighter carries.
+          || (isTech(gameId)
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['carry'])
+            && request.resource.data.carry is number && request.resource.data.carry >= 0);
         allow delete: if signedIn() && (uid == request.auth.uid || isTech(gameId));
       }
 
@@ -333,7 +345,32 @@ service cloud.firestore {
       // players capture flags. Sectors change hands only by the techs' count.
       match /markers/{markerId} {
         allow read: if inGame(gameId);
-        allow create, delete: if isTech(gameId);
+        allow create: if isTech(gameId)
+          // SQUAD: a squad commander or the side's command post opens a building site for
+          // their side (empty, unbuilt, unseen); the referee does the rest.
+          || (isPlayer(gameId)
+            && request.resource.data.kind in ['b-fob', 'b-reb', 'b-recon', 'b-air', 'b-depot']
+            && request.resource.data.owner == get(/databases/$(database)/documents/games/$(gameId)/players/$(request.auth.uid)).data.sideId
+            && canBuild(gameId, request.resource.data.owner)
+            && request.resource.data.lat is number && request.resource.data.lng is number
+            && request.resource.data.label is string && request.resource.data.label.size() <= 40
+            && request.resource.data.bld.keys().hasOnly(['cost', 'paid', 'built', 'seen', 'ready'])
+            && request.resource.data.bld.cost is number && request.resource.data.bld.cost >= 100
+            && request.resource.data.bld.paid == 0
+            && request.resource.data.bld.built == false
+            && request.resource.data.bld.seen.size() == 0)
+          // SQUAD: the command post orders an air strike or a recon scan for its side.
+          || (request.resource.data.kind in ['strike', 'scan']
+            && isSideStaff(request.resource.data.owner)
+            && get(sidePath(request.resource.data.owner)).data.get('gameId', null) == gameId
+            && request.resource.data.lat is number && request.resource.data.lng is number
+            && request.resource.data.hit.keys().hasOnly(['at'])
+            && request.resource.data.hit.at is number);
+        // Techs remove anything; a side cancels its own empty building site.
+        allow delete: if isTech(gameId)
+          || (resource.data.kind in ['b-fob', 'b-reb', 'b-recon', 'b-air', 'b-depot']
+            && resource.data.bld.paid == 0
+            && canBuild(gameId, resource.data.owner));
         allow update: if isTech(gameId)
           || (isPlayer(gameId)
             && resource.data.kind == 'flag'

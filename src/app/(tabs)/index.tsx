@@ -55,6 +55,8 @@ import { WavePanel } from '../../ui/WavePanel';
 import { GameScore } from '../../ui/GameScore';
 import { HOT, phaseText, selfInZone, useNow, ZonePanel } from '../../ui/ZonePanel';
 import { useGame } from '../../state/game';
+import { SquadPanel, StrikeBanner } from '../../ui/SquadPanel';
+import { BUILDINGS, isBuilding } from '../../lib/squadMode';
 import { Avatar, Button, Glass, GlassButton, Icon, RoleIcon, Sheet, tap, type IconName } from '../../ui/components';
 import { InfoSheet, type Stat } from '../../ui/InfoSheet';
 import { C, eyebrow, F, R } from '../../ui/theme';
@@ -490,7 +492,50 @@ export default function MapScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [placeRequest]);
   const placing = placeRequest && placeRequest !== 'ball' ? placeRequest : null;
-  placingRef.current = placing;
+  // Modes with settings open the marker sheet; SQUAD objects go straight in from the bar.
+  const placingModal = placing === 'hotzone' || placing === 'flag' || placing === 'sector' ? placing : null;
+  placingRef.current = placingModal;
+  const [hqSide, setHqSide] = useState<string | null>(null);
+  const [gameChipH, setGameChipH] = useState(56);
+  const placeDirect = async (at: LatLng) => {
+    if (!placing || placingModal) return;
+    const techKind = placing === 'hq' || placing === 'mine';
+    try {
+      if (placing === 'hq') {
+        const sid = hqSide ?? game.sides[0]?.id;
+        if (!sid) throw new Error('Сначала создайте стороны (шаг 1)');
+        await game.addHq(at, sid);
+      } else if (placing === 'mine') {
+        await game.addMine(at);
+      } else if (placing === 'strike' || placing === 'scan') {
+        const ok = await new Promise<boolean>((resolve) =>
+          Alert.alert(
+            placing === 'strike' ? 'Авиаудар сюда?' : 'Разведка здесь?',
+            placing === 'strike'
+              ? 'Через 30 секунд всё в радиусе 50 м будет уничтожено. Все бойцы в круге получат предупреждение.'
+              : 'Покажет постройки и бойцов противника в радиусе 150 м (кроме прикрытых РЭБ).',
+            [
+              { text: 'Отмена', style: 'cancel', onPress: () => resolve(false) },
+              { text: placing === 'strike' ? 'Ударить' : 'Сканировать', style: 'destructive', onPress: () => resolve(true) },
+            ]
+          )
+        );
+        if (!ok) return;
+        await game.orderHit(placing, at);
+      } else if (isBuilding(placing)) {
+        await game.placeBuilding(placing, at);
+      }
+      if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+      if (techKind && placing === 'hq') {
+        game.requestPlace(null);
+        router.navigate('/game');
+      } else if (!techKind) {
+        game.requestPlace(null);
+      }
+    } catch (e) {
+      Alert.alert('Не получилось', (e as Error).message);
+    }
+  };
 
   const saveMarker = async (
     kind: MarkerKind,
@@ -1113,6 +1158,21 @@ export default function MapScreen() {
         </Glass>
       )}
 
+      {game.squad.on && !drawing && !placing && game.mySideId && (
+        <SquadPanel
+          squad={game.squad}
+          // Under the game's clock and score card.
+          top={(landscape ? insets.top + 60 : pillTop + 64 + (banner || sosShown ? 56 : 0)) + gameChipH + 8}
+          left={12 + insets.left}
+          onPlace={(k) => {
+            setFollow(false);
+            setSelection(null);
+            game.requestPlace(k);
+          }}
+        />
+      )}
+      {game.squad.on && <StrikeBanner squad={game.squad} me={position} top={insets.top + 8} />}
+
       {zoneMarker && !drawing && (
         <ZoneChip
           marker={zoneMarker}
@@ -1135,6 +1195,7 @@ export default function MapScreen() {
       {game.game && !(zoneMarker?.gameId) && !drawing && (
         <Pressable
           onPress={() => router.push('/game')}
+          onLayout={(e) => setGameChipH(Math.round(e.nativeEvent.layout.height))}
           style={[
             styles.zoneChipWrap,
             landscape
@@ -1205,7 +1266,30 @@ export default function MapScreen() {
           style={[styles.placeBar, { bottom: insets.bottom + 12, left: 12 + insets.left, right: 12 + insets.right }]}
         >
           <Text style={styles.placeTitle}>{PLACE_TEXT[placing]}</Text>
-          <Text style={styles.placeSub}>Двигайте карту, чтобы перекрестие встало на место, и нажмите «Сюда».</Text>
+          <Text style={styles.placeSub}>
+            {placing === 'mine'
+              ? 'Ставьте рудники по одному: после каждого «Сюда» можно двигать карту к следующему. «Отмена» — закончить.'
+              : 'Двигайте карту, чтобы перекрестие встало на место, и нажмите «Сюда».'}
+          </Text>
+          {placing === 'hq' && (
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+              {game.sides.map((gs) => {
+                const on = (hqSide ?? game.sides[0]?.id) === gs.id;
+                return (
+                  <Pressable
+                    key={gs.id}
+                    onPress={() => {
+                      tap();
+                      setHqSide(gs.id);
+                    }}
+                    style={[styles.sideChip, { borderColor: gs.color }, on && { backgroundColor: gs.color }]}
+                  >
+                    <Text style={[styles.sideChipText, on && { color: C.accentInk }]}>Штаб: {gs.name}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          )}
           <View style={{ flexDirection: 'row', gap: 10 }}>
             <Button
               title="Отмена"
@@ -1213,15 +1297,17 @@ export default function MapScreen() {
               style={{ flex: 1 }}
               onPress={() => {
                 setGameKind(null);
+                // The techs' setup goes back to the game screen; players stay on the map.
+                const back = Boolean(placingModal) || placing === 'hq' || placing === 'mine';
                 game.requestPlace(null);
-                router.navigate('/game');
+                if (back) router.navigate('/game');
               }}
             />
             <Button
               title="Сюда"
               icon="crosshairs-gps"
               style={{ flex: 1.4 }}
-              onPress={() => center && openAdd(center)}
+              onPress={() => center && (placingModal ? openAdd(center) : placeDirect(center))}
             />
           </View>
         </Glass>
@@ -1900,10 +1986,19 @@ function Reticle() {
 const TICK = 9;
 const GAP = 7;
 
-const PLACE_TEXT: Record<'sector' | 'flag' | 'hotzone', string> = {
+const PLACE_TEXT: Record<Exclude<import('../../state/game').GamePlace, 'ball'>, string> = {
   sector: 'Захват территорий: центр поля 3×3',
   flag: 'Флаг: где он стоит',
   hotzone: 'Зона контроля: центр большого круга',
+  hq: 'Штаб стороны: где лежат её ресурсы',
+  mine: 'Рудник: нейтральная точка',
+  strike: 'Авиаудар: центр круга 50 м',
+  scan: 'Разведка: центр круга 150 м',
+  'b-fob': `Стройка: ${BUILDINGS['b-fob'].title}`,
+  'b-reb': `Стройка: ${BUILDINGS['b-reb'].title}`,
+  'b-recon': `Стройка: ${BUILDINGS['b-recon'].title}`,
+  'b-air': `Стройка: ${BUILDINGS['b-air'].title}`,
+  'b-depot': `Стройка: ${BUILDINGS['b-depot'].title}`,
 };
 
 const styles = StyleSheet.create({
@@ -1929,6 +2024,8 @@ const styles = StyleSheet.create({
   toolbarRow: { flexDirection: 'row', width: 'auto', paddingVertical: 0, paddingHorizontal: 4, height: 46 },
   toolbarSepRow: { width: StyleSheet.hairlineWidth, height: 24 },
 
+  sideChip: { paddingHorizontal: 12, height: 32, borderRadius: R.pill, borderWidth: 1.5, justifyContent: 'center' },
+  sideChipText: { color: C.text, fontSize: 13, fontFamily: F.semibold },
   banner: {
     position: 'absolute',
     left: 12,
