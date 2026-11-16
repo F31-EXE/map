@@ -54,7 +54,7 @@ export type Side = {
   gameId?: string | null;
   /** Made by a game tech: the code a commander uses to take it over. */
   claim?: string | null;
-  /** HQ signallers the commander named: { uid: callsign }; they get the commander's rights. */
+  /** Deputies the commander named: { uid: callsign }; they get the commander's rights. */
   deputies?: Record<string, string>;
 };
 

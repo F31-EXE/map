@@ -122,8 +122,8 @@ export default function SideScreen() {
       {side.isDeputy && (
         <Card style={{ gap: 6 }}>
           <View style={styles.inline}>
-            <Icon name="radio-tower" size={22} color={C.accent} />
-            <Text style={styles.cardTitle}>Вы связист штаба</Text>
+            <Icon name="account-star" size={22} color={C.accent} />
+            <Text style={styles.cardTitle}>Вы заместитель командира стороны</Text>
           </View>
           <Text style={styles.text}>
             Командир стороны дал вам свои права: вся карта стороны, приказы отрядам, брифинги, в большой игре — постройки
@@ -208,7 +208,7 @@ export default function SideScreen() {
 }
 
 /**
- * HQ signallers: the commander names fighters of the side's squads (signallers first);
+ * Deputies of the side commander: the commander names fighters of the side's squads;
  * they get the commander's rights and keep the side running while the commander is busy.
  */
 function DeputiesCard({ run }: { run: (fn: () => Promise<unknown>) => Promise<void> }) {
@@ -218,23 +218,23 @@ function DeputiesCard({ run }: { run: (fn: () => Promise<unknown>) => Promise<vo
   const candidates = side.squads
     .flatMap((sq) => sq.members.map((m) => ({ m, sq })))
     .filter(({ m }) => !side.side?.deputies?.[m.id] && m.id !== side.side?.ownerId)
-    .sort((a, b) => Number(b.m.role === 'radio') - Number(a.m.role === 'radio') || a.m.callsign.localeCompare(b.m.callsign));
+    .sort((a, b) => a.sq.name.localeCompare(b.sq.name) || a.m.callsign.localeCompare(b.m.callsign));
   return (
     <Card style={{ gap: 10 }}>
-      <Eyebrow>Связисты штаба · {deputies.length}</Eyebrow>
+      <Eyebrow>Заместители КС · {deputies.length}</Eyebrow>
       <Text style={styles.sub}>
         Получают ваши права: ведут сторону, пока вы на связи с оргами или отошли. Видят всю карту, отдают приказы.
       </Text>
       {deputies.map(([id, name]) => (
         <View key={id} style={styles.squadRow}>
-          <Icon name="radio-tower" size={20} color={C.accent} />
+          <Icon name="account-star" size={20} color={C.accent} />
           <Text style={[styles.cardTitle, { flex: 1 }]} numberOfLines={1}>
             {name}
           </Text>
           <Pressable
             hitSlop={8}
             onPress={() =>
-              confirmDestructive(`Снять ${name} со связи штаба?`, 'Права командира стороны у него пропадут.', 'Снять', () =>
+              confirmDestructive(`Снять заместителя ${name}?`, 'Права командира стороны у него пропадут.', 'Снять', () =>
                 run(() => side.setDeputy(id, null))
               )
             }
@@ -254,14 +254,13 @@ function DeputiesCard({ run }: { run: (fn: () => Promise<unknown>) => Promise<vo
               onPress={() => {
                 tap();
                 setPicking(false);
-                run(() => side.setDeputy(m.id, m.callsign || 'Связист'));
+                run(() => side.setDeputy(m.id, m.callsign || 'Заместитель'));
               }}
               style={({ pressed }) => [styles.squadRow, pressed && { opacity: 0.6 }]}
             >
-              <Icon name={m.role === 'radio' ? 'radio-tower' : 'account'} size={20} color={m.role === 'radio' ? C.accent : C.dim} />
+              <Icon name="account" size={20} color={C.dim} />
               <Text style={[styles.text, { flex: 1 }]} numberOfLines={1}>
                 {m.callsign} · {sq.name}
-                {m.role === 'radio' ? ' · связист' : ''}
               </Text>
               <Icon name="plus" size={20} color={C.accent} />
             </Pressable>
@@ -269,7 +268,7 @@ function DeputiesCard({ run }: { run: (fn: () => Promise<unknown>) => Promise<vo
         )
       ) : null}
       <Button
-        title={picking ? 'Отмена' : 'Назначить связиста штаба'}
+        title={picking ? 'Отмена' : 'Назначить заместителя'}
         icon={picking ? 'close' : 'account-plus-outline'}
         kind="secondary"
         onPress={() => setPicking((v) => !v)}

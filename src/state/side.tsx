@@ -34,9 +34,9 @@ type SideState = {
   side: Side | null;
   /** The side's commander, or one of the deputies they named: the commander's rights. */
   isSideCommander: boolean;
-  /** HQ signaller named by the side commander (not the commander themselves). */
+  /** Deputy named by the side commander (not the commander themselves). */
   isDeputy: boolean;
-  /** Names / removes an HQ signaller (commander only). */
+  /** Names / removes a deputy (commander only). */
   setDeputy: (uid: string, callsign: string | null) => Promise<void>;
   squads: Squad[];
   /** Side map filter: every fighter, or squad commanders only. */
@@ -162,7 +162,7 @@ export function SideProvider({ children }: { children: ReactNode }) {
 
   const setDeputy = useCallback(
     async (who: string, name: string | null) => {
-      if (!side || side.ownerId !== uid) throw new Error('Назначать связистов штаба может только командир стороны');
+      if (!side || side.ownerId !== uid) throw new Error('Назначать заместителей может только командир стороны');
       await sides.setDeputy(side.id, who, name);
     },
     [side, uid]
