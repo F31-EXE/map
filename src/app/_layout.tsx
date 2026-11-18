@@ -6,6 +6,7 @@ import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
 import { Pressable, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 // Registers the background location task at startup.
 import '../services/backgroundLocation';
@@ -33,6 +34,9 @@ SplashScreen.preventAutoHideAsync().catch(() => {});
 SplashScreen.setOptions({ fade: true, duration: 300 });
 
 export default function RootLayout() {
+  // Android draws edge to edge: in landscape the system navigation bar sits over a side
+  // of the window, so stack screens keep their content clear of it.
+  const insets = useSafeAreaInsets();
   const [fontsLoaded, fontError] = useFonts({
     Exo2_500Medium,
     Exo2_600SemiBold,
@@ -63,10 +67,13 @@ export default function RootLayout() {
                   headerTintColor: C.text,
                   headerTitleStyle: { fontFamily: F.mono, fontSize: 15 },
                   headerBackButtonDisplayMode: 'minimal',
-                  contentStyle: { backgroundColor: C.bg },
+                  contentStyle: { backgroundColor: C.bg, paddingLeft: insets.left, paddingRight: insets.right },
                 }}
               >
-                <Stack.Screen name="(tabs)" options={{ headerShown: false, title: 'Карта' }} />
+                <Stack.Screen
+                  name="(tabs)"
+                  options={{ headerShown: false, title: 'Карта', contentStyle: { backgroundColor: C.bg } }}
+                />
                 <Stack.Screen name="maps" options={{ title: 'Карты полигона' }} />
                 <Stack.Screen name="regions" options={{ title: 'Схемы регионов' }} />
                 <Stack.Screen name="side" options={{ title: 'Командование стороной' }} />

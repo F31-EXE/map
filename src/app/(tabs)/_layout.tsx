@@ -1,5 +1,6 @@
 import { Tabs } from 'expo-router/js-tabs';
 import { useWindowDimensions } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useChat } from '../../state/chat';
 import { useSession } from '../../state/session';
@@ -8,6 +9,10 @@ import { C, F } from '../../ui/theme';
 
 export default function TabsLayout() {
   const { width, height } = useWindowDimensions();
+  // Edge to edge: in landscape the Android navigation bar covers the right edge (the
+  // tab bar takes care of the left one). The map screen places its own panels.
+  const insets = useSafeAreaInsets();
+  const side = { paddingRight: insets.right };
   const landscape = width > height;
   const chat = useChat();
   const session = useSession();
@@ -35,9 +40,9 @@ export default function TabsLayout() {
       }}
     >
       <Tabs.Screen name="index" options={{ headerShown: false, title: 'Карта' }} />
-      <Tabs.Screen name="chat" options={{ title: 'Чат отряда' }} />
-      <Tabs.Screen name="team" options={{ title: 'Отряд' }} />
-      <Tabs.Screen name="settings" options={{ title: 'Настройки' }} />
+      <Tabs.Screen name="chat" options={{ title: 'Чат отряда', sceneStyle: { backgroundColor: C.bg, ...side } }} />
+      <Tabs.Screen name="team" options={{ title: 'Отряд', sceneStyle: { backgroundColor: C.bg, ...side } }} />
+      <Tabs.Screen name="settings" options={{ title: 'Настройки', sceneStyle: { backgroundColor: C.bg, ...side } }} />
     </Tabs>
   );
 }
