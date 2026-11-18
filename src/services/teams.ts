@@ -215,6 +215,7 @@ export async function publishPosition(teamId: string, uid: string, p: SelfPositi
     lng: p.lng,
     accuracy: p.accuracy,
     heading: p.heading,
+    gpsSrc: p.source ?? 'phone',
     // Rides along with positions: no extra writes.
     ...(power ? { battery: power.battery, charging: power.charging, radioBattery: power.radioBattery } : {}),
     updatedAt: serverTimestamp(),
@@ -293,6 +294,8 @@ export function subscribeMembers(
             battery: typeof v.battery === 'number' ? v.battery : null,
             charging: v.charging === true,
             radioBattery: typeof v.radioBattery === 'number' ? v.radioBattery : null,
+            gpsSrc: v.gpsSrc === 'radio' || v.gpsSrc === 'phone' ? v.gpsSrc : null,
+            accuracy: typeof v.accuracy === 'number' ? v.accuracy : null,
             briefRead: typeof v.briefRead === 'number' ? v.briefRead : null,
           };
         })

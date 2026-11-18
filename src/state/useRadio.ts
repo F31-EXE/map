@@ -4,7 +4,16 @@ import {
   decodePosition,
   decodeTelemetryBattery,
   decodeUser,
+  FAST_GPS_SECS,
   hasSquadChannel,
+  LOC_MANUAL,
+  patchVarints,
+  POS_FLAG_DOP,
+  POS_FLAG_SATS,
+  radioAccuracy,
+  radioGpsFast,
+  radioHasGps,
+  setPositionConfig,
   packetId,
   payloadForMtu,
   PORT,
@@ -13,7 +22,8 @@ import {
   SQUAD_CHANNEL,
   squadPsk,
 } from '../lib/meshtastic';
-import type { MtChannel, MtNode, MtPacket } from '../lib/meshtastic';
+import type { MtChannel, MtNode, MtPacket, MtPosition, MtPositionConfig } from '../lib/meshtastic';
+import { radioPollMs } from '../lib/gpsSource';
 import { KEYS, loadJson, saveJson } from '../lib/storage';
 import {
   bluetoothReady,
@@ -25,9 +35,29 @@ import {
   type RadioState,
 } from '../services/meshRadio';
 
+import { useGpsMode } from './gpsSource';
+
 /** Lost the radio: try again this often while it's still the chosen one. */
 const RECONNECT_MS = 15_000;
 const MAX_NODES = 100;
+/** The radio's DOP (from its own position broadcasts) is trusted this long. */
+const DOP_MAX_AGE_MS = 15 * 60_000;
+
+/** Our radio's GPS fix; `at` = when this phone saw it change. */
+export type RadioGpsFix = { lat: number; lng: number; at: number; accuracy: number | null; sats: number | null };
+
+export type RadioGps = {
+  /** The radio's position settings (null until the config arrives). */
+  config: MtPositionConfig | null;
+  /** Has a GPS that's on; null = not known yet. */
+  hasGps: boolean | null;
+  /** Updates every few seconds and reports its precision (set up by «Ускорить GPS рации»). */
+  fast: boolean;
+  /** The phone is reading the radio's position now; how often. */
+  pollMs: number | null;
+  /** GrimMap changed this radio's GPS settings and can put them back. */
+  canRestore: boolean;
+};
 
 export type Radio = {
   /** This build can talk to radios (not Expo Go, not the web). */
@@ -53,7 +83,12 @@ export type Radio = {
   /** Largest payload per packet the connected radio's Bluetooth link takes in one write. */
   maxPayload: () => number;
   /** Our own radio's GPS position, if it has GPS (laptops have none of their own). */
-  myPosition: { lat: number; lng: number; at: number } | null;
+  myPosition: RadioGpsFix | null;
+  gps: RadioGps;
+  /** GPS every FAST_GPS_SECS s with DOP and satellites in its reports; the radio reboots. */
+  speedUpGps: () => Promise<void>;
+  /** Puts back the GPS settings the radio had before speedUpGps; the radio reboots. */
+  restoreGps: () => Promise<void>;
   /** Our own radio's battery %, 101 = on external power. */
   myBattery: number | null;
 };
@@ -70,7 +105,32 @@ export function useRadio(teamId: string | null, onPacket: (p: MtPacket) => void)
   const onPacketRef = useRef(onPacket);
   onPacketRef.current = onPacket;
   const myNodeRef = useRef<number | null>(null);
-  const [myPosition, setMyPosition] = useState<{ lat: number; lng: number; at: number } | null>(null);
+  const [myPosition, setMyPosition] = useState<RadioGpsFix | null>(null);
+  const [posConfig, setPosConfig] = useState<MtPositionConfig | null>(null);
+  const [backup, setBackup] = useState<{ device: string; interval: number; flags: number } | null>(null);
+  // Precision from the radio's own position broadcasts (the node list has none).
+  const dop = useRef<{ accuracy: number | null; sats: number | null; at: number } | null>(null);
+  const lastFixKey = useRef<string | null>(null);
+  const polledNodes = useRef(0);
+  const gpsMode = useGpsMode();
+
+  /** A position of our own radio: new fix → `at` now; the same fix again keeps its age. */
+  const ownFix = useCallback((pos: MtPosition) => {
+    if (pos.source === LOC_MANUAL) return;
+    const key = pos.time ? String(pos.time) : `${pos.lat},${pos.lng}`;
+    const d = dop.current && Date.now() - dop.current.at < DOP_MAX_AGE_MS ? dop.current : null;
+    setMyPosition((prev) => {
+      const same = lastFixKey.current === key && prev != null;
+      lastFixKey.current = key;
+      return {
+        lat: pos.lat,
+        lng: pos.lng,
+        at: same ? prev.at : Date.now(),
+        accuracy: d?.accuracy ?? null,
+        sats: d?.sats ?? null,
+      };
+    });
+  }, []);
   const [myBattery, setMyBattery] = useState<number | null>(null);
 
   const updateNode = useCallback((num: number, patch: Partial<MtNode>) => {
@@ -130,10 +190,14 @@ export function useRadio(teamId: string | null, onPacket: (p: MtPacket) => void)
           setMyNode(n);
         },
         onChannels: setChannels,
+        onPositionConfig: setPosConfig,
+        onNodesPolled: (count) => {
+          polledNodes.current = count;
+        },
         onNode: (n) => {
           if (n.num !== myNodeRef.current) updateNode(n.num, n);
           else {
-            if (n.lat != null && n.lng != null) setMyPosition({ lat: n.lat, lng: n.lng, at: Date.now() });
+            if (n.pos) ownFix(n.pos);
             if (n.battery != null) setMyBattery(n.battery);
           }
         },
@@ -152,7 +216,12 @@ export function useRadio(teamId: string | null, onPacket: (p: MtPacket) => void)
             if (p.portnum === PORT.position) {
               try {
                 const pos = decodePosition(p.payload);
-                if (pos) setMyPosition({ ...pos, at: Date.now() });
+                if (pos) {
+                  if (pos.hdop || pos.pdop || pos.sats) {
+                    dop.current = { accuracy: radioAccuracy(pos), sats: pos.sats || null, at: Date.now() };
+                  }
+                  ownFix(pos);
+                }
               } catch {
                 // Not a position after all.
               }
@@ -192,8 +261,37 @@ export function useRadio(teamId: string | null, onPacket: (p: MtPacket) => void)
       link.current = null;
       setState('off');
       setChannels([]);
+      setPosConfig(null);
+      setMyPosition(null);
+      lastFixKey.current = null;
     };
-  }, [device, updateNode]);
+  }, [device, updateNode, ownFix]);
+
+  useEffect(() => {
+    loadJson<{ device: string; interval: number; flags: number } | null>(KEYS.radioGpsBackup, null).then(setBackup);
+  }, []);
+
+  // «Авто» / «Рация»: read the radio's own position from its node list every few seconds.
+  const hasGps = radioHasGps(posConfig);
+  const polling = gpsMode !== 'phone' && state === 'ready' && hasGps !== false;
+  const [pollMs, setPollMs] = useState<number | null>(null);
+  useEffect(() => {
+    if (!polling) {
+      setPollMs(null);
+      return;
+    }
+    let last = 0;
+    const tick = () => {
+      const every = radioPollMs(polledNodes.current);
+      setPollMs(every);
+      if (Date.now() - last < every) return;
+      last = Date.now();
+      link.current?.pollNodes();
+    };
+    tick();
+    const t = setInterval(tick, 1000);
+    return () => clearInterval(t);
+  }, [polling]);
 
   const psk = useMemo(() => (teamId ? squadPsk(teamId) : null), [teamId]);
   const squadReady = state === 'ready' && psk != null && hasSquadChannel(channels, psk);
@@ -255,6 +353,45 @@ export function useRadio(teamId: string | null, onPacket: (p: MtPacket) => void)
     [squadReady]
   );
 
+  const writePositionConfig = useCallback(
+    async (patch: Record<number, number>) => {
+      const l = link.current;
+      if (!l || myNode == null || !posConfig) throw new Error('Рация не подключена');
+      await l.write(setPositionConfig(myNode, patchVarints(posConfig.raw, patch), packetId()));
+    },
+    [myNode, posConfig]
+  );
+
+  const speedUpGps = useCallback(async () => {
+    if (!posConfig || !device) throw new Error('Рация не подключена');
+    if (radioHasGps(posConfig) === false) throw new Error('На рации нет включённого GPS');
+    // Keep what the owner had, once (a second speed-up must not save our own values).
+    if (!backup || backup.device !== device.id) {
+      const b = { device: device.id, interval: posConfig.updateInterval, flags: posConfig.flags };
+      setBackup(b);
+      await saveJson(KEYS.radioGpsBackup, b);
+    }
+    await writePositionConfig({ 5: FAST_GPS_SECS, 7: posConfig.flags | POS_FLAG_DOP | POS_FLAG_SATS });
+  }, [posConfig, device, backup, writePositionConfig]);
+
+  const restoreGps = useCallback(async () => {
+    if (!backup || !device || backup.device !== device.id) throw new Error('Нечего возвращать');
+    await writePositionConfig({ 5: backup.interval, 7: backup.flags });
+    setBackup(null);
+    await saveJson(KEYS.radioGpsBackup, null);
+  }, [backup, device, writePositionConfig]);
+
+  const gps = useMemo<RadioGps>(
+    () => ({
+      config: posConfig,
+      hasGps,
+      fast: radioGpsFast(posConfig),
+      pollMs,
+      canRestore: Boolean(backup && device && backup.device === device.id),
+    }),
+    [posConfig, hasGps, pollMs, backup, device]
+  );
+
   const maxPayload = useCallback(() => link.current?.maxPayload ?? payloadForMtu(null), []);
 
   const nodeList = useMemo(() => [...nodes.values()].sort((a, b) => b.lastHeard - a.lastHeard), [nodes]);
@@ -276,5 +413,8 @@ export function useRadio(teamId: string | null, onPacket: (p: MtPacket) => void)
     maxPayload,
     myPosition,
     myBattery,
+    gps,
+    speedUpGps,
+    restoreGps,
   };
 }

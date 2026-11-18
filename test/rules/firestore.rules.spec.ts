@@ -780,6 +780,10 @@ describe('team game', () => {
     await assertFails(updateDoc(carol, { battery: 150 }));
     await assertFails(updateDoc(carol, { charging: 'yes' }));
     await assertFails(updateDoc(doc(as('carol'), 'teams', TEAM, 'members', 'bob'), { battery: 10 }));
+    // Whose GPS the position came from.
+    await assertSucceeds(updateDoc(carol, { lat: 56.8, lng: 60.6, accuracy: 3, gpsSrc: 'radio' }));
+    await assertSucceeds(updateDoc(carol, { gpsSrc: 'phone' }));
+    await assertFails(updateDoc(carol, { gpsSrc: 'satellite' }));
   });
 });
 

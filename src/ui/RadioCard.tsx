@@ -4,10 +4,12 @@ import { Alert, Platform, Pressable, StyleSheet, Text, View } from 'react-native
 import { timeAgo } from '../lib/geo';
 import { nodeIdText } from '../lib/meshtastic';
 import { pickRadio, type RadioDevice } from '../services/meshRadio';
+import { GPS_MODES, type GpsMode } from '../lib/gpsSource';
+import { setGpsMode, useGpsMode } from '../state/gpsSource';
 import type { Radio } from '../state/useRadio';
 
 import { Button, Card, Eyebrow, Icon, Sheet, tap } from './components';
-import { confirmDestructive } from './confirm';
+import { confirmAction, confirmDestructive } from './confirm';
 import { C, F, R } from './theme';
 
 function statusText(r: Radio, inTeam: boolean, peers: number): { text: string; color: string } {
@@ -67,6 +69,7 @@ export function RadioCard({ radio, inTeam, peers }: { radio: Radio; inTeam: bool
               }
             />
           )}
+          <GpsSourceBlock radio={radio} />
           {radio.nodes.length > 0 && (
             <View style={{ gap: 6 }}>
               <Eyebrow>Рации в эфире · {radio.nodes.length}</Eyebrow>
@@ -117,6 +120,100 @@ export function RadioCard({ radio, inTeam, peers }: { radio: Radio; inTeam: bool
 }
 
 const WEB = Platform.OS === 'web';
+
+/**
+ * «Источник координат»: the phone's GPS, the radio's (often a better antenna), or
+ * whichever is more accurate. The radio's position is read over Bluetooth every few
+ * seconds; nothing extra goes on air. Fast radio GPS needs a settings change (reboot).
+ */
+function GpsSourceBlock({ radio }: { radio: Radio }) {
+  const mode = useGpsMode();
+  const g = radio.gps;
+  const fix = radio.myPosition;
+  const [, setNow] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 5000);
+    return () => clearInterval(t);
+  }, []);
+
+  const pick = (m: GpsMode) => {
+    tap();
+    setGpsMode(m);
+    if (m !== 'phone' && radio.state === 'ready' && g.hasGps && !g.fast) askSpeedUp(radio);
+  };
+
+  let status: string;
+  if (g.hasGps === false) status = 'У этой рации GPS выключен или его нет: координаты берутся с телефона.';
+  else if (!fix) status = mode === 'phone' ? 'GPS рации используется, только если у телефона нет сигнала.' : 'Жду позицию от GPS рации…';
+  else {
+    const age = Date.now() - fix.at;
+    const parts = [
+      `GPS рации: ${fix.accuracy != null ? `±${Math.round(fix.accuracy)} м` : 'точность неизвестна'}`,
+      fix.sats != null ? `спутников ${fix.sats}` : null,
+      age < 60_000 ? 'фикс свежий' : `фикс ${timeAgo(fix.at)}`,
+    ];
+    status = parts.filter(Boolean).join(' · ');
+  }
+
+  return (
+    <View style={{ gap: 8 }}>
+      <Eyebrow>Источник координат</Eyebrow>
+      <View style={styles.row}>
+        {GPS_MODES.map((m) => (
+          <Pressable
+            key={m.id}
+            onPress={() => pick(m.id)}
+            style={[styles.chip, mode === m.id && styles.chipOn]}
+            disabled={m.id !== 'phone' && g.hasGps === false}
+          >
+            <Text style={[styles.chipText, mode === m.id && { color: C.accentInk }, m.id !== 'phone' && g.hasGps === false && { opacity: 0.4 }]}>
+              {m.title}
+            </Text>
+          </Pressable>
+        ))}
+      </View>
+      <Text style={styles.sub}>
+        {mode === 'phone'
+          ? 'GPS телефона.'
+          : mode === 'radio'
+            ? 'GPS рации (выносная антенна ловит лучше в лесу и в кармане); без её сигнала — GPS телефона.'
+            : 'Точнее из двух: GPS телефона или рации.'}{' '}
+        {status}
+      </Text>
+      {mode !== 'phone' && g.hasGps && !g.fast && radio.state === 'ready' && (
+        <Button title="Ускорить GPS рации" icon="crosshairs-gps" kind="secondary" onPress={() => askSpeedUp(radio)} />
+      )}
+      {g.canRestore && (
+        <Button
+          title="Вернуть рации обычный GPS"
+          icon="battery-heart-variant"
+          kind="ghost"
+          onPress={() =>
+            confirmAction(
+              'Вернуть настройки GPS рации?',
+              'Рация будет обновлять позицию как раньше и меньше тратить батарею. Она перезагрузится (около 10 секунд).',
+              'Вернуть',
+              () =>
+                radio.restoreGps().catch((e: Error) => Alert.alert('Не получилось', e.message))
+            )
+          }
+        />
+      )}
+    </View>
+  );
+}
+
+function askSpeedUp(radio: Radio) {
+  const was = radio.gps.config?.updateInterval || 120;
+  confirmAction(
+    'Ускорить GPS рации?',
+    `Сейчас GPS рации обновляет позицию раз в ${was} с. GrimMap поставит раз в 5 с и попросит рацию сообщать точность и число спутников. ` +
+      'В эфир чаще ничего не уходит, но батарея рации будет садиться быстрее. Рация перезагрузится (около 10 секунд). ' +
+      'Вернуть как было можно здесь же.',
+    'Ускорить',
+    () => radio.speedUpGps().catch((e: Error) => Alert.alert('Не получилось', e.message))
+  );
+}
 
 /** Browser: the radio comes from the browser's own chooser, opened by a click. */
 function WebPick({ radio }: { radio: Radio }) {
@@ -259,6 +356,18 @@ const styles = StyleSheet.create({
   deviceRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   device: { color: C.text, fontSize: 15, fontFamily: F.semibold },
   row: { flexDirection: 'row', gap: 10 },
+  chip: {
+    flex: 1,
+    height: 36,
+    borderRadius: R.pill,
+    borderWidth: 1,
+    borderColor: C.line,
+    backgroundColor: C.elevated,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  chipOn: { backgroundColor: C.accent, borderColor: C.accent },
+  chipText: { color: C.text, fontSize: 14, fontFamily: F.semibold },
   node: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   nodeName: { color: C.text, fontSize: 14, fontFamily: F.regular, flex: 1 },
   nodeSub: { color: C.faint, fontSize: 12, fontFamily: F.mono },

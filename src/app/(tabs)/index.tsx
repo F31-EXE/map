@@ -5,6 +5,8 @@ import { Alert, Platform, Pressable, StyleSheet, Text, useWindowDimensions, Vibr
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useSelfPosition } from '../../hooks/useSelfPosition';
+import { gpsSrcText, pickGps, RADIO_ACCURACY_GUESS, type GpsSrc } from '../../lib/gpsSource';
+import { useGpsMode } from '../../state/gpsSource';
 import { bearingDegrees, distanceMeters, formatClock, formatCoords, formatDistance, timeAgo } from '../../lib/geo';
 import { centroid, isArea, ZoneWatcher, type Area, type AreaKind } from '../../lib/geofence';
 import { turnAngle, turnText } from '../../lib/heading';
@@ -256,17 +258,39 @@ export default function MapScreen() {
   );
   const { overlays, focusRequest, requestFocus, viewRequest, requestView, areas, download } = useOverlays();
   const { position: gps, status, heading, compassPoor } = useSelfPosition();
-  // A laptop has no GPS (and no location at all offline): use the connected radio's
-  // GPS when the device's own fix is missing or stale.
+  // The phone's GPS or the radio's (Settings → рация → «Источник координат»): the radio
+  // often has a better antenna, and a laptop has no GPS at all. See src/lib/gpsSource.ts.
   const radioPos = session.mesh.radio.myPosition;
-  const position = useMemo(() => {
-    const now = Date.now();
-    if (gps && now - gps.timestamp < 60_000) return gps;
-    if (radioPos && now - radioPos.at < 10 * 60_000) {
-      return { lat: radioPos.lat, lng: radioPos.lng, accuracy: 15, heading, timestamp: radioPos.at };
+  const radioPollMs = session.mesh.radio.gps.pollMs;
+  const gpsMode = useGpsMode();
+  const gpsSrc = useRef<GpsSrc | null>(null);
+  // Re-check every few seconds: a source going stale must hand over without a new fix.
+  const [gpsTick, setGpsTick] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setGpsTick((n) => n + 1), 5000);
+    return () => clearInterval(t);
+  }, []);
+  const src = useMemo(() => {
+    // Three missed polls make the radio's fix stale.
+    const fresh = Math.max(20_000, (radioPollMs ?? 10_000) * 3);
+    const next = pickGps(gpsMode, gps, radioPos, Date.now(), fresh, gpsSrc.current);
+    gpsSrc.current = next;
+    return next;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gps, radioPos, gpsMode, radioPollMs, gpsTick]);
+  const position = useMemo<SelfPosition | null>(() => {
+    if (src === 'radio' && radioPos) {
+      return {
+        lat: radioPos.lat,
+        lng: radioPos.lng,
+        accuracy: radioPos.accuracy ?? RADIO_ACCURACY_GUESS,
+        heading,
+        timestamp: radioPos.at,
+        source: 'radio',
+      };
     }
-    return gps;
-  }, [gps, radioPos, heading]);
+    return gps ? { ...gps, source: 'phone' } : null;
+  }, [src, gps, radioPos, heading]);
   const mapRef = useRef<TacticalMapHandle>(null);
 
   const [baseLayer, setBaseLayer] = useState<BaseLayerId>('yandex-sat');
@@ -1514,6 +1538,9 @@ export default function MapScreen() {
         </View>
         <View style={[styles.gps, landscape && styles.gpsCompact]}>
           <View style={[styles.gpsDot, { backgroundColor: gpsColor(position?.accuracy) }]} />
+          {position?.source === 'radio' && (
+            <Icon name="radio-handheld" size={12} color={C.dim} />
+          )}
           <Text style={styles.gpsText}>
             {position?.accuracy != null ? `±${Math.round(position.accuracy)}м` : 'GPS'}
           </Text>
@@ -1704,6 +1731,7 @@ export default function MapScreen() {
             selectedMember.canCommand || selectedMember.id === session.team?.ownerId ? 'отдаёт приказы' : null,
             selectedMember.updatedAt ? `на связи ${timeAgo(selectedMember.updatedAt)}` : null,
             powerText(selectedMember),
+            gpsSrcText(selectedMember.gpsSrc, selectedMember.accuracy),
           ]
             .filter(Boolean)
             .join(' · ')

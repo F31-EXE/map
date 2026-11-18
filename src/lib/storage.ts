@@ -33,6 +33,10 @@ export const KEYS = {
   mortarPos: 'tacmap.mortarPos',
   /** Meshtastic radio picked in settings ({ id, name }), reconnected on start. */
   radio: 'tacmap.radio',
+  /** Where my position comes from: 'phone' | 'auto' | 'radio' (src/lib/gpsSource.ts). */
+  gpsSource: 'tacmap.gpsSource',
+  /** The radio's own GPS settings before GrimMap sped them up: {device, interval, flags}. */
+  radioGpsBackup: 'tacmap.radioGpsBackup',
   /** Snail grid origin when not in a squad (in a squad it's on the team doc). */
   gridOrigin: 'tacmap.gridOrigin',
   /** Night mode: red, dimmed screen. */

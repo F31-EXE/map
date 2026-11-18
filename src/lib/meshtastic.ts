@@ -121,6 +121,8 @@ export type MtNode = {
   lastHeard: number;
   /** Battery %, 101 = on external power (DeviceMetrics.battery_level), if reported. */
   battery?: number | null;
+  /** The node's position in full (fix time, source), when it has one. */
+  pos?: MtPosition | null;
 };
 
 export type FromRadio =
@@ -129,17 +131,174 @@ export type FromRadio =
   | { type: 'channel'; channel: MtChannel }
   | { type: 'packet'; packet: MtPacket }
   | { type: 'configComplete'; nonce: number }
+  | { type: 'positionConfig'; config: MtPositionConfig }
   | { type: 'rebooted' }
   | { type: 'other' };
 
-/** Latitude/longitude out of a Position message (integers in 1e-7 degrees). */
-export function decodePosition(b: Uint8Array): { lat: number; lng: number } | null {
+/**
+ * A Position message (mesh.proto): latitude_i 1 / longitude_i 2 (1e-7 degrees), time 4,
+ * location_source 5 (1 manual, 2 internal GPS, 3 external), PDOP 11 / HDOP 12 (1/100),
+ * gps_accuracy 14 (mm, the receiver's constant), sats_in_view 19. DOPs and satellites are
+ * only there when the radio's position flags ask for them.
+ */
+export type MtPosition = {
+  lat: number;
+  lng: number;
+  /** Fix time on the radio's clock, seconds (0 = unknown). */
+  time: number;
+  source: number;
+  pdop: number;
+  hdop: number;
+  gpsAccuracy: number;
+  sats: number;
+};
+
+export function decodePosition(b: Uint8Array): MtPosition | null {
   const f = new Fields(b);
   if (!f.has(1) || !f.has(2)) return null;
   const lat = f.int(1) / 1e7;
   const lng = f.int(2) / 1e7;
+  // A radio that lost its fix reports 0, 0.
   if (!lat && !lng) return null;
-  return Math.abs(lat) <= 90 && Math.abs(lng) <= 180 ? { lat, lng } : null;
+  if (Math.abs(lat) > 90 || Math.abs(lng) > 180) return null;
+  return {
+    lat,
+    lng,
+    time: f.uint(4),
+    source: f.uint(5),
+    pdop: f.uint(11),
+    hdop: f.uint(12),
+    gpsAccuracy: f.uint(14),
+    sats: f.uint(19),
+  };
+}
+
+/** location_source: set by hand (a fixed position), not a GPS fix. */
+export const LOC_MANUAL = 1;
+
+/**
+ * Rough horizontal accuracy of a radio's fix in metres: DOP × the receiver's error
+ * (gps_accuracy, mm; ~5 m when not reported), HDOP preferred. Null without a DOP.
+ */
+export function radioAccuracy(p: Pick<MtPosition, 'pdop' | 'hdop' | 'gpsAccuracy'>): number | null {
+  const dop = (p.hdop || p.pdop) / 100;
+  if (!dop) return null;
+  const uere = p.gpsAccuracy ? p.gpsAccuracy / 1000 : 5;
+  return Math.max(1, Math.round(dop * uere * 10) / 10);
+}
+
+/**
+ * want_config nonce that makes firmware 2.6+ send only the node list, our own node
+ * first (PhoneAPI SPECIAL_NONCE_ONLY_NODES). Our node's position there follows the
+ * radio's GPS (updated at gps_update_interval) without anything going on air. Older
+ * firmware answers with the whole config instead — heavier, same result.
+ */
+export const ONLY_NODES_NONCE = 69421;
+
+/** Config.PositionConfig as the radio reported it; `raw` is kept to write it back whole. */
+export type MtPositionConfig = {
+  raw: Uint8Array;
+  broadcastSecs: number;
+  fixed: boolean;
+  /** gps_enabled (deprecated, older firmware). */
+  gpsEnabled: boolean;
+  updateInterval: number;
+  flags: number;
+  /** gps_mode: 0 disabled, 1 enabled, 2 not present; null on firmware without it. */
+  gpsMode: number | null;
+};
+
+export const POS_FLAG_DOP = 0x0008;
+export const POS_FLAG_SATS = 0x0020;
+/** How often the radio's GPS updates in «GPS рации» mode, seconds. */
+export const FAST_GPS_SECS = 5;
+
+export function decodePositionConfig(raw: Uint8Array): MtPositionConfig {
+  const f = new Fields(raw);
+  return {
+    raw,
+    broadcastSecs: f.uint(1),
+    fixed: f.uint(3) !== 0,
+    gpsEnabled: f.uint(4) !== 0,
+    updateInterval: f.uint(5),
+    flags: f.uint(7),
+    gpsMode: f.has(13) ? f.uint(13) : null,
+  };
+}
+
+/** The radio has a GPS that is switched on (and isn't just repeating a fixed position). */
+export function radioHasGps(c: MtPositionConfig | null): boolean | null {
+  if (!c) return null;
+  if (c.fixed) return false;
+  // proto3 leaves out zeros: no gps_mode means DISABLED on current firmware, but old
+  // firmware only had gps_enabled.
+  return c.gpsMode != null ? c.gpsMode === 1 : c.gpsEnabled;
+}
+
+/** The radio's GPS already updates often and reports its precision. */
+export function radioGpsFast(c: MtPositionConfig | null): boolean {
+  if (!c) return false;
+  // 0 means the firmware default (2 minutes).
+  return c.updateInterval > 0 && c.updateInterval <= 10 && (c.flags & POS_FLAG_DOP) !== 0;
+}
+
+/**
+ * Copies a message, replacing (or adding) the given varint fields and keeping every
+ * other field byte for byte — fields this app doesn't know survive a write-back.
+ */
+export function patchVarints(raw: Uint8Array, patch: Record<number, number>): Uint8Array {
+  const out = new Writer();
+  const parts: Uint8Array[] = [];
+  let i = 0;
+  const varint = () => {
+    let v = 0;
+    let mul = 1;
+    for (;;) {
+      const b = raw[i++];
+      if (b === undefined) throw new Error('truncated varint');
+      v += (b & 0x7f) * mul;
+      if (b < 0x80) return v;
+      mul *= 128;
+    }
+  };
+  while (i < raw.length) {
+    const start = i;
+    const key = varint();
+    const no = Math.floor(key / 8);
+    const wire = key & 7;
+    if (wire === 0) varint();
+    else if (wire === 5) i += 4;
+    else if (wire === 1) i += 8;
+    else if (wire === 2) {
+      // Read the length first: `i += varint()` would add it to the old `i`.
+      const n = varint();
+      i += n;
+    }
+    else throw new Error(`wire type ${wire}`);
+    if (i > raw.length) throw new Error('truncated field');
+    if (!(no in patch)) parts.push(raw.slice(start, i));
+  }
+  for (const [no, v] of Object.entries(patch)) out.uint(Number(no), v);
+  const tail = out.finish();
+  const total = parts.reduce((n, p) => n + p.length, 0) + tail.length;
+  const buf = new Uint8Array(total);
+  let o = 0;
+  for (const p of parts) {
+    buf.set(p, o);
+    o += p.length;
+  }
+  buf.set(tail, o);
+  return buf;
+}
+
+/**
+ * Admin set_config (34) of Config.position (2) for our own radio. The firmware saves
+ * it and reboots (~10 s); the link comes back by itself.
+ */
+export function setPositionConfig(myNode: number, raw: Uint8Array, id: number): Uint8Array {
+  const config = new Writer().bytesField(2, raw);
+  const admin = new Writer().message(34, config).finish();
+  return sendPacket({ to: myNode, channel: 0, portnum: PORT.admin, payload: admin, id, wantResponse: true });
 }
 
 /**
@@ -202,6 +361,7 @@ export function decodeFromRadio(buf: Uint8Array): FromRadio {
         lng: p?.lng ?? null,
         lastHeard: node.uint(5),
         battery: df?.has(1) ? df.uint(1) : null,
+        pos: p,
       },
     };
   }
@@ -213,6 +373,10 @@ export function decodeFromRadio(buf: Uint8Array): FromRadio {
       channel: { index: ch.int(1), role: ch.uint(3), name: s?.string(3) ?? '', psk: s?.bytes(2) ?? new Uint8Array(0) },
     };
   }
+  // Config (5) → position (2).
+  const cfg = f.message(5);
+  const posCfg = cfg?.bytes(2);
+  if (posCfg) return { type: 'positionConfig', config: decodePositionConfig(posCfg) };
   if (f.has(7)) return { type: 'configComplete', nonce: f.uint(7) };
   if (f.has(8)) return { type: 'rebooted' };
   return { type: 'other' };

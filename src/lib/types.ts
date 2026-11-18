@@ -10,6 +10,8 @@ export type SelfPosition = LatLng & {
   accuracy: number | null;
   heading: number | null;
   timestamp: number;
+  /** Whose GPS: the phone's or the Meshtastic radio's (src/lib/gpsSource.ts). */
+  source?: 'phone' | 'radio';
 };
 
 export type Team = {
@@ -156,6 +158,9 @@ export type Member = {
   charging?: boolean;
   /** Meshtastic radio battery %, 101 = on external power. */
   radioBattery?: number | null;
+  /** Whose GPS the position is from, and its accuracy (m). */
+  gpsSrc?: 'phone' | 'radio' | null;
+  accuracy?: number | null;
   /** Side hierarchy stars: 3 side commander, 2 deputy, 1 direction commander. */
   stars?: 0 | 1 | 2 | 3;
   /** Map label instead of callsign and role (side view: the squad's name on its commander). */

@@ -175,7 +175,8 @@ service cloud.firestore {
         && (!('radioBattery' in d) || d.radioBattery == null
           || (d.radioBattery is number && d.radioBattery >= 0 && d.radioBattery <= 101))
         && (!('briefRead' in d) || d.briefRead == null || d.briefRead is number)
-        && (!('tag' in d) || d.tag == null || (d.tag is string && d.tag.size() <= 5));
+        && (!('tag' in d) || d.tag == null || (d.tag is string && d.tag.size() <= 5))
+        && (!('gpsSrc' in d) || d.gpsSrc == null || d.gpsSrc in ['phone', 'radio']);
     }
     // Squad briefing: written by commanders as themselves.
     function validBriefing(b) {
