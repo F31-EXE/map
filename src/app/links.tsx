@@ -5,6 +5,7 @@ import { distanceMeters, formatDistance, timeAgo } from '../lib/geo';
 import { nodeIdText } from '../lib/meshtastic';
 import { powerText } from '../lib/power';
 import { ROLES } from '../lib/roles';
+import { useLte } from '../state/network';
 import { useSession } from '../state/session';
 import { Card, Eyebrow, Icon, RoleIcon, type IconName } from '../ui/components';
 import { C, F } from '../ui/theme';
@@ -13,12 +14,13 @@ import { C, F } from '../ui/theme';
 const FRESH_MS = 3 * 60_000;
 
 /**
- * «Связь отряда» for signallers: who is on air by which path (server, Bluetooth/Wi-Fi
- * between phones, LoRa radio), when each was last heard, batteries, and the radios this
+ * «Связь отряда» for signallers: who is on air by which path (server or the LoRa radio;
+ * phone-to-phone Bluetooth is retired), when each was last heard, batteries, and the radios this
  * phone's radio hears with their distance.
  */
 export default function LinksScreen() {
   const s = useSession();
+  const lte = useLte();
   const [, tick] = useState(0);
   useEffect(() => {
     const t = setInterval(() => tick((x) => x + 1), 5000);
@@ -44,12 +46,7 @@ export default function LinksScreen() {
     <ScrollView contentContainerStyle={styles.content}>
       <Card style={{ gap: 8 }}>
         <Eyebrow>Мой телефон</Eyebrow>
-        <Line
-          icon="bluetooth"
-          label="Телефоны рядом"
-          value={s.mesh.enabled ? `${s.mesh.peers} на связи` : 'выключено'}
-          ok={s.mesh.peers > 0}
-        />
+        <Line icon="signal-4g" label="Интернет (LTE)" value={lte ? 'включён' : 'выключен'} ok={lte} />
         <Line
           icon="radio-handheld"
           label="Рация"
@@ -93,7 +90,6 @@ export default function LinksScreen() {
             </Text>
             {m.id !== s.uid && (
               <View style={styles.row}>
-                <Chip icon="bluetooth" text={via.nearby ? timeAgo(via.nearby, now) : '—'} on={via.nearby != null && now - via.nearby < FRESH_MS} />
                 <Chip icon="radio-handheld" text={via.radio ? timeAgo(via.radio, now) : '—'} on={via.radio != null && now - via.radio < FRESH_MS} />
               </View>
             )}

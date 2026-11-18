@@ -237,7 +237,7 @@ export function TacticalMap(props: Props) {
         callsign: m.mapLabel ?? withTag(m.callsign, m.tag),
         color: m.tech ? TECH_COLOR : (m.color ?? props.teamColor),
         rolePath: ROLES[m.role].path,
-        roleTitle: m.tech ? 'Игротех' : m.mapLabel ? null : ROLES[m.role].title,
+        roleTitle: m.tech ? 'Игротех' : m.tracker != null ? 'трекер' : m.mapLabel ? null : ROLES[m.role].title,
         commander: !m.tech && (m.leader ?? (m.canCommand || m.id === props.ownerId)),
         stars: m.stars ?? 0,
         tech: Boolean(m.tech),

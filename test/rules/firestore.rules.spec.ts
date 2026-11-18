@@ -170,6 +170,32 @@ describe('roles, colors and avatars', () => {
   });
 });
 
+describe('trackers', () => {
+  beforeEach(async () => {
+    await createTeam(as('alice'), 'alice');
+    await join(as('bob'), 'bob');
+  });
+  const T = { num: 0xa1b2c3d4, name: 'Союзники-1', short: 'SOY1', role: 'rifleman', color: '#FFC83D', vis: 'all', viewers: [], addedBy: 'alice', lat: null, lng: null, at: null, heardBy: null };
+  const ref = (uid: string) => doc(as(uid), 'teams', TEAM, 'trackers', 'a1b2c3d4');
+  test('commanders add them, members relay newer positions only', async () => {
+    await assertFails(setDoc(ref('bob'), { ...T, addedBy: 'bob' }));
+    await assertFails(setDoc(ref('alice'), { ...T, vis: 'nobody' }));
+    await assertSucceeds(setDoc(ref('alice'), T));
+    await assertSucceeds(getDoc(ref('bob')));
+    await assertSucceeds(updateDoc(ref('bob'), { lat: 56.8, lng: 60.6, at: 1000, heardBy: 'bob' }));
+    // Older than what the server has, or as someone else, or touching the name: refused.
+    await assertFails(updateDoc(ref('bob'), { lat: 56.8, lng: 60.6, at: 900, heardBy: 'bob' }));
+    await assertFails(updateDoc(ref('bob'), { lat: 56.8, lng: 60.6, at: 2000, heardBy: 'alice' }));
+    await assertFails(updateDoc(ref('bob'), { name: 'Враги' }));
+    await assertFails(deleteDoc(ref('bob')));
+    await assertSucceeds(updateDoc(ref('alice'), { vis: 'chosen', viewers: ['bob'] }));
+    await assertSucceeds(deleteDoc(ref('alice')));
+    // Outsiders don't read them.
+    await setDoc(ref('alice'), T);
+    await assertFails(getDoc(ref('mallory')));
+  });
+});
+
 describe('command rights and orders', () => {
   beforeEach(async () => {
     await createTeam(as('alice'), 'alice');

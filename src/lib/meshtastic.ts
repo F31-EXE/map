@@ -96,7 +96,14 @@ export function squadPsk(teamId: string): Uint8Array {
   return sha256(utf8Encode(`grimmap-squad:${teamId}`));
 }
 
-export type MtChannel = { index: number; role: number; name: string; psk: Uint8Array };
+export type MtChannel = {
+  index: number;
+  role: number;
+  name: string;
+  psk: Uint8Array;
+  /** ChannelSettings as received, to write back with one field changed. */
+  raw?: Uint8Array;
+};
 
 export type MtPacket = {
   from: number;
@@ -123,6 +130,8 @@ export type MtNode = {
   battery?: number | null;
   /** The node's position in full (fix time, source), when it has one. */
   pos?: MtPosition | null;
+  /** When this phone last got a position of it over the air (ms). */
+  posAt?: number;
 };
 
 export type FromRadio =
@@ -243,10 +252,11 @@ export function radioGpsFast(c: MtPositionConfig | null): boolean {
 }
 
 /**
- * Copies a message, replacing (or adding) the given varint fields and keeping every
- * other field byte for byte — fields this app doesn't know survive a write-back.
+ * Copies a message, replacing (or adding) the given fields — numbers as varints, bytes
+ * as length-delimited — and keeping every other field byte for byte, so fields this
+ * app doesn't know survive a write-back.
  */
-export function patchVarints(raw: Uint8Array, patch: Record<number, number>): Uint8Array {
+export function patchVarints(raw: Uint8Array, patch: Record<number, number | Uint8Array>): Uint8Array {
   const out = new Writer();
   const parts: Uint8Array[] = [];
   let i = 0;
@@ -278,7 +288,10 @@ export function patchVarints(raw: Uint8Array, patch: Record<number, number>): Ui
     if (i > raw.length) throw new Error('truncated field');
     if (!(no in patch)) parts.push(raw.slice(start, i));
   }
-  for (const [no, v] of Object.entries(patch)) out.uint(Number(no), v);
+  for (const [no, v] of Object.entries(patch)) {
+    if (typeof v === 'number') out.uint(Number(no), v);
+    else out.bytesField(Number(no), v);
+  }
   const tail = out.finish();
   const total = parts.reduce((n, p) => n + p.length, 0) + tail.length;
   const buf = new Uint8Array(total);
@@ -370,7 +383,13 @@ export function decodeFromRadio(buf: Uint8Array): FromRadio {
     const s = ch.message(2);
     return {
       type: 'channel',
-      channel: { index: ch.int(1), role: ch.uint(3), name: s?.string(3) ?? '', psk: s?.bytes(2) ?? new Uint8Array(0) },
+      channel: {
+        index: ch.int(1),
+        role: ch.uint(3),
+        name: s?.string(3) ?? '',
+        psk: s?.bytes(2) ?? new Uint8Array(0),
+        raw: ch.bytes(2) ?? new Uint8Array(0),
+      },
     };
   }
   // Config (5) → position (2).
@@ -402,3 +421,60 @@ export function packetId(): number {
 export function textPayload(s: string): Uint8Array {
   return utf8Clip(s, MAX_PAYLOAD);
 }
+
+// ---------- Trackers: a radio without a phone, set up once from GrimMap ----------
+
+/** Firmware limits (mesh.proto User): long name 24 bytes of UTF-8, short name 4. */
+export const LONG_NAME_BYTES = 24;
+export const SHORT_NAME_BYTES = 4;
+
+function admin(myNode: number, msg: Writer, id: number): Uint8Array {
+  return sendPacket({ to: myNode, channel: 0, portnum: PORT.admin, payload: msg.finish(), id, wantResponse: true });
+}
+
+/** begin_edit_settings (64): hold the saves and the reboot until commit. */
+export function beginEdit(myNode: number, id: number): Uint8Array {
+  return admin(myNode, new Writer().bool(64, true), id);
+}
+
+/** commit_edit_settings (65): save everything; the radio restarts. */
+export function commitEdit(myNode: number, id: number): Uint8Array {
+  return admin(myNode, new Writer().bool(65, true), id);
+}
+
+/** set_owner (32): the radio's long and short names, which it announces on air. */
+export function setOwner(myNode: number, longName: string, shortName: string, id: number): Uint8Array {
+  const user = new Writer().bytesField(2, utf8Clip(longName, LONG_NAME_BYTES)).bytesField(3, utf8Clip(shortName, SHORT_NAME_BYTES));
+  return admin(myNode, new Writer().message(32, user), id);
+}
+
+/** set_channel (33) with whole ChannelSettings bytes. */
+export function setChannelRaw(myNode: number, index: number, role: number, settings: Uint8Array, id: number): Uint8Array {
+  const channel = new Writer().uint(1, index).bytesField(2, settings).uint(3, role);
+  return admin(myNode, new Writer().message(33, channel), id);
+}
+
+/**
+ * ChannelSettings with module_settings.position_precision (7 → 1) changed. The firmware
+ * sends its position on the first channel whose precision isn't 0, so a tracker gets 0
+ * on its primary channel and 32 (full) on the squad channel: its position then only
+ * goes out encrypted with the squad's key.
+ */
+export function withPositionPrecision(settings: Uint8Array, precision: number): Uint8Array {
+  const module = new Fields(settings).bytes(7) ?? new Uint8Array(0);
+  return patchVarints(settings, { 7: patchVarints(module, { 1: precision }) });
+}
+
+/** The squad channel's settings for a tracker: same name and key, full position precision. */
+export function trackerSquadSettings(psk: Uint8Array): Uint8Array {
+  return new Writer().bytesField(2, psk).string(3, SQUAD_CHANNEL_NAME).message(7, new Writer().uint(1, 32)).finish();
+}
+
+/**
+ * Position settings of a tracker: a broadcast at least every 60 s, smart broadcasts
+ * when it moved 20 m (no more often than every 30 s), GPS on and read every 30 s.
+ */
+export const TRACKER_POSITION: Record<number, number> = { 1: 60, 2: 1, 5: 30, 10: 20, 11: 30, 13: 1 };
+
+export const CHANNEL_PRIMARY = 1;
+export { CHANNEL_SECONDARY };

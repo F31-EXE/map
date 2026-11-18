@@ -7,6 +7,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useSelfPosition } from '../../hooks/useSelfPosition';
 import { gpsSrcText, pickGps, RADIO_ACCURACY_GUESS, type GpsSrc } from '../../lib/gpsSource';
 import { useGpsMode } from '../../state/gpsSource';
+import { useTrackers } from '../../state/trackers';
+import { useLte } from '../../state/network';
 import { bearingDegrees, distanceMeters, formatClock, formatCoords, formatDistance, timeAgo } from '../../lib/geo';
 import { centroid, isArea, ZoneWatcher, type Area, type AreaKind } from '../../lib/geofence';
 import { turnAngle, turnText } from '../../lib/heading';
@@ -252,9 +254,11 @@ export default function MapScreen() {
   const game = useGame();
   // Squad / side markers and people, plus the big game's (game modes, game techs).
   const allMarkers = useMemo(() => (game.markers.length ? [...side.mapMarkers, ...game.markers] : side.mapMarkers), [side.mapMarkers, game.markers]);
+  // Squad trackers (radios without a phone); this screen also relays what my radio hears.
+  const trackers = useTrackers(true);
   const allMembers = useMemo(
-    () => (game.mapMembers.length ? [...side.mapMembers, ...game.mapMembers] : side.mapMembers),
-    [side.mapMembers, game.mapMembers]
+    () => [...side.mapMembers, ...game.mapMembers, ...trackers.members],
+    [side.mapMembers, game.mapMembers, trackers.members]
   );
   const { overlays, focusRequest, requestFocus, viewRequest, requestView, areas, download } = useOverlays();
   const { position: gps, status, heading, compassPoor } = useSelfPosition();
@@ -263,6 +267,7 @@ export default function MapScreen() {
   const radioPos = session.mesh.radio.myPosition;
   const radioPollMs = session.mesh.radio.gps.pollMs;
   const gpsMode = useGpsMode();
+  const lte = useLte();
   const gpsSrc = useRef<GpsSrc | null>(null);
   // Re-check every few seconds: a source going stale must hand over without a new fix.
   const [gpsTick, setGpsTick] = useState(0);
@@ -623,7 +628,7 @@ export default function MapScreen() {
   // Side commander without a squad of their own: the pill shows the side instead.
   const sideOnly = side.commandsSquads && !inTeam;
   const online = allMembers.filter(
-    (m) => m.id !== session.uid && m.updatedAt && now - m.updatedAt < STALE_MS
+    (m) => m.id !== session.uid && m.tracker == null && m.updatedAt && now - m.updatedAt < STALE_MS
   ).length;
 
   const orderTargets: { id: OrderTarget; label: string; color?: string }[] = [
@@ -985,10 +990,10 @@ export default function MapScreen() {
                 </Text>
               </View>
             )}
-            {session.mesh.enabled && session.mesh.available && inTeam && (
-              <View style={[styles.meshChip, session.mesh.peers > 0 && styles.meshChipOn]}>
-                <Icon name="bluetooth" size={13} color={session.mesh.peers > 0 ? C.info : C.faint} />
-                <Text style={[styles.meshText, session.mesh.peers > 0 && { color: C.info }]}>{session.mesh.peers}</Text>
+            {!lte && inTeam && (
+              <View style={styles.meshChip}>
+                <Icon name="signal-off" size={13} color={C.warn} />
+                <Text style={[styles.meshText, { color: C.warn }]}>LTE</Text>
               </View>
             )}
             {session.team?.recordingId && (
@@ -1725,6 +1730,7 @@ export default function MapScreen() {
         subtitle={
           selectedMember &&
           [
+            selectedMember.tracker != null ? 'трекер (рация без телефона)' : null,
             selectedMember.mapLabel ? `командир отряда «${selectedMember.mapLabel}»` : null,
             ROLES[selectedMember.role].title,
             selectedMember.status !== 'alive' ? STATUSES[selectedMember.status].title.toUpperCase() : null,

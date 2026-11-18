@@ -178,6 +178,17 @@ service cloud.firestore {
         && (!('tag' in d) || d.tag == null || (d.tag is string && d.tag.size() <= 5))
         && (!('gpsSrc' in d) || d.gpsSrc == null || d.gpsSrc in ['phone', 'radio']);
     }
+    function validTracker(d) {
+      return d.keys().hasOnly(['num', 'name', 'short', 'role', 'color', 'vis', 'viewers', 'addedBy', 'lat', 'lng', 'at', 'heardBy', 'updatedAt'])
+        && d.num is int && d.num > 0
+        && d.name is string && d.name.size() > 0 && d.name.size() <= 24
+        && d.short is string && d.short.size() <= 4
+        && d.role is string && d.role.size() <= 20
+        && d.color is string && d.color.size() <= 9
+        && d.vis in ['all', 'commanders', 'chosen']
+        && d.viewers is list && d.viewers.size() <= 60
+        && d.addedBy is string;
+    }
     // Squad briefing: written by commanders as themselves.
     function validBriefing(b) {
       return b == null
@@ -673,6 +684,21 @@ service cloud.firestore {
             && (resource.data.createdBy == request.auth.uid
               || rank(teamId, request.auth.uid) > rank(teamId, resource.data.createdBy));
         }
+      }
+
+      // Trackers: radios with GPS and no phone, tied to the squad (src/lib/trackers.ts).
+      // Commanders add, edit and remove them; any member relays a newer heard position.
+      // Who sees which (vis/viewers) is filtered in the app, not here.
+      match /trackers/{nodeId} {
+        allow read: if isMember(teamId) || oversees(teamId);
+        allow create, update: if canCommand(teamId) && validTracker(request.resource.data);
+        allow update: if isMember(teamId)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['lat', 'lng', 'at', 'heardBy', 'updatedAt'])
+          && request.resource.data.lat is number && request.resource.data.lng is number
+          && request.resource.data.at is number
+          && (resource.data.at == null || request.resource.data.at > resource.data.at)
+          && request.resource.data.heardBy == request.auth.uid;
+        allow delete: if canCommand(teamId);
       }
 
       // Pictures of photo markers: compressed JPEG data URIs, one per doc.

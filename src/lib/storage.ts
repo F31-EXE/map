@@ -17,6 +17,10 @@ export const KEYS = {
   grid: 'tacmap.grid',
   status: 'tacmap.status',
   mesh: 'tacmap.mesh',
+  /** Internet (LTE) channel on/off: off = Firestore offline, data only over the radio. */
+  lte: 'tacmap.lte',
+  /** The Meshtastic radio link paused by hand (the device stays remembered). */
+  radioOff: 'tacmap.radioOff',
   keepAwake: 'tacmap.keepAwake',
   offlineAreas: 'tacmap.offlineAreas',
   background: 'tacmap.background',

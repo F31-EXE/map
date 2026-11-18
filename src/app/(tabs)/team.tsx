@@ -14,6 +14,7 @@ import { STALE_MS } from '../../map/TacticalMap';
 import * as recordings from '../../services/recordings';
 import { useSession } from '../../state/session';
 import { useSide } from '../../state/side';
+import { useTrackers } from '../../state/trackers';
 import { confirmDestructive } from '../../ui/confirm';
 import { GameLinkCard } from '../../ui/GameLinkCard';
 import { QrCode } from '../../ui/QrCode';
@@ -202,6 +203,8 @@ export default function TeamScreen() {
               </View>
             </Card>
           )}
+
+          <TrackersCard />
 
           <GameLinkCard />
 
@@ -760,6 +763,28 @@ function BriefingCard() {
                   ? `Прочитали ${readCount} из ${others}`
                   : brief.text}
           </Text>
+        </View>
+        <Icon name="chevron-right" size={20} color={C.faint} />
+      </Card>
+    </Pressable>
+  );
+}
+
+/** Entry to «Трекеры отряда»: commanders always (to add them), others when they see one. */
+function TrackersCard() {
+  const s = useSession();
+  const { trackers, visible } = useTrackers();
+  if (!s.firebaseEnabled || (!s.canCommand && visible.length === 0)) return null;
+  const n = s.canCommand ? trackers.length : visible.length;
+  return (
+    <Pressable onPress={() => router.push('/trackers')}>
+      <Card style={styles.sideEntry}>
+        <View style={styles.switchIcon}>
+          <Icon name="radio-handheld" size={22} color={n ? C.accent : C.dim} />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.cardTitle}>Трекеры{n ? ` · ${n}` : ''}</Text>
+          <Text style={styles.sub}>Рации без телефона: боец без смартфона, союзники рядом</Text>
         </View>
         <Icon name="chevron-right" size={20} color={C.faint} />
       </Card>

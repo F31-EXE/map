@@ -8,6 +8,7 @@ import { BACKGROUND_SUPPORTED } from '../../services/backgroundLocation';
 import { clearLastError, lastError } from '../../services/crashGuard';
 import { TRAIL_CHOICES } from '../../lib/trail';
 import { setNight, useNight } from '../../state/night';
+import { setLte, useLte } from '../../state/network';
 import { say, setVoice, setVolume, useVoice, useVolume } from '../../state/voice';
 import { setTrailMinutes, useTrailMinutes } from '../../state/trail';
 import { useSession } from '../../state/session';
@@ -28,6 +29,7 @@ const PRIVACY_URL = 'https://f31-exe.github.io/map/privacy.html';
 
 export default function SettingsScreen() {
   const s = useSession();
+  const lte = useLte();
   const night = useNight();
   const voice = useVoice();
   const volume = useVolume();
@@ -179,28 +181,39 @@ export default function SettingsScreen() {
         />
         <View style={styles.divider} />
         <SettingRow
-          icon={s.mesh.enabled ? 'bluetooth-connect' : 'bluetooth-off'}
-          title="Связь без интернета"
+          icon={lte ? 'signal-4g' : 'signal-off'}
+          title="Интернет (LTE)"
           sub={
-            !s.mesh.available
-              ? 'Bluetooth и Wi-Fi Direct между телефонами. Только в Android-приложении'
-              : s.mesh.error
-                ? `Ошибка: ${s.mesh.error}`
-                : s.mesh.enabled
-                  ? s.teamId
-                    ? `Рядом на связи: ${s.mesh.peers}. Позиции и чат передаются от бойца к бойцу`
-                    : 'Включится, когда вы в отряде'
-                  : 'Позиции и чат от телефона к телефону, когда нет сети'
+            lte
+              ? 'Позиции, чат и метки через сервер: весь отряд, сторона и штаб'
+              : 'Выключен: с сервером ничего не обменивается, связь только через рацию. Ваши записи уйдут, когда включите'
           }
-          value={s.mesh.enabled}
-          disabled={!s.mesh.available}
-          onChange={(v) =>
-            run(async () => {
-              await s.mesh.setEnabled(v);
-              // Bluetooth stalls with the screen off; keep it on while the mesh runs.
-              if (v && !s.keepAwake) await s.setKeepAwake(true);
-            })
+          value={lte}
+          onChange={(v) => {
+            if (!v && (!s.mesh.radio.device || s.mesh.radio.paused)) {
+              Alert.alert('Без интернета и без рации', 'Отряд перестанет вас видеть, пока не включите интернет или рацию.');
+            }
+            setLte(v);
+          }}
+        />
+        <View style={styles.divider} />
+        <SettingRow
+          icon={s.mesh.radio.paused ? 'radio-off' : 'radio-handheld'}
+          title="Mesh (рация Meshtastic)"
+          sub={
+            !s.mesh.radio.supported
+              ? 'Рации подключаются в приложении на телефоне и в Chrome / Edge на компьютере'
+              : !s.mesh.radio.device
+                ? 'Рация не выбрана: подключите её в карточке «Рация» ниже'
+                : s.mesh.radio.paused
+                  ? 'Выключено: рация не используется (остаётся в памяти)'
+                  : s.mesh.radio.state === 'ready'
+                    ? `На связи: ${s.mesh.radio.device.name}. Позиции, чат и метки по радио на километры`
+                    : 'Подключаюсь к рации…'
           }
+          value={Boolean(s.mesh.radio.device) && !s.mesh.radio.paused}
+          disabled={!s.mesh.radio.supported || !s.mesh.radio.device}
+          onChange={(v) => s.mesh.radio.setPaused(!v)}
         />
         <View style={styles.divider} />
         <SettingRow

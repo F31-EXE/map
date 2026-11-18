@@ -173,6 +173,8 @@ export type Member = {
   briefRead?: number | null;
   /** Asked for help (SOS) and not cancelled yet: pulses red on the map. */
   sos?: boolean;
+  /** A tracker radio (no phone): its node number; id is `trk/<hex>`. */
+  tracker?: number;
 };
 
 export type OrderKind = 'order-move' | 'order-attack' | 'order-defend';

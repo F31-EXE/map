@@ -9,6 +9,8 @@ import { Pressable, Text, View } from 'react-native';
 
 // Registers the background location task at startup.
 import '../services/backgroundLocation';
+// Applies a saved «Интернет (LTE): выкл» before anything talks to the server.
+import '../state/network';
 import { installErrorRecorder, recordError } from '../services/crashGuard';
 import { KEYS, saveJson } from '../lib/storage';
 import { OverlaysProvider } from '../state/overlays';
@@ -70,6 +72,7 @@ export default function RootLayout() {
                 <Stack.Screen name="side" options={{ title: 'Командование стороной' }} />
                 <Stack.Screen name="side-chat" options={{ title: 'Чат стороны' }} />
                 <Stack.Screen name="links" options={{ title: 'Связь отряда' }} />
+                <Stack.Screen name="trackers" options={{ title: 'Трекеры' }} />
                 <Stack.Screen name="game" options={{ title: 'Большая игра' }} />
                 <Stack.Screen name="scan" options={{ title: 'Сканировать QR', presentation: 'modal' }} />
                 <Stack.Screen name="join" options={{ title: 'Приглашение' }} />
@@ -112,12 +115,13 @@ export function ErrorBoundary({ error, retry }: { error: Error; retry: () => Pro
       <Pressable
         onPress={async () => {
           await saveJson(KEYS.mesh, false);
+          await saveJson(KEYS.radioOff, true);
           await saveJson(KEYS.background, false);
           await retry();
         }}
         style={{ borderColor: C.lineStrong, borderWidth: 1, padding: 16, borderRadius: 8, alignItems: 'center' }}
       >
-        <Text style={{ color: C.text, fontSize: 15 }}>Выключить Bluetooth-связь и фон, затем снова</Text>
+        <Text style={{ color: C.text, fontSize: 15 }}>Отключить рацию и фон, затем снова</Text>
       </Pressable>
     </View>
   );

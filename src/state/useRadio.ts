@@ -89,6 +89,9 @@ export type Radio = {
   speedUpGps: () => Promise<void>;
   /** Puts back the GPS settings the radio had before speedUpGps; the radio reboots. */
   restoreGps: () => Promise<void>;
+  /** «Mesh (рация)» switched off: the link is dropped, the radio stays remembered. */
+  paused: boolean;
+  setPaused: (v: boolean) => void;
   /** Our own radio's battery %, 101 = on external power. */
   myBattery: number | null;
 };
@@ -96,6 +99,7 @@ export type Radio = {
 /** Connection to the user's Meshtastic radio; packets go to `onPacket`. */
 export function useRadio(teamId: string | null, onPacket: (p: MtPacket) => void): Radio {
   const [device, setDevice] = useState<RadioDevice | null>(null);
+  const [paused, setPausedState] = useState(false);
   const [state, setState] = useState<RadioState>('off');
   const [error, setError] = useState<string | null>(null);
   const [myNode, setMyNode] = useState<number | null>(null);
@@ -141,6 +145,7 @@ export function useRadio(teamId: string | null, onPacket: (p: MtPacket) => void)
         ...prev,
         ...(patch.longName ? { longName: patch.longName, shortName: patch.shortName ?? prev.shortName } : {}),
         ...(patch.lat != null && patch.lng != null ? { lat: patch.lat, lng: patch.lng } : {}),
+        ...(patch.posAt ? { posAt: patch.posAt } : {}),
         lastHeard: Math.max(prev.lastHeard, patch.lastHeard ?? 0),
       });
       if (next.size > MAX_NODES) {
@@ -154,11 +159,12 @@ export function useRadio(teamId: string | null, onPacket: (p: MtPacket) => void)
   useEffect(() => {
     if (!radioSupported) return;
     loadJson<RadioDevice | null>(KEYS.radio, null).then((d) => d && setDevice(d));
+    loadJson<boolean>(KEYS.radioOff, false).then((v) => setPausedState(v === true));
   }, []);
 
   // Keep a link to the chosen radio, reconnecting when it drops.
   useEffect(() => {
-    if (!radioSupported || !device) return;
+    if (!radioSupported || !device || paused) return;
     let stopped = false;
     let retry: ReturnType<typeof setTimeout> | null = null;
     const later = () => {
@@ -231,7 +237,10 @@ export function useRadio(teamId: string | null, onPacket: (p: MtPacket) => void)
           // Radios announce names and (with GPS) positions; keep the list current.
           const heard = p.rxTime || Math.floor(Date.now() / 1000);
           try {
-            if (p.portnum === PORT.position) updateNode(p.from, { ...decodePosition(p.payload), lastHeard: heard });
+            if (p.portnum === PORT.position) {
+              const pos = decodePosition(p.payload);
+              updateNode(p.from, pos ? { lat: pos.lat, lng: pos.lng, posAt: Date.now(), lastHeard: heard } : { lastHeard: heard });
+            }
             else if (p.portnum === PORT.nodeInfo) updateNode(p.from, { ...decodeUser(p.payload), lastHeard: heard });
             else updateNode(p.from, { lastHeard: heard });
           } catch {
@@ -265,7 +274,12 @@ export function useRadio(teamId: string | null, onPacket: (p: MtPacket) => void)
       setMyPosition(null);
       lastFixKey.current = null;
     };
-  }, [device, updateNode, ownFix]);
+  }, [device, paused, updateNode, ownFix]);
+
+  const setPaused = useCallback((v: boolean) => {
+    setPausedState(v);
+    saveJson(KEYS.radioOff, v).catch(() => {});
+  }, []);
 
   useEffect(() => {
     loadJson<{ device: string; interval: number; flags: number } | null>(KEYS.radioGpsBackup, null).then(setBackup);
@@ -416,5 +430,7 @@ export function useRadio(teamId: string | null, onPacket: (p: MtPacket) => void)
     gps,
     speedUpGps,
     restoreGps,
+    paused,
+    setPaused,
   };
 }

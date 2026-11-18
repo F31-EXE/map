@@ -127,26 +127,17 @@ export function useMesh(me: {
   const radioOnRef = useRef(false);
   radioOnRef.current = radioOn;
 
+  // Phone-to-phone Nearby (Bluetooth / Wi-Fi Direct) is retired: its range was too short
+  // to matter in the field. The links are the internet (LTE) and the Meshtastic radio.
+  // The switch is gone and a saved «on» is cleared; the native module goes with the next
+  // store build (removing it now would change the fingerprint and stop OTA updates).
   useEffect(() => {
-    (async () => {
-      const on = await loadJson<boolean>(KEYS.mesh, false);
-      // After repeated startup crashes the mesh stays off until switched on by hand.
-      if (on && (await checkSafeMode())) {
-        await saveJson(KEYS.mesh, false);
-        return;
-      }
-      setEnabledState(on);
-    })();
+    saveJson(KEYS.mesh, false).catch(() => {});
   }, []);
 
-  const setEnabled = useCallback(async (v: boolean) => {
-    if (v && !(await requestPermissions())) {
-      setError('Нет разрешений на Bluetooth и «Устройства поблизости»');
-      return;
-    }
+  const setEnabled = useCallback(async (_v: boolean) => {
     setError(null);
-    setEnabledState(v);
-    await saveJson(KEYS.mesh, v);
+    setEnabledState(false);
   }, []);
 
   const broadcast = useCallback((list: Envelope[], to: string[] = []) => {

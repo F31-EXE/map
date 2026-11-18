@@ -246,7 +246,7 @@ function Header() {
   );
 }
 
-function RadioPicker({
+export function RadioPicker({
   visible,
   radio,
   onClose,
