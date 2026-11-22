@@ -14,7 +14,11 @@ on:
         description: 'apk — собрать APK здесь; expo-android / expo-ios / expo-all — сборка на серверах Expo; update — обновление без переустановки (EAS Update: тестовые сборки и App Store); ios-store — iOS для App Store с отправкой в App Store Connect'
         type: choice
         default: apk
-        options: [apk, update, expo-android, expo-ios, expo-all, ios-store]
+        options: [apk, update, expo-android, expo-ios, expo-all, ios-store, adi]
+      adi_token:
+        description: 'adi — код из Play Console («Подпишите и загрузите APK-файл»): APK только для подтверждения права на пакет'
+        required: false
+        default: ''
       build_id:
         description: 'ios-store: id уже запущенной сборки Expo — дождаться её и отправить, не собирая заново'
         required: false
@@ -138,7 +142,7 @@ jobs:
           exit 1
 
   apk:
-    if: ${{ inputs.target == '' || inputs.target == 'apk' }}
+    if: ${{ inputs.target == '' || inputs.target == 'apk' || inputs.target == 'adi' }}
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
@@ -171,6 +175,33 @@ jobs:
             exit 1
           fi
       - run: npm ci
+      # Android developer verification: Play Console asks for an APK signed with our key
+      # that carries its code in assets/adi-registration.properties. Only this runner's
+      # copy gets the plugin (not committed: a new plugin in app.json would change the
+      # native fingerprint and stop OTA updates reaching installed builds).
+      - name: Add the package registration code
+        if: ${{ inputs.target == 'adi' }}
+        env:
+          ADI_TOKEN: ${{ inputs.adi_token }}
+        run: |
+          if [ -z "$ADI_TOKEN" ]; then echo "::error::Fill in adi_token"; exit 1; fi
+          # The build step runs prebuild later without this step's env: keep the code in a file.
+          printf '%s' "$(echo "$ADI_TOKEN" | tr -d '[:space:]')" > adi-token.txt
+          cat > adi-plugin.js <<'JS'
+          const fs = require('fs');
+          const path = require('path');
+          const { withDangerousMod } = require('expo/config-plugins');
+          module.exports = (config) =>
+            withDangerousMod(config, ['android', async (c) => {
+              const dir = path.join(c.modRequest.platformProjectRoot, 'app/src/main/assets');
+              fs.mkdirSync(dir, { recursive: true });
+              const token = fs.readFileSync(path.join(c.modRequest.projectRoot, 'adi-token.txt'), 'utf8');
+              fs.writeFileSync(path.join(dir, 'adi-registration.properties'), token);
+              return c;
+            }]);
+          JS
+          node -e "const f='app.json';const j=require('./'+f);j.expo.plugins=[...(j.expo.plugins||[]),'./adi-plugin.js'];require('fs').writeFileSync(f,JSON.stringify(j,null,2))"
+          echo "EAS_NO_VCS=1" >> "$GITHUB_ENV"
       - name: Build APK
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
@@ -184,9 +215,13 @@ jobs:
       - name: Name the APK after the app version
         run: |
           v=$(node -p "require('./app.json').expo.version")
+          if [ "${{ inputs.target }}" = "adi" ]; then
+            unzip -p "$RUNNER_TEMP/grimmap.apk" assets/adi-registration.properties && echo " ← в APK"
+            v="$v-registration"
+          fi
           mkdir -p out && cp "$RUNNER_TEMP/grimmap.apk" "out/GrimMap-$v.apk"
       - uses: actions/upload-artifact@v4
         with:
-          name: GrimMap-apk
+          name: ${{ inputs.target == 'adi' && 'GrimMap-registration-apk' || 'GrimMap-apk' }}
           path: out/*.apk
           retention-days: 30
