@@ -847,6 +847,21 @@ export default function MapScreen() {
     : (inTeam ? 2 : 0) + (mortar.isMortar ? 1 : 0) + 2;
   const columnTop = height - (insets.bottom + 108) - (actionCount * 52 + 64 + actionCount * 14);
   const columnHitsToolbar = toolsBottom != null && columnTop < toolsBottom + 10;
+  // As a row in portrait the buttons must fit the screen's width (six of them didn't:
+  // «+» went off the left edge): shrink them a little when needed.
+  const actionsRow = landscape || calculator || nav || columnHitsToolbar;
+  const rowGap = 10;
+  const rowAvail = width - insets.left - insets.right - 24;
+  const btnSize =
+    actionsRow && !landscape
+      ? Math.max(40, Math.min(52, Math.floor((rowAvail - 60 - rowGap * actionCount) / actionCount)))
+      : 52;
+  const fabSize = actionsRow && !landscape ? Math.min(64, btnSize + 8) : 64;
+  // Mortar calculator in portrait: its panel and the button row cover the lower half, so
+  // the crosshair (the target) moves to the middle of the map that's still visible.
+  const aimOn = calculator && !nav && !landscape && hudTop != null;
+  const aimTop = aimOn ? pillTop + 58 : 0;
+  const aimBottom = aimOn ? height - (hudTop ?? height) + 24 + fabSize : 0;
 
   const hqGroups: HqGroup[] = game.isTech
     ? game.roster
@@ -916,12 +931,14 @@ export default function MapScreen() {
         onFollowChanged={setFollow}
         onOverlayError={onOverlayError}
         bottomInset={hudTop == null ? undefined : height - hudTop + 6}
+        aimTop={aimTop}
+        aimBottom={aimBottom}
         drawing={drawing && { ...drawing, area: drawing.kind === 'arrow' || drawing.kind === 'ball' ? null : drawing.kind }}
         mortar={mortarMap}
         onDrawChanged={(points) => setDrawing((d) => (d ? { ...d, points } : d))}
       />
 
-      <Reticle />
+      <Reticle top={aimTop} bottom={aimBottom} />
 
 
       {/* Top: team status + tools */}
@@ -930,7 +947,10 @@ export default function MapScreen() {
           styles.top,
           { top: pillTop, left: 12 + insets.left, right: 12 + insets.right },
           landscape && { right: undefined, width: pillW },
+          // Landscape: the calculator / nav panel is as tall as the screen and would sit on it.
+          landscape && (calculator || nav) && { opacity: 0 },
         ]}
+        pointerEvents={landscape && (calculator || nav) ? 'none' : 'auto'}
       >
         <Pressable
           style={({ pressed }) => [{ flex: 1 }, pressed && { opacity: 0.8 }]}
@@ -1357,14 +1377,15 @@ export default function MapScreen() {
           },
           // A tall bottom panel, or a short screen, leaves no room for a column under the
           // toolbar: a row then.
-          (landscape || calculator || nav || columnHitsToolbar) && { flexDirection: 'row-reverse' },
+          actionsRow && { flexDirection: 'row-reverse' },
+          actionsRow && !landscape && { gap: rowGap },
         ]}
       >
         {inTeam && (!toolsHidden || mySos) && (
           <GlassButton
             icon="lifebuoy"
             label={mySos ? 'Отменить SOS' : 'SOS: нужна помощь'}
-            size={52}
+            size={btnSize}
             active={mySos != null}
             activeColor={C.danger}
             onPress={toggleSos}
@@ -1374,7 +1395,7 @@ export default function MapScreen() {
           <GlassButton
             icon="skull"
             label={session.status === 'dead' ? 'Я снова в игре' : 'Я убит'}
-            size={52}
+            size={btnSize}
             active={session.status === 'dead'}
             activeColor={C.danger}
             onPress={() => {
@@ -1388,7 +1409,7 @@ export default function MapScreen() {
           <GlassButton
             icon="bullseye-arrow"
             label="Миномётный калькулятор"
-            size={52}
+            size={btnSize}
             active={calculator}
             onPress={() => {
               if (!calculator) {
@@ -1403,7 +1424,7 @@ export default function MapScreen() {
           <GlassButton
             icon="camera"
             label="Фото с привязкой"
-            size={52}
+            size={btnSize}
             onPress={async () => {
               if (!position) {
                 Alert.alert('Нет GPS', 'Фото привязывается к вашей позиции — дождитесь координат');
@@ -1425,7 +1446,7 @@ export default function MapScreen() {
         <GlassButton
           icon={follow ? 'crosshairs-gps' : 'crosshairs'}
           label="Моё местоположение"
-          size={52}
+          size={btnSize}
           active={follow}
           onPress={() => {
             if (!position) {
@@ -1442,7 +1463,10 @@ export default function MapScreen() {
         <Pressable
           accessibilityLabel="Поставить метку в перекрестие"
           onPress={() => center && openAdd(center)}
-          style={({ pressed }) => [styles.fab, { transform: [{ scale: pressed ? 0.94 : 1 }] }]}
+          style={({ pressed }) => [
+            styles.fab,
+            { width: fabSize, height: fabSize, transform: [{ scale: pressed ? 0.94 : 1 }] },
+          ]}
         >
           <Icon name="map-marker-plus" size={28} color={C.accentInk} />
         </Pressable>
@@ -2003,9 +2027,9 @@ function ToolbarButton({
 }
 
 /** Thin aiming reticle in the middle of the map: "+" places markers exactly here. */
-function Reticle() {
+function Reticle({ top = 0, bottom = 0 }: { top?: number; bottom?: number }) {
   return (
-    <View pointerEvents="none" style={styles.reticleWrap}>
+    <View pointerEvents="none" style={[styles.reticleWrap, { top, bottom }]}>
       <View style={styles.reticle}>
         <View style={[styles.tick, styles.tickTop]} />
         <View style={[styles.tick, styles.tickBottom]} />

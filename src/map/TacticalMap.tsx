@@ -118,6 +118,9 @@ type Props = {
   bottomInset?: number;
   /** Pixels at the top covered by native panels (grid labels go below). */
   topInset?: number;
+  /** Map area hidden by panels above/below the crosshair: the crosshair (and `viewChanged`) sits mid-way between. */
+  aimTop?: number;
+  aimBottom?: number;
   /** Arrow drawing mode: taps add points (reported via onDrawChanged). */
   drawing?: { color: string; points: LatLng[]; area?: string | null } | null;
   onDrawChanged?: (points: LatLng[]) => void;
@@ -322,6 +325,12 @@ export function TacticalMap(props: Props) {
   useEffect(() => {
     if (ready && bottomInset != null) send({ type: 'setInsets', payload: { bottom: bottomInset, top: topInset ?? 0 } });
   }, [ready, generation, bottomInset, topInset, send]);
+
+  const aimTop = props.aimTop ?? 0;
+  const aimBottom = props.aimBottom ?? 0;
+  useEffect(() => {
+    if (ready) send({ type: 'setAim', payload: { top: aimTop, bottom: aimBottom } });
+  }, [ready, generation, aimTop, aimBottom, send]);
 
   const drawing = props.drawing;
   useEffect(() => {

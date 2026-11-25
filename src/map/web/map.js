@@ -931,10 +931,28 @@
     }
   }
 
+  // The crosshair sits in the middle of the map area left free by native panels (the
+  // mortar calculator covers the lower part in portrait): `setAim {top, bottom}`.
+  var aimInset = { top: 0, bottom: 0 };
+  function aimPoint() {
+    var s = map.getSize();
+    return L.point(s.x / 2, aimInset.top + (s.y - aimInset.top - aimInset.bottom) / 2);
+  }
+  function aimLatLng() {
+    return aimInset.top || aimInset.bottom ? map.containerPointToLatLng(aimPoint()) : map.getCenter();
+  }
+  // Puts a place under the crosshair (not the map's middle) with setView.
+  function setAimView(latlng, zoom) {
+    map.setView(latlng, zoom, { animate: false });
+    var s = map.getSize();
+    var dy = s.y / 2 - aimPoint().y;
+    if (dy && isFinite(dy)) map.panBy([0, dy], { animate: false });
+  }
+
   function updateAim() {
     if (!aimLine || !mortarState || !mortarState.aim) return;
     var a = mortarState.aim;
-    var c = map.getCenter();
+    var c = aimLatLng();
     var d = map.distance([a.lat, a.lng], c);
     var far = d > a.r;
     aimLine.setLatLngs([[a.lat, a.lng], c]);
@@ -1864,8 +1882,10 @@
   map.on('zoomend', updateLod);
   updateLod();
 
+  var lastAim = null;
   function postView() {
-    var c = map.getCenter();
+    var c = aimLatLng();
+    lastAim = c;
     var b = map.getBounds();
     post('viewChanged', {
       lat: c.lat,
@@ -2105,7 +2125,7 @@
   // The snail grid shows only close to the ground (like a camera ≤ 500 m up): further
   // out its squares are just noise over the map. "Altitude" = the visible height of
   // the screen in meters / 1.15 (a ~60° field of view).
-  var SNAIL_MAX_ALT_M = 500;
+  var SNAIL_MAX_ALT_M = 1500;
   function snailAltitude(f) {
     return (f.metersPerPx * map.getSize().y) / 1.15;
   }
@@ -2223,7 +2243,21 @@
       centerOnSelf();
     },
     setView: function (p) {
-      map.setView([p.lat, p.lng], p.zoom || map.getZoom());
+      if (aimInset.top || aimInset.bottom) setAimView([p.lat, p.lng], p.zoom || map.getZoom());
+      else map.setView([p.lat, p.lng], p.zoom || map.getZoom());
+    },
+    // Where the crosshair is: the place under it stays put when panels open or close.
+    setAim: function (p) {
+      var next = { top: Math.max(0, Math.round((p && p.top) || 0)), bottom: Math.max(0, Math.round((p && p.bottom) || 0)) };
+      if (next.top === aimInset.top && next.bottom === aimInset.bottom) return;
+      // The place under the crosshair as last reported (the window may be resizing right
+      // now, which makes a fresh pixel→place conversion unreliable).
+      var keep = lastAim || aimLatLng();
+      aimInset = next;
+      map.invalidateSize({ pan: false });
+      setAimView(keep, map.getZoom());
+      updateAim();
+      postView();
     },
     // Zoom to show every given point (e.g. all squads), but never closer than street level.
     fitPoints: function (pts) {
